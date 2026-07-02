@@ -36,6 +36,26 @@ Same approach as the reference app: `exiftool` is an external binary invoked via
 (Foundation's subprocess API), not a hand-rolled EXIF/IPTC/XMP parser. Wrap it in one service
 (`ExifToolClient` or similar) that all read/write paths go through.
 
+exiftool's per-invocation cost is dominated by its own process/Perl-interpreter startup, not the
+actual file read/write — reading or writing N files one at a time is roughly N times slower than
+doing them in one invocation (~15x measured on a 20-file sample in the reference app). Batch
+multi-file operations (importing a card, saving a capture set) into as few `exiftool` invocations
+as possible:
+
+- **Reads**: pass every path as a trailing argument to one `exiftool -j -G1 -a -s file1 file2 ...`
+  call; the JSON array comes back with one object per file, keyed by that object's `SourceFile`
+  tag. Chunk large batches so one invocation's runtime/output stays bounded.
+- **Writes**: only batch files that share byte-identical target tag values — pass the shared
+  `-TAG=value` args once followed by every target path. Group files by their value-tuple first;
+  files needing a unique per-file value (e.g. a rename-derived title) can't be grouped and should
+  stay one invocation per file.
+- **Partial failure**: never let one bad/slow file fail the whole batch. On any batch miss,
+  failure, or timeout, fall back to a per-file retry for just the affected path(s) rather than
+  trying to parse exiftool's partial-failure output. For writes, restore backups for the whole
+  group before falling back.
+
+See `ExifToolClient.readMetadata(at: [URL])` for the reference implementation of this pattern.
+
 ## Provider pattern (AI)
 
 Mirror the reference app's split: a small `AIProvider` protocol (async chat/vision call, given an

@@ -46,6 +46,9 @@ deterministically, and copy files into local storage.
   lens type/model, aperture, shutter speed, focal length, focus distance, capture time (raw +
   display format), ISO, GPS lat/lon/altitude, and any in-camera filter/effect token the camera
   encodes (used later for auto-description rules and renaming).
+- When reading more than one file (e.g. a card import), batch the reads into as few `exiftool`
+  invocations as possible rather than spawning one process per file — see docs/ARCHITECTURE.md
+  "exiftool integration" for the batching/fallback pattern.
 
 ## 3. Metadata write-back
 
@@ -53,6 +56,11 @@ deterministically, and copy files into local storage.
 - Roll back cleanly if the underlying `exiftool` write fails partway.
 - Save scopes: single file, or a full capture set (propagates the same edited fields to every
   member).
+- When saving a capture set, files sharing identical write values (the common case: same
+  description/keywords/GPS across the set) should be written in one batched `exiftool` invocation
+  instead of one per file — see docs/ARCHITECTURE.md "exiftool integration". Files needing a
+  unique per-file value (e.g. a rename-derived title during process/move) can't be grouped and
+  stay one invocation per file.
 - Field → tag mapping (dual-write EXIF/IPTC/XMP so both older and newer metadata consumers see it):
   - Title → `IPTC:ObjectName`, `XMP-dc:Title`
   - Description → `IPTC:Caption-Abstract`, `XMP-dc:Description`

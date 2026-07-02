@@ -68,6 +68,27 @@ single obvious cause. Resolve the real path once (check `PATH` first, then fall 
 `/opt/homebrew/bin/exiftool` / `/usr/local/bin/exiftool`) and launch that resolved path directly
 instead of going through `env`. See `ExifToolClient.exiftoolPath` for the reference implementation.
 
+## Local cache (Timeline GPS matching)
+
+The reference app caches an imported Google Timeline export in local SQLite for nearest-timestamp
+GPS matching (see `SPEC.md` §7). This app uses **GRDB.swift** for the same job rather than
+SwiftData: the query shape — nearest timestamp within a bounded window, tie-broken by source-type
+reliability then reported accuracy — is a `CASE`/`ORDER BY` SQL query that doesn't map cleanly onto
+SwiftData's `#Predicate` macros, and the schema is a near-literal port of the reference app's
+existing cache tables. `TimelineLocationCache` (an `actor`, since GRDB's `DatabaseQueue` is
+thread-safe but the cache also needs its own serialized read/write ordering) is the reference
+implementation: idempotent import via a `timelineImport` signature table (source path/size/mtime),
+upsert-by-`recordKey` into `timelinePosition` so re-imports update rows in place, and the
+bounded-window nearest-match query. `TimelineSample` mirrors the reference app's `_TimelinePosition`
+and reuses its `record_key` hash scheme (SHA-1 over timestamp/lat/lon/altitude/source/accuracy) —
+not because the two apps share a database, but so the two implementations stay easy to compare.
+
+`TimelineImportParser` parses a raw Timeline JSON export into `TimelineSample` values (matching the
+reference app's `_parse_timeline_positions`), preferring `rawSignals[].position` entries (richer:
+accuracy/source/altitude) and falling back to `semanticSegments[].timelinePath[]` points (coarser,
+tagged `TIMELINE_PATH`, no altitude/accuracy/source). A malformed or partial record is skipped
+rather than failing the whole parse; the result feeds `TimelineLocationCache.importSamples`.
+
 ## Provider pattern (AI)
 
 Mirror the reference app's split: a small `AIProvider` protocol (async chat/vision call, given an

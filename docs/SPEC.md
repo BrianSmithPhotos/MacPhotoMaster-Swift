@@ -108,8 +108,9 @@ deterministically, and copy files into local storage.
 
 ## 7. GPS enrichment from Timeline export
 
-- Source: a Google Timeline JSON export, imported idempotently into a local cache (SQLite or
-  similar) keyed by a normalized record identity, so re-imports don't duplicate rows.
+- Source: a Google Timeline JSON export, imported idempotently into a local SQLite cache (via
+  GRDB.swift — see `TimelineLocationCache`) keyed by a normalized record identity, so re-imports
+  don't duplicate rows.
 - Matching: nearest-timestamp lookup, but **only within a bounded window** (30 minutes in the
   reference app — tune based on real coverage density). No match within the window → leave GPS
   blank; never guess.

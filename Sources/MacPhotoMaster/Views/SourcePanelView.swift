@@ -1,12 +1,10 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Folder tree + thumbnail grid for the active source directory. See docs/SPEC.md §1.
+/// Folder navigator + thumbnail grid for the active source directory. See docs/SPEC.md §1.
 ///
-/// No folder *tree* yet, deliberately — that's a bigger piece (persisted skip-state per folder,
-/// multi-select-by-capture-group, etc. from the spec) than this pass covers. This wires up the
-/// single-folder thumbnail grid first so there's an actual end-to-end path from disk to pixels on
-/// screen; the tree view slots in above this grid later without changing how the grid works.
+/// Navigation is breadcrumb-style (one level open at a time) rather than a recursive expandable
+/// tree — see `FolderBrowser`'s doc comment for why.
 struct SourcePanelView: View {
     @ObservedObject var viewModel: SourceBrowserViewModel
     @State private var isChoosingFolder = false
@@ -22,6 +20,14 @@ struct SourcePanelView: View {
                 Button("Open Folder…") { isChoosingFolder = true }
             }
 
+            if !viewModel.breadcrumb.isEmpty {
+                BreadcrumbBar(segments: viewModel.breadcrumb) { viewModel.navigate(to: $0) }
+            }
+
+            if !viewModel.subfolders.isEmpty {
+                SubfolderStrip(folders: viewModel.subfolders) { viewModel.navigate(to: $0) }
+            }
+
             if viewModel.isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity)
@@ -29,8 +35,12 @@ struct SourcePanelView: View {
                 Text(message)
                     .foregroundStyle(.red)
             } else if viewModel.captureSets.isEmpty {
-                Text("Open a folder to browse photos.")
-                    .foregroundStyle(.secondary)
+                Text(
+                    viewModel.breadcrumb.isEmpty
+                        ? "Open a folder to browse photos."
+                        : "No supported photos in this folder."
+                )
+                .foregroundStyle(.secondary)
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 8) {
@@ -42,6 +52,9 @@ struct SourcePanelView: View {
                                     isSelected: viewModel.selectedAssetID == representative.id
                                 )
                                 .onTapGesture { viewModel.selectedAssetID = representative.id }
+                                .contextMenu {
+                                    Button("Skip") { viewModel.skip(captureSet) }
+                                }
                             }
                         }
                     }
@@ -55,8 +68,67 @@ struct SourcePanelView: View {
         // rather than something you present imperatively.
         .fileImporter(isPresented: $isChoosingFolder, allowedContentTypes: [.folder]) { result in
             if case let .success(url) = result {
-                viewModel.loadFolder(at: url)
+                viewModel.openFolder(at: url)
             }
+        }
+        // A visually hidden button is the standard SwiftUI way to attach a keyboard shortcut that
+        // isn't tied to an on-screen control — `.hidden()` only affects rendering, so the shortcut
+        // still registers with the window's responder chain. Mirrors the context-menu "Skip" action
+        // so the same set-level skip is reachable either by right-click or the Delete key.
+        .background {
+            Button("Skip Selected", action: viewModel.skipSelected)
+                .keyboardShortcut(.delete, modifiers: [])
+                .disabled(viewModel.selectedCaptureSet == nil)
+                .hidden()
+        }
+    }
+}
+
+/// Finder-path-bar-style row of the folders between the opened root and the current folder.
+/// Clicking a segment jumps straight there (via `SourceBrowserViewModel.navigate(to:)`, which
+/// truncates the breadcrumb back to that point).
+private struct BreadcrumbBar: View {
+    let segments: [URL]
+    let onSelect: (URL) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(Array(segments.enumerated()), id: \.element) { index, url in
+                    if index > 0 {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Button(url.lastPathComponent) { onSelect(url) }
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                        .fontWeight(index == segments.count - 1 ? .semibold : .regular)
+                }
+            }
+        }
+    }
+}
+
+/// Chip row of the current folder's immediate subfolders. Tapping one descends into it.
+private struct SubfolderStrip: View {
+    let folders: [URL]
+    let onSelect: (URL) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(folders, id: \.self) { folder in
+                    Button {
+                        onSelect(folder)
+                    } label: {
+                        Label(folder.lastPathComponent, systemImage: "folder")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(.vertical, 2)
         }
     }
 }

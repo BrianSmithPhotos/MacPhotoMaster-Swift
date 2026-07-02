@@ -56,6 +56,18 @@ as possible:
 
 See `ExifToolClient.readMetadata(at: [URL])` for the reference implementation of this pattern.
 
+### Resolving the exiftool binary — don't rely on `PATH` alone
+
+macOS launches `.app` bundles (Dock, Finder, `open`) with a minimal `PATH`
+(`/usr/bin:/bin:/usr/sbin:/sbin`) that excludes Homebrew's install directories. Code that runs
+`exiftool` via `env`/bare-name `PATH` lookup works fine from `swift run` or Xcode (both inherit the
+launching shell's full `PATH`) but fails with an unhelpful launch error the moment the same binary
+ships as a double-clickable app — and since capture grouping, metadata reads, and preview
+extraction all shell out to exiftool, this kind of PATH failure breaks all three at once with no
+single obvious cause. Resolve the real path once (check `PATH` first, then fall back to
+`/opt/homebrew/bin/exiftool` / `/usr/local/bin/exiftool`) and launch that resolved path directly
+instead of going through `env`. See `ExifToolClient.exiftoolPath` for the reference implementation.
+
 ## Provider pattern (AI)
 
 Mirror the reference app's split: a small `AIProvider` protocol (async chat/vision call, given an

@@ -74,12 +74,39 @@ struct ExifToolClient {
         return bySourceFile
     }
 
+    /// Homebrew install locations to fall back to when `PATH` doesn't resolve exiftool. macOS
+    /// launches .app bundles (Dock/Finder) with a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`)
+    /// that excludes these, so a `PATH`-only lookup that works when run from Xcode/a terminal
+    /// fails silently once bundled.
+    private static let homebrewExiftoolCandidates = [
+        "/opt/homebrew/bin/exiftool",  // Apple Silicon
+        "/usr/local/bin/exiftool",  // Intel
+    ]
+
+    /// Resolved once per process: checks `PATH` first (covers `swift run`/Xcode where the
+    /// launching shell's environment is inherited), then the known Homebrew locations.
+    private static let exiftoolPath: String = {
+        if let pathVariable = ProcessInfo.processInfo.environment["PATH"] {
+            for directory in pathVariable.split(separator: ":") {
+                let candidate = "\(directory)/exiftool"
+                if FileManager.default.isExecutableFile(atPath: candidate) {
+                    return candidate
+                }
+            }
+        }
+        for candidate in homebrewExiftoolCandidates {
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return "exiftool"
+    }()
+
     private func run(arguments: [String]) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
-            // Resolve via PATH rather than hardcoding a Homebrew prefix (Apple Silicon vs Intel differ).
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["exiftool"] + arguments
+            process.executableURL = URL(fileURLWithPath: Self.exiftoolPath)
+            process.arguments = arguments
 
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()

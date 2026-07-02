@@ -104,6 +104,16 @@ struct NativeMetadataReader {
         return thumbnail
     }
 
+    /// Same as `extractPreview(at:maxPixelSize:)` but decodes on a background thread — for
+    /// SwiftUI callers, where decoding a RAW preview on the caller's actor would block the UI.
+    /// `Task.detached` is what actually opts out of inheriting the calling `@MainActor` context;
+    /// see docs/ARCHITECTURE.md's concurrency rules.
+    func extractPreviewAsync(at url: URL, maxPixelSize: Int = 2048) async throws -> CGImage {
+        try await Task.detached(priority: .userInitiated) {
+            try self.extractPreview(at: url, maxPixelSize: maxPixelSize)
+        }.value
+    }
+
     private static func doubleValue(_ value: Any?) -> Double? {
         (value as? NSNumber)?.doubleValue
     }

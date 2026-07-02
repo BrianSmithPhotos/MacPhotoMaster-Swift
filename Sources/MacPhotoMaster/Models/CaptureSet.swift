@@ -6,11 +6,10 @@ struct CaptureSet: Identifiable {
     let id: UUID = UUID()
     var members: [PhotoAsset]
 
-    /// First JPG/JPEG in filename order, else the first member. See docs/SPEC.md §1.
+    /// First JPG/JPEG in filename order, else the first member in filename order. See docs/SPEC.md §1.
     var representative: PhotoAsset? {
-        members
-            .sorted { $0.url.lastPathComponent < $1.url.lastPathComponent }
-            .first { $0.url.pathExtension.lowercased() == "jpg" || $0.url.pathExtension.lowercased() == "jpeg" }
-            ?? members.first
+        let sortedMembers = members.sorted { $0.url.lastPathComponent < $1.url.lastPathComponent }
+        return sortedMembers.first { $0.url.pathExtension.lowercased() == "jpg" || $0.url.pathExtension.lowercased() == "jpeg" }
+            ?? sortedMembers.first
     }
 }

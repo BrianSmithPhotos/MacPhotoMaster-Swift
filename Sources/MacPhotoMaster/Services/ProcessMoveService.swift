@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 enum ProcessMoveError: Error, Equatable {
@@ -29,7 +28,6 @@ struct ProcessMoveService {
     }
 
     private static let jpegExtensions: Set<String> = ["jpg", "jpeg"]
-    private static let hashChunkSize = 1024 * 1024
 
     /// Copies `asset.url` into its routed destination folder under `libraryRoot`, verifies the
     /// copy (size + SHA-256) before trusting it, then writes the destination copy's title/
@@ -123,7 +121,7 @@ struct ProcessMoveService {
         guard sourceSize == destinationSize else {
             throw ProcessMoveError.copySizeMismatch(source: source, destination: destination)
         }
-        guard try sha256(of: source) == sha256(of: destination) else {
+        guard try FileHashing.sha256(of: source) == FileHashing.sha256(of: destination) else {
             throw ProcessMoveError.copyChecksumMismatch(source: source, destination: destination)
         }
     }
@@ -131,18 +129,6 @@ struct ProcessMoveService {
     private static func fileSize(at url: URL) throws -> Int {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return (attributes[.size] as? Int) ?? 0
-    }
-
-    private static func sha256(of url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var hasher = CryptoKit.SHA256()
-        while true {
-            let chunk = try handle.read(upToCount: hashChunkSize) ?? Data()
-            if chunk.isEmpty { break }
-            hasher.update(data: chunk)
-        }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     /// Per docs/CLAUDE.md "File Safety": deletion always goes through the trash, even for a

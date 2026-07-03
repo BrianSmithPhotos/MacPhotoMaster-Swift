@@ -47,6 +47,30 @@ struct MetadataPanelView: View {
                         TextField("Latitude", text: $viewModel.editableLatitudeText)
                         TextField("Longitude", text: $viewModel.editableLongitudeText)
                     }
+                    LabeledContent("Altitude") {
+                        HStack {
+                            Text(asset.gpsAltitude.map { String(format: "%.0f m", $0) } ?? "—")
+                            Spacer()
+                            Button {
+                                Task { await viewModel.refreshAltitude() }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(
+                                viewModel.editableLatitudeText.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    .isEmpty
+                                    || viewModel.editableLongitudeText.trimmingCharacters(
+                                        in: .whitespacesAndNewlines
+                                    ).isEmpty
+                                    || viewModel.isLookingUpAltitude)
+                        }
+                    }
+                    if let gpsSuggestionStatusMessage = viewModel.gpsSuggestionStatusMessage {
+                        Text(gpsSuggestionStatusMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .formStyle(.grouped)
 
@@ -63,6 +87,7 @@ struct MetadataPanelView: View {
         }
         .task(id: viewModel.selectedAssetID) {
             await viewModel.loadArtFilterTokenIfNeeded()
+            await viewModel.suggestGPSIfNeeded()
         }
         .fileImporter(isPresented: $isChoosingLibraryFolder, allowedContentTypes: [.folder]) { result in
             guard case let .success(url) = result else { return }

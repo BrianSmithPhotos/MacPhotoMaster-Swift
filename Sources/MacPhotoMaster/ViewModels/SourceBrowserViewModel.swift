@@ -81,12 +81,24 @@ final class SourceBrowserViewModel: ObservableObject {
     @Published private(set) var isSavingMetadata = false
     @Published var saveStatusMessage: String?
 
+    /// Status text for the Timeline-derived GPS suggestion (docs/SPEC.md §7) shown under the
+    /// lat/long fields — e.g. "Nearest GPS 3m 20s away (GPS, accuracy 12m)". Set by
+    /// `suggestGPSIfNeeded()`; there's no equivalent surface for the background Drive sync itself,
+    /// which stays silent on success just like the reference app.
+    @Published var gpsSuggestionStatusMessage: String?
+
+    /// True while `refreshAltitude()` has an elevation lookup in flight — disables the manual
+    /// refresh button so a slow/timed-out USGS EPQS call can't be fired twice concurrently.
+    @Published private(set) var isLookingUpAltitude = false
+
     private let loader = PhotoAssetLoader()
     private let folderBrowser = FolderBrowser()
     private let grouping = CaptureGroupingService()
     private let processMoveService = ProcessMoveService()
     private let exifTool = ExifToolClient()
     private let renameService = RenameService()
+    private let timelineImportParser = TimelineImportParser()
+    private let elevationService = ElevationLookupService()
 
     /// The manual per-session label `RenameService` needs for its filename pattern (docs/SPEC.md
     /// §4) — not GPS-derived, so it lives here rather than on `PhotoAsset`. Defaults to empty, in
@@ -129,6 +141,7 @@ final class SourceBrowserViewModel: ObservableObject {
         let sourceRootPath =
             UserDefaults.standard.string(forKey: Self.sourceRootDefaultsKey) ?? Self.defaultSourceRootPath
         openFolder(at: URL(fileURLWithPath: sourceRootPath))
+        Task { await syncAndImportTimelineIfNeeded() }
     }
 
     /// Called from the library-folder picker, both on first pick and on later changes.
@@ -356,6 +369,133 @@ final class SourceBrowserViewModel: ObservableObject {
             loadErrorMessage = error.localizedDescription
             return nil
         }
+    }
+
+    /// Lazily created for the same reason as `skipStore` above — `TimelineLocationCache.init` is
+    /// throwing filesystem/database work, so it can't happen synchronously in `init()`.
+    private var timelineCache: TimelineLocationCache?
+
+    private func ensureTimelineCache() async -> TimelineLocationCache? {
+        if let timelineCache { return timelineCache }
+        do {
+            let databasePath = try AppSupportDirectory.url(forFileNamed: "timeline_location.sqlite3")
+            let cache = try TimelineLocationCache(databasePath: databasePath)
+            timelineCache = cache
+            return cache
+        } catch {
+            return nil
+        }
+    }
+
+    private var elevationCache: ElevationCache?
+
+    private func ensureElevationCache() async -> ElevationCache? {
+        if let elevationCache { return elevationCache }
+        do {
+            let databasePath = try AppSupportDirectory.url(forFileNamed: "elevation_cache.sqlite3")
+            let cache = try ElevationCache(databasePath: databasePath)
+            elevationCache = cache
+            return cache
+        } catch {
+            return nil
+        }
+    }
+
+    /// Silently copies down a fresher `Timeline.json` from Google Drive (if present) and imports it
+    /// into `timelineCache`, mirroring the reference app's launch-time sync — see docs/SPEC.md §7
+    /// and `TimelineDriveSync`'s doc comment for why this has no UI surface at all, success or
+    /// failure. Best-effort: any failure here just means GPS suggestions stay unavailable until the
+    /// next launch, not a user-facing error.
+    private func syncAndImportTimelineIfNeeded() async {
+        guard let localCopyPath = try? TimelineDriveSync.resolveLocalCopyPath() else { return }
+        if let driveSourcePath = TimelineDriveSync.resolveDriveSourcePath() {
+            _ = try? TimelineDriveSync.syncIfNewer(driveSource: driveSourcePath, localCopy: localCopyPath)
+        }
+        guard FileManager.default.fileExists(atPath: localCopyPath.path) else { return }
+        guard let cache = await ensureTimelineCache() else { return }
+
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: localCopyPath.path)
+            let size = (attributes[.size] as? Int) ?? 0
+            let modificationDate = (attributes[.modificationDate] as? Date) ?? Date()
+            let modificationNanoseconds = Int64(modificationDate.timeIntervalSince1970 * 1_000_000_000)
+
+            guard
+                try await cache.isImportNeeded(
+                    sourcePath: localCopyPath.path, sourceSize: size,
+                    sourceModificationNanoseconds: modificationNanoseconds)
+            else { return }
+
+            let samples = try timelineImportParser.parseSamples(fromFileAt: localCopyPath)
+            let sha256 = try FileHashing.sha256(of: localCopyPath)
+            try await cache.importSamples(
+                samples, sourcePath: localCopyPath.path, sourceSize: size,
+                sourceModificationNanoseconds: modificationNanoseconds, sourceSHA256: sha256)
+        } catch {
+            return
+        }
+    }
+
+    /// Timeline-derived GPS suggestion for `selectedAsset`, auto-applied on first focus of a
+    /// GPS-less photo — mirrors the reference app's UX (see docs/SPEC.md §7 and
+    /// `loadArtFilterTokenIfNeeded()`'s doc comment for the same lazy-per-selection shape). No-ops
+    /// whenever the asset already has embedded GPS or the edit buffer already holds something (a
+    /// prior suggestion or an in-progress user edit), so this never overwrites real data. Chains an
+    /// elevation lookup after a successful match, since altitude is never trusted from Timeline
+    /// itself (SPEC.md §7).
+    func suggestGPSIfNeeded() async {
+        guard let id = selectedAssetID, let asset = selectedAsset,
+            asset.gpsLatitude == nil, asset.gpsLongitude == nil,
+            editableLatitudeText.isEmpty, editableLongitudeText.isEmpty,
+            let capturedAt = asset.capturedAt
+        else { return }
+        guard let cache = await ensureTimelineCache() else { return }
+
+        let captureTimestampUTC = Int(capturedAt.timeIntervalSince1970)
+        guard let suggestion = try? await cache.suggestion(forCaptureTimestampUTC: captureTimestampUTC),
+            selectedAssetID == id
+        else { return }
+
+        editableLatitudeText = String(suggestion.latitude)
+        editableLongitudeText = String(suggestion.longitude)
+        let accuracyText = suggestion.accuracyMeters.map { String(format: ", accuracy %.0fm", $0) } ?? ""
+        gpsSuggestionStatusMessage =
+            "Nearest GPS \(suggestion.ageSeconds / 60)m \(suggestion.ageSeconds % 60)s away "
+            + "(\(suggestion.sourceType)\(accuracyText))"
+
+        await lookupElevation(for: id, latitude: suggestion.latitude, longitude: suggestion.longitude)
+    }
+
+    private func lookupElevation(for id: PhotoAsset.ID, latitude: Double, longitude: Double) async {
+        guard let elevationCache = await ensureElevationCache() else { return }
+
+        if let cached = try? await elevationCache.cachedElevation(latitude: latitude, longitude: longitude) {
+            guard selectedAssetID == id else { return }
+            updateAsset(id) { $0.gpsAltitude = cached }
+            return
+        }
+
+        guard let elevation = try? await elevationService.lookupElevation(latitude: latitude, longitude: longitude)
+        else { return }
+        try? await elevationCache.store(latitude: latitude, longitude: longitude, elevationMeters: elevation)
+
+        guard selectedAssetID == id else { return }
+        updateAsset(id) { $0.gpsAltitude = elevation }
+    }
+
+    /// Manually re-runs the elevation lookup for the current lat/long — surfaced as a small refresh
+    /// button next to the Altitude field for the rare case the automatic USGS EPQS call times out
+    /// (mirrors the reference app's manual "lookup altitude" button, `gps_coordinator.py`'s
+    /// `_start_altitude_lookup`). No-ops while a lookup is already in flight or lat/long is blank.
+    func refreshAltitude() async {
+        guard !isLookingUpAltitude, let id = selectedAssetID,
+            let latitude = Double(editableLatitudeText.trimmingCharacters(in: .whitespacesAndNewlines)),
+            let longitude = Double(editableLongitudeText.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return }
+
+        isLookingUpAltitude = true
+        defer { isLookingUpAltitude = false }
+        await lookupElevation(for: id, latitude: latitude, longitude: longitude)
     }
 
     var selectedAsset: PhotoAsset? {

@@ -32,10 +32,13 @@ struct ProcessMoveService {
     private static let hashChunkSize = 1024 * 1024
 
     /// Copies `asset.url` into its routed destination folder under `libraryRoot`, verifies the
-    /// copy (size + SHA-256) before trusting it, then writes `asset`'s current title/description/
-    /// keywords/GPS to the destination copy. Any failure — verification or metadata write — trashes
-    /// the partial destination copy rather than leaving an unannotated or corrupt file behind, so
-    /// the source stays the only trustworthy copy until a retry succeeds end-to-end.
+    /// copy (size + SHA-256) before trusting it, then writes the destination copy's title/
+    /// description/keywords/GPS. Title is never taken from `asset.title` — per the Python reference
+    /// app's `process_batch_mover.py`, it's derived from the rename candidate's stem (the same name
+    /// shown live as the UI's title preview), which is the only place title is ever actually written
+    /// to a file. Any failure — verification or metadata write — trashes the partial destination
+    /// copy rather than leaving an unannotated or corrupt file behind, so the source stays the only
+    /// trustworthy copy until a retry succeeds end-to-end.
     ///
     /// `renameContext` supplies the fields `RenameService` needs to compute the destination
     /// filename — see its doc comment for why that's a separate type from `PhotoAsset`.
@@ -56,10 +59,12 @@ struct ProcessMoveService {
 
         try FileManager.default.copyItem(at: asset.url, to: destinationURL)
 
+        let title = (proposedName as NSString).deletingPathExtension
+
         do {
             try Self.verifyCopy(source: asset.url, destination: destinationURL)
             try await exifTool.write(
-                title: asset.title.isEmpty ? nil : asset.title,
+                title: title,
                 description: asset.descriptionText,
                 keywords: asset.keywords,
                 gps: Self.gpsCoordinate(for: asset),

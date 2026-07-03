@@ -57,7 +57,6 @@ final class ProcessMoveServiceTests: XCTestCase {
         let sourceURL = try makeSourceJPEG(in: sourceDirectory)
 
         var asset = PhotoAsset(id: sourceURL)
-        asset.title = "My Title"
         asset.descriptionText = "My description"
         asset.keywords = ["mountain", "sunrise"]
         asset.cameraModel = "OM-1"
@@ -82,7 +81,8 @@ final class ProcessMoveServiceTests: XCTestCase {
 
         let client = ExifToolClient()
         let metadata = try await client.readMetadata(at: result.destinationURL)
-        XCTAssertEqual(metadata["IPTC:ObjectName"] as? String, "My Title")
+        XCTAssertEqual(
+            metadata["IPTC:ObjectName"] as? String, "1010042_Yosemite_20260702_1405_OM-1_12-40mm-F2.8")
         XCTAssertEqual(metadata["IPTC:Caption-Abstract"] as? String, "My description")
         XCTAssertEqual(metadata["IPTC:Keywords"] as? [String], ["mountain", "sunrise"])
         XCTAssertEqual(metadata["GPS:GPSLatitudeRef"] as? String, "North")

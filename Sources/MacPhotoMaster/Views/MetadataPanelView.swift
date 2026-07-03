@@ -3,12 +3,14 @@ import UniformTypeIdentifiers
 
 /// Editable metadata fields + AI/GPS/save/process actions. See docs/SPEC.md §2-7.
 ///
-/// Title/description/keywords/GPS are editable and wired to `SourceBrowserViewModel.saveMetadata`
-/// (spec §3); the remaining fields (camera/lens/exposure/capture time) stay read-only display —
-/// they come from the file itself, not something a user retypes. Process/move (spec §5) is wired
-/// below the fields, mirroring the Python reference app's `metadata_panel` button row rather than a
-/// source-panel button or right-click menu — it's the last action taken once editing an SD card's
-/// images is done, so it belongs at the foot of this pane.
+/// Description/keywords/GPS are editable and wired to `SourceBrowserViewModel.saveMetadata` (spec
+/// §3); Title is a read-only live preview of the eventual rename (see `titlePreview`), never
+/// independently typed — it only becomes real metadata at Process & Move time. The remaining fields
+/// (camera/lens/exposure/capture time) stay read-only display too — they come from the file itself,
+/// not something a user retypes. Process/move (spec §5) is wired below the fields, mirroring the
+/// Python reference app's `metadata_panel` button row rather than a source-panel button or
+/// right-click menu — it's the last action taken once editing an SD card's images is done, so it
+/// belongs at the foot of this pane.
 struct MetadataPanelView: View {
     @ObservedObject var viewModel: SourceBrowserViewModel
     @State private var isChoosingLibraryFolder = false
@@ -28,7 +30,7 @@ struct MetadataPanelView: View {
 
             if let asset {
                 Form {
-                    TextField("Title", text: $viewModel.editableTitle)
+                    LabeledContent("Title", value: viewModel.titlePreview)
                     TextField("Description", text: $viewModel.editableDescription, axis: .vertical)
                         .lineLimit(3...6)
                     TextField("Keywords", text: $viewModel.editableKeywords)

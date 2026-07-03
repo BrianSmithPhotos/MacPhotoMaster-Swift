@@ -115,11 +115,20 @@ final class SourceBrowserViewModel: ObservableObject {
     var titlePreview: String { (renamePreviewFilename as NSString).deletingPathExtension }
 
     private static let libraryRootDefaultsKey = "libraryRootPath"
+    private static let sourceRootDefaultsKey = "sourceRootPath"
+    /// Falls back to the user's SD card mount point when no source folder has ever been opened.
+    /// The card is swapped for a new one roughly every 10K images, far less often than the app is
+    /// launched, so defaulting to (and, via `openFolder`, persisting) whatever was last opened
+    /// saves an "Open Folder…" click on almost every launch.
+    private static let defaultSourceRootPath = "/Volumes/OM SYSTEM/DCIM/105OMSYS/"
 
     init() {
         if let path = UserDefaults.standard.string(forKey: Self.libraryRootDefaultsKey) {
             libraryRootURL = URL(fileURLWithPath: path)
         }
+        let sourceRootPath =
+            UserDefaults.standard.string(forKey: Self.sourceRootDefaultsKey) ?? Self.defaultSourceRootPath
+        openFolder(at: URL(fileURLWithPath: sourceRootPath))
     }
 
     /// Called from the library-folder picker, both on first pick and on later changes.
@@ -139,9 +148,13 @@ final class SourceBrowserViewModel: ObservableObject {
     /// (they could have navigated on).
     private var folderPathByCaptureSetID: [CaptureSet.ID: String] = [:]
 
-    /// Called from the "Open Folder…" picker — starts a fresh breadcrumb rooted at the chosen
-    /// folder. Anything previously open is discarded.
+    /// Called from the "Open Folder…" picker (and from `init` to reopen last time's root) — starts
+    /// a fresh breadcrumb rooted at the chosen folder, discarding anything previously open, and
+    /// persists `folderURL` as the new default source root so the next launch starts here too. The
+    /// picker is only ever expected to change roots roughly every 10K images, so it's cheap to
+    /// re-persist the same path most of the time this is called from `init`.
     func openFolder(at folderURL: URL) {
+        UserDefaults.standard.set(folderURL.path, forKey: Self.sourceRootDefaultsKey)
         breadcrumb = [folderURL]
         load(folderURL)
     }
@@ -387,8 +400,12 @@ final class SourceBrowserViewModel: ObservableObject {
         processStatusMessage = "Processing \(assets.count) file(s)…"
         Task {
             defer { isProcessing = false }
+            await loadArtFilterTokens(for: assets)
+            let assetByID = Dictionary(
+                uniqueKeysWithValues: captureSets.flatMap(\.members).map { ($0.id, $0) })
             var failures: [String] = []
             for asset in assets {
+                let asset = assetByID[asset.id] ?? asset
                 let context = RenameContext(
                     sourceURL: asset.url,
                     capturedAt: asset.capturedAt,
@@ -457,6 +474,42 @@ final class SourceBrowserViewModel: ObservableObject {
     private static func existingFileNames(in directory: URL) -> Set<String> {
         let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path)
         return Set(names ?? [])
+    }
+
+    /// Lazily reads `selectedAsset`'s maker-note fields via `ExifToolClient` and fills in
+    /// `artFilterToken`, per docs/SPEC.md §2/§4 — `NativeMetadataReader`'s fast ImageIO-based
+    /// initial load can't reach Olympus's proprietary maker-note tags (see its doc comment), so
+    /// this fills the gap with one `exiftool` read for whichever asset is actually being looked at.
+    /// Meant to be driven by a View's `.task(id: selectedAssetID)`, which cancels any still-in-
+    /// flight read for the previous asset on reselection; the `selectedAssetID == id` guard after
+    /// the `await` discards a stale result that finishes after the selection has already moved on
+    /// (the underlying `exiftool` process isn't itself interruptible by task cancellation). `nil`
+    /// on `artFilterToken` means "not yet loaded" — once loaded it's set to `""` rather than left
+    /// `nil` even when no art filter was found, so this never re-reads the same file twice. Batch
+    /// scopes (capture set / session / manual selection) use `loadArtFilterTokens(for:)` below
+    /// instead, since a per-asset read there would be one `exiftool` process launch per file.
+    func loadArtFilterTokenIfNeeded() async {
+        guard let id = selectedAssetID, let asset = selectedAsset, asset.artFilterToken == nil
+        else { return }
+        guard let metadata = try? await exifTool.readMetadata(at: asset.url) else { return }
+        guard selectedAssetID == id else { return }
+        updateAsset(id) { $0.artFilterToken = ArtFilterTokenParsing.token(from: metadata) }
+        updateRenamePreview()
+    }
+
+    /// Batch-fills `artFilterToken` for every asset in `assets` that doesn't have one loaded yet,
+    /// via `ExifToolClient`'s already-batched multi-file read rather than one `exiftool` launch per
+    /// file — called before Process & Move so a full capture-set/session/manual-selection scope
+    /// gets an accurate art-filter rename token even for files the user never individually selected
+    /// (the only thing that triggers `loadArtFilterTokenIfNeeded` above).
+    private func loadArtFilterTokens(for assets: [PhotoAsset]) async {
+        let missing = assets.filter { $0.artFilterToken == nil }
+        guard !missing.isEmpty else { return }
+        let results = (try? await exifTool.readMetadata(at: missing.map(\.url))) ?? [:]
+        for asset in missing {
+            guard case .success(let metadata) = results[asset.url] else { continue }
+            updateAsset(asset.id) { $0.artFilterToken = ArtFilterTokenParsing.token(from: metadata) }
+        }
     }
 
     /// Finds `id` across every capture set and applies `mutate` in place — the one spot that knows

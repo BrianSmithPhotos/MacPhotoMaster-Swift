@@ -61,6 +61,9 @@ struct MetadataPanelView: View {
 
             processMoveSection
         }
+        .task(id: viewModel.selectedAssetID) {
+            await viewModel.loadArtFilterTokenIfNeeded()
+        }
         .fileImporter(isPresented: $isChoosingLibraryFolder, allowedContentTypes: [.folder]) { result in
             guard case let .success(url) = result else { return }
             viewModel.setLibraryRoot(url)

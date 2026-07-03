@@ -23,6 +23,15 @@ final class SourceBrowserViewModel: ObservableObject {
     @Published var loadErrorMessage: String?
     @Published var selectedAssetID: PhotoAsset.ID?
 
+    /// Where process/move (docs/SPEC.md §5) copies destination files under — picked once via a
+    /// folder picker in `SourcePanelView` and persisted in `UserDefaults` so it's only asked for
+    /// once rather than every process action; `setLibraryRoot` is also how the user changes it
+    /// later. This app has no App Sandbox entitlement (no `.entitlements` file in the package), so
+    /// a plain persisted path is enough — no security-scoped bookmark dance required.
+    @Published private(set) var libraryRootURL: URL?
+    @Published private(set) var isProcessing = false
+    @Published var processStatusMessage: String?
+
     private let loader = PhotoAssetLoader()
     private let folderBrowser = FolderBrowser()
     private let grouping = CaptureGroupingService()
@@ -32,6 +41,20 @@ final class SourceBrowserViewModel: ObservableObject {
     /// §4) — not GPS-derived, so it lives here rather than on `PhotoAsset`. Not yet exposed in any
     /// View; defaults to empty, in which case `RenameService` just omits the location segment.
     @Published var sessionLocation: String = ""
+
+    private static let libraryRootDefaultsKey = "libraryRootPath"
+
+    init() {
+        if let path = UserDefaults.standard.string(forKey: Self.libraryRootDefaultsKey) {
+            libraryRootURL = URL(fileURLWithPath: path)
+        }
+    }
+
+    /// Called from the library-folder picker, both on first pick and on later changes.
+    func setLibraryRoot(_ url: URL) {
+        libraryRootURL = url
+        UserDefaults.standard.set(url.path, forKey: Self.libraryRootDefaultsKey)
+    }
 
     /// Lazily created on first use rather than in `init` because `SkipStateStore.init` is
     /// throwing (it touches the filesystem to open/migrate the database) and `SourceBrowserViewModel`
@@ -156,15 +179,26 @@ final class SourceBrowserViewModel: ObservableObject {
     /// `libraryRoot` via `ProcessMoveService`, per docs/SPEC.md §5. One asset's failure (a bad copy,
     /// a metadata-write error) doesn't stop the rest of the scope from processing — failures are
     /// collected and surfaced together afterward, the same "don't let one bad file fail the whole
-    /// batch" approach `ExifToolClient` uses.
+    /// batch" approach `ExifToolClient` uses. Reports progress/outcome via `processStatusMessage`
+    /// rather than `loadErrorMessage`, since that property's View treatment replaces the whole
+    /// thumbnail grid — appropriate for a folder-load failure, wrong for a process action that
+    /// should leave the grid exactly as it was.
     ///
-    /// Auto-skip-on-success (SPEC.md §5: "successfully processed files auto-skip from the current
-    /// session view") and a library-root picker aren't wired yet — this only performs the
-    /// copy-and-write-metadata step.
+    /// No-op while a previous call is still running, and no-op on an empty scope (nothing
+    /// selected). Auto-skip-on-success (SPEC.md §5: "successfully processed files auto-skip from
+    /// the current session view") isn't wired yet — this only performs the copy-and-write-metadata
+    /// step.
     func process(scope: ProcessMoveScope, libraryRoot: URL) {
+        guard !isProcessing else { return }
+        let assets = scope.assets
+        guard !assets.isEmpty else { return }
+
+        isProcessing = true
+        processStatusMessage = "Processing \(assets.count) file(s)…"
         Task {
+            defer { isProcessing = false }
             var failures: [String] = []
-            for asset in scope.assets {
+            for asset in assets {
                 let context = RenameContext(
                     sourceURL: asset.url,
                     capturedAt: asset.capturedAt,
@@ -179,8 +213,13 @@ final class SourceBrowserViewModel: ObservableObject {
                     failures.append("\(asset.url.lastPathComponent): \(error.localizedDescription)")
                 }
             }
-            if !failures.isEmpty {
-                loadErrorMessage = failures.joined(separator: "\n")
+            let successCount = assets.count - failures.count
+            if failures.isEmpty {
+                processStatusMessage = "Processed \(successCount) file(s)."
+            } else {
+                processStatusMessage =
+                    "Processed \(successCount)/\(assets.count) file(s); \(failures.count) failed:\n"
+                    + failures.joined(separator: "\n")
             }
         }
     }

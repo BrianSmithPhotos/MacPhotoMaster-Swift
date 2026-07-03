@@ -26,6 +26,12 @@ final class SourceBrowserViewModel: ObservableObject {
     private let loader = PhotoAssetLoader()
     private let folderBrowser = FolderBrowser()
     private let grouping = CaptureGroupingService()
+    private let processMoveService = ProcessMoveService()
+
+    /// The manual per-session label `RenameService` needs for its filename pattern (docs/SPEC.md
+    /// §4) — not GPS-derived, so it lives here rather than on `PhotoAsset`. Not yet exposed in any
+    /// View; defaults to empty, in which case `RenameService` just omits the location segment.
+    @Published var sessionLocation: String = ""
 
     /// Lazily created on first use rather than in `init` because `SkipStateStore.init` is
     /// throwing (it touches the filesystem to open/migrate the database) and `SourceBrowserViewModel`
@@ -144,5 +150,38 @@ final class SourceBrowserViewModel: ObservableObject {
     func skipSelected() {
         guard let selectedCaptureSet else { return }
         skip(selectedCaptureSet)
+    }
+
+    /// Resolves `scope` to its concrete assets (see `ProcessMoveScope.assets`) and copies each into
+    /// `libraryRoot` via `ProcessMoveService`, per docs/SPEC.md §5. One asset's failure (a bad copy,
+    /// a metadata-write error) doesn't stop the rest of the scope from processing — failures are
+    /// collected and surfaced together afterward, the same "don't let one bad file fail the whole
+    /// batch" approach `ExifToolClient` uses.
+    ///
+    /// Auto-skip-on-success (SPEC.md §5: "successfully processed files auto-skip from the current
+    /// session view") and a library-root picker aren't wired yet — this only performs the
+    /// copy-and-write-metadata step.
+    func process(scope: ProcessMoveScope, libraryRoot: URL) {
+        Task {
+            var failures: [String] = []
+            for asset in scope.assets {
+                let context = RenameContext(
+                    sourceURL: asset.url,
+                    capturedAt: asset.capturedAt,
+                    cameraModel: asset.cameraModel,
+                    lensModel: asset.lensModel,
+                    location: sessionLocation,
+                    artFilterToken: asset.artFilterToken)
+                do {
+                    _ = try await processMoveService.processAndCopy(
+                        asset: asset, renameContext: context, libraryRoot: libraryRoot)
+                } catch {
+                    failures.append("\(asset.url.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+            if !failures.isEmpty {
+                loadErrorMessage = failures.joined(separator: "\n")
+            }
+        }
     }
 }

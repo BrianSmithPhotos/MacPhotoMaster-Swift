@@ -39,7 +39,10 @@ struct NativeMetadataReader {
         let gps = metadata[kCGImagePropertyGPSDictionary as String] as? [String: Any] ?? [:]
         let iptc = metadata[kCGImagePropertyIPTCDictionary as String] as? [String: Any] ?? [:]
 
-        asset.title = (iptc[kCGImagePropertyIPTCObjectName as String] as? String) ?? ""
+        let objectName = (iptc[kCGImagePropertyIPTCObjectName as String] as? String) ?? ""
+        // Per docs/SPEC.md §4: no EXIF title yet, so the filename stem is the starting point
+        // rather than a blank field — still user-editable, just not empty on first load.
+        asset.title = objectName.isEmpty ? url.deletingPathExtension().lastPathComponent : objectName
         asset.descriptionText =
             (iptc[kCGImagePropertyIPTCCaptionAbstract as String] as? String)
             ?? (tiff[kCGImagePropertyTIFFImageDescription as String] as? String) ?? ""

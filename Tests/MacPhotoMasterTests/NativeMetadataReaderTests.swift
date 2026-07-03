@@ -118,6 +118,20 @@ final class NativeMetadataReaderTests: XCTestCase {
         XCTAssertEqual(asset.descriptionText, "fallback description")
     }
 
+    func testMapToPhotoAssetFallsBackToFilenameStemWhenNoIPTCObjectName() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("P1010042")
+            .appendingPathExtension("jpg")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try writeSampleJPEG(to: url, extraProperties: [kCGImagePropertyIPTCDictionary: [:]])
+
+        let reader = NativeMetadataReader()
+        let metadata = try reader.readMetadata(at: url)
+        let asset = reader.mapToPhotoAsset(url: url, metadata: metadata)
+
+        XCTAssertEqual(asset.title, "P1010042")
+    }
+
     func testExtractPreviewReturnsImageMatchingSourceDimensions() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

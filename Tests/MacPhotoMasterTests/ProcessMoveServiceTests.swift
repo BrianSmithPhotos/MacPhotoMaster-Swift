@@ -47,7 +47,7 @@ final class ProcessMoveServiceTests: XCTestCase {
             capturedAt: asset.capturedAt,
             cameraModel: asset.cameraModel,
             lensModel: asset.lensModel,
-            location: "Yosemite",
+            batch: "Yosemite",
             artFilterToken: asset.artFilterToken)
     }
 

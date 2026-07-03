@@ -1,7 +1,7 @@
 import Foundation
 
 /// The fields a rename decision needs, gathered from wherever they currently live (EXIF read,
-/// the manual per-session location label, an in-progress edit) — decoupled from `PhotoAsset` since
+/// the manual per-session batch label, an in-progress edit) — decoupled from `PhotoAsset` since
 /// the caller may want to preview a rename against edited-but-not-yet-saved values.
 struct RenameContext {
     var sourceURL: URL
@@ -9,12 +9,12 @@ struct RenameContext {
     var cameraModel: String
     var lensModel: String
     /// Manual per-session label, not GPS-derived — see docs/SPEC.md §4.
-    var location: String
+    var batch: String
     var artFilterToken: String?
 }
 
 /// Computes the destination filename for a rename per docs/SPEC.md §4's
-/// `sequence_location_YYYYMMDD_HHMM_[artfilter]_camera_lens.ext` pattern. Pure computation only —
+/// `sequence_batch_YYYYMMDD_HHMM_[artfilter]_camera_lens.ext` pattern. Pure computation only —
 /// this never touches a file on disk. Renaming only ever applies to the *destination* copy made
 /// during process/move (spec §5); the source file (e.g. on the SD card) is never renamed in place.
 struct RenameService {
@@ -24,7 +24,7 @@ struct RenameService {
     func buildFilename(for context: RenameContext) -> String {
         let sequence = Self.sequence(from: context.sourceURL)
         let (date, time) = Self.dateTimeParts(context.capturedAt)
-        let location = Self.sanitizeComponent(context.location)
+        let batch = Self.sanitizeComponent(context.batch)
         let artFilter = Self.sanitizeComponent(context.artFilterToken ?? "")
 
         let sanitizedCamera = Self.sanitizeComponent(context.cameraModel)
@@ -33,7 +33,7 @@ struct RenameService {
         let lens = sanitizedLens.isEmpty ? "UnknownLens" : sanitizedLens
 
         var parts = [sequence]
-        if !location.isEmpty { parts.append(location) }
+        if !batch.isEmpty { parts.append(batch) }
         parts.append(date)
         parts.append(time)
         if !artFilter.isEmpty { parts.append(artFilter) }
@@ -87,7 +87,7 @@ struct RenameService {
 
     /// Trims outer whitespace, replaces filesystem-invalid characters and whitespace runs with a
     /// single `-`, collapses repeated `-`, strips leading/trailing `-`/`.`, and caps length —
-    /// applied identically to the location, camera, lens, and art-filter segments.
+    /// applied identically to the batch, camera, lens, and art-filter segments.
     private static func sanitizeComponent(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }

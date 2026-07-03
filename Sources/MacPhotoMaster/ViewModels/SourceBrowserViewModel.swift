@@ -25,7 +25,16 @@ final class SourceBrowserViewModel: ObservableObject {
     /// The single asset shown large in the center preview — always a member of whatever the grid
     /// or filmstrip most recently pointed at. See `multiSelectedIDs` for the separate batch-action
     /// selection.
-    @Published var selectedAssetID: PhotoAsset.ID?
+    ///
+    /// `didSet` resyncs the metadata edit buffer below to match whatever's now selected, discarding
+    /// any unsaved in-progress edit on the previously-selected asset — there's no autosave-on-switch
+    /// in this first pass, see `loadEditBuffer`.
+    @Published var selectedAssetID: PhotoAsset.ID? {
+        didSet {
+            guard selectedAssetID != oldValue else { return }
+            loadEditBuffer()
+        }
+    }
 
     /// Grid multi-selection (cmd-click toggles a tile, shift-click ranges from the last anchor) —
     /// docs/SPEC.md §1 "Manual multi-select". Always representative ids (one per capture set/single
@@ -54,15 +63,28 @@ final class SourceBrowserViewModel: ObservableObject {
     @Published private(set) var isProcessing = false
     @Published var processStatusMessage: String?
 
+    /// The metadata panel's editable fields, kept as free text (parsed via `MetadataEditParsing` at
+    /// save time) rather than typed properties so the view can bind `TextField`s directly. Synced
+    /// to `selectedAsset`'s current values by `loadEditBuffer` whenever the selection changes. See
+    /// docs/SPEC.md §2-3.
+    @Published var editableTitle: String = ""
+    @Published var editableDescription: String = ""
+    @Published var editableKeywords: String = ""
+    @Published var editableLatitudeText: String = ""
+    @Published var editableLongitudeText: String = ""
+    @Published private(set) var isSavingMetadata = false
+    @Published var saveStatusMessage: String?
+
     private let loader = PhotoAssetLoader()
     private let folderBrowser = FolderBrowser()
     private let grouping = CaptureGroupingService()
     private let processMoveService = ProcessMoveService()
+    private let exifTool = ExifToolClient()
 
     /// The manual per-session label `RenameService` needs for its filename pattern (docs/SPEC.md
-    /// §4) — not GPS-derived, so it lives here rather than on `PhotoAsset`. Not yet exposed in any
-    /// View; defaults to empty, in which case `RenameService` just omits the location segment.
-    @Published var sessionLocation: String = ""
+    /// §4) — not GPS-derived, so it lives here rather than on `PhotoAsset`. Defaults to empty, in
+    /// which case `RenameService` just omits the batch segment.
+    @Published var sessionBatch: String = ""
 
     private static let libraryRootDefaultsKey = "libraryRootPath"
 
@@ -344,7 +366,7 @@ final class SourceBrowserViewModel: ObservableObject {
                     capturedAt: asset.capturedAt,
                     cameraModel: asset.cameraModel,
                     lensModel: asset.lensModel,
-                    location: sessionLocation,
+                    batch: sessionBatch,
                     artFilterToken: asset.artFilterToken)
                 do {
                     _ = try await processMoveService.processAndCopy(
@@ -360,6 +382,125 @@ final class SourceBrowserViewModel: ObservableObject {
                 processStatusMessage =
                     "Processed \(successCount)/\(assets.count) file(s); \(failures.count) failed:\n"
                     + failures.joined(separator: "\n")
+            }
+        }
+    }
+
+    /// Resets the metadata edit buffer to `selectedAsset`'s current field values (or clears it when
+    /// nothing's selected) — called from `selectedAssetID`'s `didSet` so the form always reflects
+    /// whichever photo is currently shown large.
+    private func loadEditBuffer() {
+        guard let asset = selectedAsset else {
+            editableTitle = ""
+            editableDescription = ""
+            editableKeywords = ""
+            editableLatitudeText = ""
+            editableLongitudeText = ""
+            return
+        }
+        editableTitle = asset.title
+        editableDescription = asset.descriptionText
+        editableKeywords = asset.keywords.joined(separator: ", ")
+        editableLatitudeText = asset.gpsLatitude.map { String($0) } ?? ""
+        editableLongitudeText = asset.gpsLongitude.map { String($0) } ?? ""
+    }
+
+    /// Finds `id` across every capture set and applies `mutate` in place — the one spot that knows
+    /// how to reach into `captureSets`' nested `members` arrays, so a successful metadata save can
+    /// update in-memory state immediately without re-reading the file back from disk.
+    private func updateAsset(_ id: PhotoAsset.ID, _ mutate: (inout PhotoAsset) -> Void) {
+        for setIndex in captureSets.indices {
+            if let memberIndex = captureSets[setIndex].members.firstIndex(where: { $0.id == id }) {
+                mutate(&captureSets[setIndex].members[memberIndex])
+                return
+            }
+        }
+    }
+
+    /// Saves the current edit buffer to `scope`'s file(s) via `ExifToolClient`, per docs/SPEC.md §3.
+    ///
+    /// Title is per-file (usually filename-derived, same rationale as `RenameContext`/
+    /// `ProcessMoveService`), so a capture-set save only writes it to the originally-selected
+    /// member; description/keywords/GPS are the fields that are genuinely shared across a set, and
+    /// go out in one batched `exiftool` invocation to every *other* member — see
+    /// docs/ARCHITECTURE.md "exiftool integration" for why grouping same-value writes into one
+    /// invocation matters. `ExifToolClient`'s batched write already reports per-file success/failure
+    /// without letting one bad file cost the group its write, so this just relays that.
+    ///
+    /// No-op while a previous save is still running.
+    func saveMetadata(scope: MetadataSaveScope) {
+        guard !isSavingMetadata else { return }
+        let title = editableTitle
+        let description = editableDescription
+        let keywords = MetadataEditParsing.parseKeywords(editableKeywords)
+        let gps = MetadataEditParsing.parseGPS(
+            latitudeText: editableLatitudeText, longitudeText: editableLongitudeText,
+            altitude: selectedAsset?.gpsAltitude)
+
+        func applyEdit(to id: PhotoAsset.ID, includingTitle: Bool) {
+            updateAsset(id) { asset in
+                if includingTitle { asset.title = title }
+                asset.descriptionText = description
+                asset.keywords = keywords
+                if let gps {
+                    asset.gpsLatitude = gps.latitude
+                    asset.gpsLongitude = gps.longitude
+                }
+            }
+        }
+
+        isSavingMetadata = true
+        saveStatusMessage = "Saving…"
+        Task {
+            defer { isSavingMetadata = false }
+            do {
+                switch scope {
+                case .singleAsset(let asset):
+                    try await exifTool.write(
+                        title: title, description: description, keywords: keywords, gps: gps, to: asset.url)
+                    applyEdit(to: asset.id, includingTitle: true)
+                    saveStatusMessage = "Saved."
+
+                case .captureSet(let captureSet):
+                    let selectedID = selectedAssetID.flatMap { id in
+                        captureSet.members.contains { $0.id == id } ? id : nil
+                    } ?? captureSet.members.first?.id
+
+                    guard let selectedID, let selectedMember = captureSet.members.first(where: { $0.id == selectedID })
+                    else {
+                        saveStatusMessage = "Nothing to save."
+                        return
+                    }
+
+                    try await exifTool.write(
+                        title: title, description: description, keywords: keywords, gps: gps,
+                        to: selectedMember.url)
+                    applyEdit(to: selectedMember.id, includingTitle: true)
+
+                    let otherMembers = captureSet.members.filter { $0.id != selectedMember.id }
+                    guard !otherMembers.isEmpty else {
+                        saveStatusMessage = "Saved."
+                        return
+                    }
+
+                    let results = try await exifTool.write(
+                        description: description, keywords: keywords, gps: gps, to: otherMembers.map(\.url))
+                    var failureCount = 0
+                    for member in otherMembers {
+                        switch results[member.url] {
+                        case .success:
+                            applyEdit(to: member.id, includingTitle: false)
+                        default:
+                            failureCount += 1
+                        }
+                    }
+                    saveStatusMessage =
+                        failureCount == 0
+                        ? "Saved to \(captureSet.members.count) file(s)."
+                        : "Saved with \(failureCount) failure(s)."
+                }
+            } catch {
+                saveStatusMessage = "Save failed: \(error.localizedDescription)"
             }
         }
     }

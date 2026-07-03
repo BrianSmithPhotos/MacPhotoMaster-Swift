@@ -3,12 +3,12 @@ import UniformTypeIdentifiers
 
 /// Editable metadata fields + AI/GPS/save/process actions. See docs/SPEC.md §2-7.
 ///
-/// Read-only for now: `ExifToolClient`'s write path (spec §3) doesn't exist yet, so there's
-/// nowhere for an edit to go. Fields display what `NativeMetadataReader` read for the current
-/// selection; editing/Save/AI/rename actions come once the write path is built. Process/move
-/// (spec §5) is wired below the fields, mirroring the Python reference app's `metadata_panel`
-/// button row rather than a source-panel button or right-click menu — it's the last action taken
-/// once editing an SD card's images is done, so it belongs at the foot of this pane.
+/// Title/description/keywords/GPS are editable and wired to `SourceBrowserViewModel.saveMetadata`
+/// (spec §3); the remaining fields (camera/lens/exposure/capture time) stay read-only display —
+/// they come from the file itself, not something a user retypes. Process/move (spec §5) is wired
+/// below the fields, mirroring the Python reference app's `metadata_panel` button row rather than a
+/// source-panel button or right-click menu — it's the last action taken once editing an SD card's
+/// images is done, so it belongs at the foot of this pane.
 struct MetadataPanelView: View {
     @ObservedObject var viewModel: SourceBrowserViewModel
     @State private var isChoosingLibraryFolder = false
@@ -28,9 +28,10 @@ struct MetadataPanelView: View {
 
             if let asset {
                 Form {
-                    LabeledContent("Title", value: asset.title)
-                    LabeledContent("Description", value: asset.descriptionText)
-                    LabeledContent("Keywords", value: asset.keywords.joined(separator: ", "))
+                    TextField("Title", text: $viewModel.editableTitle)
+                    TextField("Description", text: $viewModel.editableDescription, axis: .vertical)
+                        .lineLimit(3...6)
+                    TextField("Keywords", text: $viewModel.editableKeywords)
                     LabeledContent("Camera", value: asset.cameraModel)
                     LabeledContent("Lens", value: asset.lensModel)
                     LabeledContent("Aperture", value: asset.aperture)
@@ -40,11 +41,14 @@ struct MetadataPanelView: View {
                     if let capturedAt = asset.capturedAt {
                         LabeledContent("Captured", value: capturedAt.formatted())
                     }
-                    if let latitude = asset.gpsLatitude, let longitude = asset.gpsLongitude {
-                        LabeledContent("GPS", value: "\(latitude), \(longitude)")
+                    HStack {
+                        TextField("Latitude", text: $viewModel.editableLatitudeText)
+                        TextField("Longitude", text: $viewModel.editableLongitudeText)
                     }
                 }
                 .formStyle(.grouped)
+
+                saveSection
             } else {
                 Spacer()
                 Text("Select a photo to see its metadata.")
@@ -65,10 +69,37 @@ struct MetadataPanelView: View {
         }
     }
 
+    private var saveSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button("Save (This File)") {
+                    guard let asset = viewModel.selectedAsset else { return }
+                    viewModel.saveMetadata(scope: .singleAsset(asset))
+                }
+                .disabled(viewModel.selectedAsset == nil || viewModel.isSavingMetadata)
+
+                Button("Save (Capture Set)") {
+                    guard let captureSet = viewModel.selectedCaptureSet else { return }
+                    viewModel.saveMetadata(scope: .captureSet(captureSet))
+                }
+                .disabled(viewModel.selectedCaptureSet == nil || viewModel.isSavingMetadata)
+            }
+
+            if let saveStatusMessage = viewModel.saveStatusMessage {
+                Text(saveStatusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal)
+    }
+
     private var processMoveSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Process & Move")
                 .font(.subheadline.bold())
+
+            TextField("Batch", text: $viewModel.sessionBatch)
 
             HStack(spacing: 6) {
                 Button("Single Image") {

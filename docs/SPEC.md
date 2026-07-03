@@ -76,10 +76,10 @@ deterministically, and copy files into local storage.
 
 ## 4. Rename
 
-- Deterministic pattern: `sequence_location_YYYYMMDD_HHMM_[artfilter]_camera_lens.ext`.
+- Deterministic pattern: `sequence_batch_YYYYMMDD_HHMM_[artfilter]_camera_lens.ext`.
 - Sanitize for filesystem-safe characters; resolve collisions deterministically (never silently
   overwrite).
-- `Location` is a manual per-session label, not GPS-derived — GPS enrichment and renaming are
+- `Batch` is a manual per-session label, not GPS-derived — GPS enrichment and renaming are
   deliberately decoupled.
 - Title auto-populates from the filename stem as a starting point (still user-editable).
 

@@ -20,7 +20,7 @@ final class RenameServiceTests: XCTestCase {
             capturedAt: exifDate("2026:06:21 14:05:30"),
             cameraModel: "OM-1",
             lensModel: "12-40mm F2.8",
-            location: "Yosemite",
+            batch: "Yosemite",
             artFilterToken: nil)
 
         let filename = RenameService().buildFilename(for: context)
@@ -28,11 +28,11 @@ final class RenameServiceTests: XCTestCase {
         XCTAssertEqual(filename, "1010042_Yosemite_20260621_1405_OM-1_12-40mm-F2.8.jpg")
     }
 
-    func testBuildFilenameOmitsLocationSegmentWhenEmpty() {
+    func testBuildFilenameOmitsBatchSegmentWhenEmpty() {
         let context = RenameContext(
             sourceURL: URL(fileURLWithPath: "/card/P1010042.JPG"),
             capturedAt: exifDate("2026:06:21 14:05:30"),
-            cameraModel: "OM-1", lensModel: "12-40mm F2.8", location: "", artFilterToken: nil)
+            cameraModel: "OM-1", lensModel: "12-40mm F2.8", batch: "", artFilterToken: nil)
 
         let filename = RenameService().buildFilename(for: context)
 
@@ -43,7 +43,7 @@ final class RenameServiceTests: XCTestCase {
         let context = RenameContext(
             sourceURL: URL(fileURLWithPath: "/card/P1010042.JPG"),
             capturedAt: exifDate("2026:06:21 14:05:30"),
-            cameraModel: "OM-1", lensModel: "12-40mm F2.8", location: "",
+            cameraModel: "OM-1", lensModel: "12-40mm F2.8", batch: "",
             artFilterToken: "Dramatic Tone")
 
         let filename = RenameService().buildFilename(for: context)
@@ -55,7 +55,7 @@ final class RenameServiceTests: XCTestCase {
         let context = RenameContext(
             sourceURL: URL(fileURLWithPath: "/card/P1010042.JPG"),
             capturedAt: exifDate("2026:06:21 14:05:30"),
-            cameraModel: "", lensModel: "  ", location: "", artFilterToken: nil)
+            cameraModel: "", lensModel: "  ", batch: "", artFilterToken: nil)
 
         let filename = RenameService().buildFilename(for: context)
 
@@ -65,7 +65,7 @@ final class RenameServiceTests: XCTestCase {
     func testBuildFilenameFallsBackToUnknownDateAndTimeWhenCapturedAtIsMissing() {
         let context = RenameContext(
             sourceURL: URL(fileURLWithPath: "/card/P1010042.JPG"),
-            capturedAt: nil, cameraModel: "OM-1", lensModel: "12-40mm F2.8", location: "",
+            capturedAt: nil, cameraModel: "OM-1", lensModel: "12-40mm F2.8", batch: "",
             artFilterToken: nil)
 
         let filename = RenameService().buildFilename(for: context)
@@ -77,7 +77,7 @@ final class RenameServiceTests: XCTestCase {
         let context = RenameContext(
             sourceURL: URL(fileURLWithPath: "/card/IMG.JPG"),
             capturedAt: exifDate("2026:06:21 14:05:30"),
-            cameraModel: "OM-1", lensModel: "12-40mm F2.8", location: "", artFilterToken: nil)
+            cameraModel: "OM-1", lensModel: "12-40mm F2.8", batch: "", artFilterToken: nil)
 
         let filename = RenameService().buildFilename(for: context)
 
@@ -89,7 +89,7 @@ final class RenameServiceTests: XCTestCase {
             sourceURL: URL(fileURLWithPath: "/card/P1010042.JPG"),
             capturedAt: exifDate("2026:06:21 14:05:30"),
             cameraModel: "OM-1", lensModel: "12-40mm F2.8",
-            location: "Big Sur/Highway  1", artFilterToken: nil)
+            batch: "Big Sur/Highway  1", artFilterToken: nil)
 
         let filename = RenameService().buildFilename(for: context)
 
@@ -97,24 +97,24 @@ final class RenameServiceTests: XCTestCase {
     }
 
     func testSanitizeTruncatesComponentsLongerThan64Characters() {
-        let longLocation = String(repeating: "a", count: 100)
+        let longBatch = String(repeating: "a", count: 100)
         let context = RenameContext(
             sourceURL: URL(fileURLWithPath: "/card/P1010042.JPG"),
             capturedAt: exifDate("2026:06:21 14:05:30"),
-            cameraModel: "OM-1", lensModel: "12-40mm F2.8", location: longLocation,
+            cameraModel: "OM-1", lensModel: "12-40mm F2.8", batch: longBatch,
             artFilterToken: nil)
 
         let filename = RenameService().buildFilename(for: context)
-        let locationSegment = filename.split(separator: "_")[1]
+        let batchSegment = filename.split(separator: "_")[1]
 
-        XCTAssertEqual(locationSegment.count, 64)
+        XCTAssertEqual(batchSegment.count, 64)
     }
 
     func testExtensionIsLowercasedAndRawExtensionsArePreservedNotConvertedToJPG() {
         let context = RenameContext(
             sourceURL: URL(fileURLWithPath: "/card/P1010042.ORF"),
             capturedAt: exifDate("2026:06:21 14:05:30"),
-            cameraModel: "OM-1", lensModel: "12-40mm F2.8", location: "", artFilterToken: nil)
+            cameraModel: "OM-1", lensModel: "12-40mm F2.8", batch: "", artFilterToken: nil)
 
         let filename = RenameService().buildFilename(for: context)
 
@@ -125,7 +125,7 @@ final class RenameServiceTests: XCTestCase {
         let context = RenameContext(
             sourceURL: URL(fileURLWithPath: "/card/P1010042"),
             capturedAt: exifDate("2026:06:21 14:05:30"),
-            cameraModel: "OM-1", lensModel: "12-40mm F2.8", location: "", artFilterToken: nil)
+            cameraModel: "OM-1", lensModel: "12-40mm F2.8", batch: "", artFilterToken: nil)
 
         let filename = RenameService().buildFilename(for: context)
 

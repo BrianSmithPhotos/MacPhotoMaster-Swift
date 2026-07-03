@@ -38,6 +38,11 @@ deterministically, and copy files into local storage.
 - Manual multi-select (cmd-click to toggle, shift-click for range) should act on the *full capture-group
   membership* of whatever's selected, not just the visibly selected representative tiles — otherwise
   bulk actions silently skip hidden group members (e.g. the RAW file behind a stacked JPEG).
+- A row of every member of the currently active selection (a capture set's members, or a single
+  image) shows under the large preview. Clicking a thumbnail there swaps which member is shown
+  large; cmd-clicking toggles a finer-grained "ring-selection" within that row (e.g. exclude the RAW
+  file from a set before processing). This ring-selection is a second, narrower level of multi-select
+  than the grid's — see §5 for how it feeds process/move.
 
 ## 2. EXIF read and field mapping
 
@@ -81,6 +86,10 @@ deterministically, and copy files into local storage.
 ## 5. Process & move
 
 - Scopes: single image, capture set, current (manual) selection, or the whole session.
+  - "Current (manual) selection" prefers the preview filmstrip's ring-selection (§1) when the user
+    has narrowed it to a proper subset; otherwise it falls back to the grid's multi-select, expanded
+    to full capture-group membership. This lets the filmstrip's narrowing double as a process/move
+    scope, not just a preview-picker.
 - Copy-first — never deletes from the source (SD card).
 - Destination routing by file type (example from the reference app; adapt paths to taste):
   - RAW → `<library>/<Month>/<DD>/`

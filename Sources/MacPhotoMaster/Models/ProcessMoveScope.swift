@@ -1,12 +1,12 @@
 import Foundation
 
-/// Which photos a process/move action should act on — see docs/SPEC.md §5's four scopes. Manual
-/// selection isn't included yet: the app has no multi-select model, only a single
-/// `SourceBrowserViewModel.selectedAssetID`, so there's nothing yet for that scope to resolve
-/// against.
+/// Which photos a process/move action should act on — see docs/SPEC.md §5's four scopes.
 enum ProcessMoveScope {
     case singleAsset(PhotoAsset)
     case captureSet(CaptureSet)
+    /// The grid's manual multi-selection (docs/SPEC.md §1), expanded to full capture-group
+    /// membership — see `SourceBrowserViewModel.manualSelectionAssets`/`SelectionScope`.
+    case manualSelection([PhotoAsset])
     case session([CaptureSet])
 
     /// Flattens the scope to the concrete list of assets a process/move action should copy.
@@ -16,6 +16,8 @@ enum ProcessMoveScope {
             return [asset]
         case .captureSet(let captureSet):
             return captureSet.members
+        case .manualSelection(let assets):
+            return assets
         case .session(let captureSets):
             return captureSets.flatMap(\.members)
         }

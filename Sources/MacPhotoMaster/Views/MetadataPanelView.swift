@@ -83,6 +83,13 @@ struct MetadataPanelView: View {
                 }
                 .disabled(viewModel.selectedCaptureSet == nil || viewModel.isProcessing)
 
+                Button("Current Selection") {
+                    let assets = viewModel.manualSelectionAssets
+                    guard !assets.isEmpty else { return }
+                    requestProcess(.manualSelection(assets))
+                }
+                .disabled(!viewModel.hasCurrentSelection || viewModel.isProcessing)
+
                 Button("Session") { requestProcess(.session(viewModel.captureSets)) }
                     .disabled(viewModel.captureSets.isEmpty || viewModel.isProcessing)
             }

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Holds the currently-browsed folder's capture sets and the current selection. Views bind to
@@ -21,7 +22,28 @@ final class SourceBrowserViewModel: ObservableObject {
     @Published private(set) var breadcrumb: [URL] = []
     @Published private(set) var isLoading = false
     @Published var loadErrorMessage: String?
+    /// The single asset shown large in the center preview — always a member of whatever the grid
+    /// or filmstrip most recently pointed at. See `multiSelectedIDs` for the separate batch-action
+    /// selection.
     @Published var selectedAssetID: PhotoAsset.ID?
+
+    /// Grid multi-selection (cmd-click toggles a tile, shift-click ranges from the last anchor) —
+    /// docs/SPEC.md §1 "Manual multi-select". Always representative ids (one per capture set/single
+    /// image tile in the grid); a plain click resets this to just that one tile. Drives the
+    /// `.manualSelection` process/move scope and, via `refreshVariantStrip`, what the filmstrip
+    /// under the preview shows.
+    @Published private(set) var multiSelectedIDs: Set<PhotoAsset.ID> = []
+    private var rangeAnchorID: PhotoAsset.ID?
+
+    /// The full capture-group membership of the current grid selection (`SelectionScope.resolveScope`)
+    /// — the filmstrip under the preview renders exactly this list, in this order.
+    @Published private(set) var variantMemberIDs: [PhotoAsset.ID] = []
+    /// Ring-selected subset of `variantMemberIDs` — starts equal to the full scope; cmd-click on a
+    /// filmstrip tile narrows it (kept non-empty, mirroring the reference app). Not yet consumed by
+    /// any action (there's no "Save Selected"/AI wiring in this app yet) — reserved for that.
+    @Published private(set) var variantSelectedIDs: Set<PhotoAsset.ID> = []
+
+    var hasMultiSelection: Bool { multiSelectedIDs.count > 1 }
 
     /// Where process/move (docs/SPEC.md §5) copies destination files under — picked once via a
     /// folder picker in `SourcePanelView` and persisted in `UserDefaults` so it's only asked for
@@ -112,7 +134,7 @@ final class SourceBrowserViewModel: ObservableObject {
                 folderPathByCaptureSetID = Dictionary(
                     uniqueKeysWithValues: captureSets.map { ($0.id, folderURL.path) })
                 subfolders = folders
-                selectedAssetID = captureSets.first?.representative?.id
+                selectFirstTile()
             } catch {
                 loadErrorMessage = error.localizedDescription
             }
@@ -131,10 +153,128 @@ final class SourceBrowserViewModel: ObservableObject {
 
             captureSets.removeAll { $0.id == captureSet.id }
             folderPathByCaptureSetID.removeValue(forKey: captureSet.id)
+            if let representativeID = captureSet.representative?.id {
+                multiSelectedIDs.remove(representativeID)
+            }
             if selectedAssetID == captureSet.representative?.id {
-                selectedAssetID = captureSets.first?.representative?.id
+                selectFirstTile()
+            } else {
+                refreshVariantStrip()
             }
         }
+    }
+
+    /// Selects the first tile in the grid (or clears selection if the grid is empty), resetting
+    /// the multi-selection and filmstrip to match. Used on a fresh folder load and whenever the
+    /// active selection is skipped out from under it.
+    private func selectFirstTile() {
+        guard let id = captureSets.first?.representative?.id else {
+            selectedAssetID = nil
+            multiSelectedIDs = []
+            rangeAnchorID = nil
+            refreshVariantStrip()
+            return
+        }
+        selectedAssetID = id
+        multiSelectedIDs = [id]
+        rangeAnchorID = id
+        refreshVariantStrip()
+    }
+
+    /// Maps every asset id to its full capture-group membership (including itself) — the lookup
+    /// `SelectionScope`'s pure functions need but don't own themselves.
+    private var membersByAssetID: [PhotoAsset.ID: [PhotoAsset.ID]] {
+        var map: [PhotoAsset.ID: [PhotoAsset.ID]] = [:]
+        for set in captureSets {
+            let memberIDs = set.members.map(\.id)
+            for id in memberIDs { map[id] = memberIDs }
+        }
+        return map
+    }
+
+    /// Handles a click on a capture-set tile in the source grid: shift-click ranges from the last
+    /// anchor, cmd-click toggles the tile in/out of the multi-selection, a plain click resets to a
+    /// single selection. Mirrors the reference Python app's `SourcePanel._on_tile_clicked`.
+    func selectTile(_ id: PhotoAsset.ID, modifiers: NSEvent.ModifierFlags) {
+        let visibleIDs = captureSets.compactMap { $0.representative?.id }
+        if modifiers.contains(.shift), let anchor = rangeAnchorID {
+            multiSelectedIDs = SelectionScope.rangeBetween(anchor: anchor, target: id, visible: visibleIDs)
+        } else if modifiers.contains(.command) {
+            if multiSelectedIDs.contains(id) {
+                multiSelectedIDs.remove(id)
+            } else {
+                multiSelectedIDs.insert(id)
+            }
+            rangeAnchorID = id
+        } else {
+            multiSelectedIDs = [id]
+            rangeAnchorID = id
+        }
+        selectedAssetID = id
+        refreshVariantStrip()
+    }
+
+    /// Recomputes the filmstrip's member list and resets its ring-selection to the full scope.
+    /// Called after any change to the grid selection.
+    private func refreshVariantStrip() {
+        guard let selectedAssetID else {
+            variantMemberIDs = []
+            variantSelectedIDs = []
+            return
+        }
+        let visibleIDs = captureSets.compactMap { $0.representative?.id }
+        let orderedMultiSelection = visibleIDs.filter { multiSelectedIDs.contains($0) }
+        let scope = SelectionScope.resolveScope(
+            selected: selectedAssetID, multiSelected: orderedMultiSelection, membersByID: membersByAssetID)
+        variantMemberIDs = scope
+        variantSelectedIDs = Set(scope)
+    }
+
+    /// Cmd-click on a filmstrip tile: toggles it out of the ring-selection, refusing to drop below
+    /// one selected member so the strip is never fully empty (mirrors the reference app).
+    func toggleVariantSelection(_ id: PhotoAsset.ID) {
+        if variantSelectedIDs.contains(id) {
+            guard variantSelectedIDs.count > 1 else { return }
+            variantSelectedIDs.remove(id)
+        } else {
+            variantSelectedIDs.insert(id)
+        }
+    }
+
+    /// Plain click on a filmstrip tile: switches the large preview to that specific member without
+    /// touching the grid multi-selection or the ring-selection.
+    func setActivePreview(_ id: PhotoAsset.ID) {
+        selectedAssetID = id
+    }
+
+    /// Whether the filmstrip's ring-selection has been narrowed away from the full scope it
+    /// started at — i.e. the user cmd-clicked at least one member out, but not all the way down to
+    /// zero (which `toggleVariantSelection` already disallows).
+    var hasPartialVariantSelection: Bool {
+        !variantSelectedIDs.isEmpty && variantSelectedIDs.count < variantMemberIDs.count
+    }
+
+    /// True when there's a "current selection" distinct from the default single set/asset — either
+    /// the grid's manual multi-selection (2+ tiles) or the filmstrip narrowed to a subset of the
+    /// active selection's members. Drives whether "Current Selection" is actionable.
+    var hasCurrentSelection: Bool { hasMultiSelection || hasPartialVariantSelection }
+
+    /// Assets for a "Current Selection" process/move action (docs/SPEC.md §5's `.manualSelection`
+    /// scope). Prefers the filmstrip's narrowed ring-selection when the user has hand-picked a
+    /// subset there (e.g. excluded the RAW file from a set they're processing) — the reference
+    /// app's variant strip only ever fed a "Save Selected" metadata action, but this app's filmstrip
+    /// is also meant to scope process/move. Falls back to the grid's manual multi-selection,
+    /// expanded to full capture-group membership, when the filmstrip hasn't been narrowed.
+    var manualSelectionAssets: [PhotoAsset] {
+        let assetByID = Dictionary(uniqueKeysWithValues: captureSets.flatMap(\.members).map { ($0.id, $0) })
+        if hasPartialVariantSelection {
+            return variantMemberIDs.filter { variantSelectedIDs.contains($0) }.compactMap { assetByID[$0] }
+        }
+        guard hasMultiSelection else { return [] }
+        let visibleIDs = captureSets.compactMap { $0.representative?.id }
+        let ordered = visibleIDs.filter { multiSelectedIDs.contains($0) }
+        let expandedIDs = SelectionScope.expandToCaptureGroups(ordered, membersByID: membersByAssetID)
+        return expandedIDs.compactMap { assetByID[$0] }
     }
 
     private func skippedAssetPaths(inFolder folderURL: URL) async -> Set<String> {
@@ -161,11 +301,11 @@ final class SourceBrowserViewModel: ObservableObject {
             .first { $0.id == selectedAssetID }
     }
 
-    /// The capture set the selected tile belongs to — `selectedAssetID` always holds a
-    /// representative's id (see `load` and the grid's tap gesture), so matching on `representative`
-    /// finds it directly rather than needing to search every member.
+    /// The capture set the selected tile belongs to. Matches on full membership rather than just
+    /// `representative` because `setActivePreview` (a filmstrip click) can point `selectedAssetID`
+    /// at a non-representative member, e.g. the RAW file behind a stacked JPEG representative.
     var selectedCaptureSet: CaptureSet? {
-        captureSets.first { $0.representative?.id == selectedAssetID }
+        captureSets.first { set in set.members.contains { $0.id == selectedAssetID } }
     }
 
     /// Keyboard-shortcut entry point for skipping the current selection — see `SourcePanelView`'s

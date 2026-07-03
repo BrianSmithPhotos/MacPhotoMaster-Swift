@@ -13,7 +13,7 @@ struct ContentView: View {
             SourcePanelView(viewModel: browser)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } content: {
-            PreviewPanelView(asset: browser.selectedAsset)
+            PreviewPanelView(viewModel: browser)
                 .navigationSplitViewColumnWidth(min: 400, ideal: 600)
         } detail: {
             MetadataPanelView(viewModel: browser)

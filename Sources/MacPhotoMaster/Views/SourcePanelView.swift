@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -49,8 +50,10 @@ struct SourcePanelView: View {
                                 CaptureTileView(
                                     asset: representative,
                                     memberCount: captureSet.members.count,
-                                    isSelected: viewModel.selectedAssetID == representative.id,
-                                    onSelect: { viewModel.selectedAssetID = representative.id }
+                                    isSelected: viewModel.multiSelectedIDs.contains(representative.id),
+                                    onSelect: { modifiers in
+                                        viewModel.selectTile(representative.id, modifiers: modifiers)
+                                    }
                                 )
                                 .contextMenu {
                                     Button("Skip") { viewModel.skip(captureSet) }
@@ -139,7 +142,12 @@ private struct CaptureTileView: View {
     let asset: PhotoAsset
     let memberCount: Int
     let isSelected: Bool
-    let onSelect: () -> Void
+    /// Cmd-click toggles this tile in/out of the grid's multi-selection, shift-click ranges from
+    /// the last clicked tile, a plain click resets to just this one — see
+    /// `SourceBrowserViewModel.selectTile`. `NSEvent.modifierFlags` reads the real modifier-key
+    /// state at the moment of a genuine user click; this is unrelated to (and unaffected by) the
+    /// AppleScript/System Events automation quirks documented for this app elsewhere.
+    let onSelect: (NSEvent.ModifierFlags) -> Void
 
     @State private var thumbnail: CGImage?
 
@@ -147,7 +155,7 @@ private struct CaptureTileView: View {
         // A real Button (rather than a plain view with `.onTapGesture`) so the tap action and the
         // accessibility frame/press-action live on the same node — otherwise VoiceOver and
         // AXPress-based UI automation see a properly framed element with no action wired to it.
-        Button(action: onSelect) {
+        Button(action: { onSelect(NSEvent.modifierFlags) }) {
             ZStack(alignment: .bottomTrailing) {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(.quaternary)

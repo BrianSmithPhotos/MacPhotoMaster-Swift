@@ -3,6 +3,22 @@ import Foundation
 enum ExifToolError: Error {
     case processFailed(status: Int32, stderr: String)
     case invalidOutput
+    case timedOut
+}
+
+/// A GPS fix to write. Latitude/longitude are required together (an EXIF fix without one or the
+/// other is meaningless), so pairing them in one type rules out that inconsistent state at compile
+/// time rather than needing a runtime check like the Python reference app does. See docs/SPEC.md §3
+/// for the Ref-tag-from-sign convention.
+struct GPSCoordinate: Equatable {
+    var latitude: Double
+    var longitude: Double
+    var altitude: Double?
+}
+
+enum MetadataWriteError: Error, Equatable {
+    case invalidLatitude(Double)
+    case invalidLongitude(Double)
 }
 
 /// Thin wrapper around the `exiftool` binary. All EXIF/IPTC/XMP read/write goes through here —
@@ -74,6 +90,138 @@ struct ExifToolClient {
         return bySourceFile
     }
 
+    /// Writes title/description/keywords/GPS to a single file. `title` is per-file-unique (it's
+    /// usually rename-derived), so it's only exposed here, never in the batched overload below —
+    /// see docs/SPEC.md §3.
+    ///
+    /// Relies on exiftool's own automatic `<path>_original` backup rather than `-overwrite_original`:
+    /// on success the backup is deleted; on failure the backup is restored over the (possibly
+    /// half-written) file so the write is all-or-nothing from the caller's perspective.
+    func write(title: String?, description: String, keywords: [String], gps: GPSCoordinate?, to url: URL) async throws {
+        try Self.validate(gps: gps)
+        let arguments = Self.writeArguments(title: title, description: description, keywords: keywords, gps: gps) + [url.path]
+        do {
+            _ = try await run(arguments: arguments, timeoutSeconds: Self.singleFileTimeout)
+            cleanupBackup(for: url)
+        } catch {
+            restoreBackupIfPresent(for: url)
+            throw error
+        }
+    }
+
+    /// Writes the same description/keywords/GPS to every file in `urls` in one exiftool invocation
+    /// — the batching optimization from docs/ARCHITECTURE.md "exiftool integration". Grouping files
+    /// by identical target values is the caller's job (e.g. a capture-set save); this method just
+    /// writes whatever list it's given.
+    ///
+    /// exiftool's exit code reflects the whole invocation, not which of several files in it
+    /// succeeded (confirmed empirically: a batch with one bad path among good ones still writes the
+    /// good ones but exits non-zero). So on any failure this restores every file's backup — even
+    /// ones exiftool did manage to write — rather than guessing which succeeded, then retries each
+    /// file individually so a single bad file doesn't cost the whole group its write.
+    func write(description: String, keywords: [String], gps: GPSCoordinate?, to urls: [URL]) async throws -> [URL: Result<Void, Error>] {
+        try Self.validate(gps: gps)
+        guard !urls.isEmpty else { return [:] }
+
+        let arguments = Self.writeArguments(title: nil, description: description, keywords: keywords, gps: gps) + urls.map(\.path)
+        do {
+            _ = try await run(arguments: arguments, timeoutSeconds: Self.batchTimeoutPerFile * Double(urls.count))
+            for url in urls { cleanupBackup(for: url) }
+            return Dictionary(uniqueKeysWithValues: urls.map { ($0, .success(())) })
+        } catch {
+            for url in urls { restoreBackupIfPresent(for: url) }
+            var results: [URL: Result<Void, Error>] = [:]
+            for url in urls {
+                do {
+                    try await write(title: nil, description: description, keywords: keywords, gps: gps, to: url)
+                    results[url] = .success(())
+                } catch {
+                    results[url] = .failure(error)
+                }
+            }
+            return results
+        }
+    }
+
+    /// Matches the reference app's per-file/per-file-in-batch timeouts (12s per file) — see
+    /// docs/ARCHITECTURE.md "exiftool integration".
+    private static let singleFileTimeout: Double = 12
+    private static let batchTimeoutPerFile: Double = 12
+
+    private static func validate(gps: GPSCoordinate?) throws {
+        guard let gps else { return }
+        guard (-90...90).contains(gps.latitude) else { throw MetadataWriteError.invalidLatitude(gps.latitude) }
+        guard (-180...180).contains(gps.longitude) else { throw MetadataWriteError.invalidLongitude(gps.longitude) }
+    }
+
+    /// Builds the `-TAG=value` argv per docs/SPEC.md §3's field->tag table. Keywords are cleared
+    /// (blank `-IPTC:Keywords=`/`-XMP-dc:Subject=`) before being rewritten one `-tag=value` pair at
+    /// a time — the idempotent way to "replace the keyword list" with exiftool, since its `+=`
+    /// append operator would duplicate keywords on every re-save.
+    private static func writeArguments(title: String?, description: String, keywords: [String], gps: GPSCoordinate?) -> [String] {
+        var arguments: [String] = []
+        if let title {
+            arguments.append("-IPTC:ObjectName=\(title)")
+            arguments.append("-XMP-dc:Title=\(title)")
+        }
+        arguments.append("-IPTC:Caption-Abstract=\(description)")
+        arguments.append("-XMP-dc:Description=\(description)")
+
+        arguments.append("-IPTC:Keywords=")
+        arguments.append("-XMP-dc:Subject=")
+        for keyword in normalizedKeywords(keywords) {
+            arguments.append("-IPTC:Keywords=\(keyword)")
+            arguments.append("-XMP-dc:Subject=\(keyword)")
+        }
+
+        if let gps {
+            arguments.append("-GPSLatitude=\(gps.latitude)")
+            arguments.append("-GPSLatitudeRef=\(gps.latitude >= 0 ? "N" : "S")")
+            arguments.append("-GPSLongitude=\(gps.longitude)")
+            arguments.append("-GPSLongitudeRef=\(gps.longitude >= 0 ? "E" : "W")")
+            if let altitude = gps.altitude {
+                arguments.append("-GPSAltitude=\(altitude)")
+                // exiftool's default (non-numeric) write mode only recognizes GPSAltitudeRef's
+                // descriptive PrintConv strings as input — writing the raw byte value ("0"/"1")
+                // directly is silently coerced to 0 regardless of what's given (confirmed
+                // empirically against exiftool 13.55; the Python reference app writes the raw
+                // byte and appears to have the same latent bug).
+                arguments.append("-GPSAltitudeRef=\(altitude >= 0 ? "Above Sea Level" : "Below Sea Level")")
+            }
+        }
+        return arguments
+    }
+
+    /// Trims, drops blanks, and dedupes case-insensitively (keeping the first-seen casing) so
+    /// re-saving the same keyword list twice — or a list with only casing differences — doesn't
+    /// grow the file's keyword tag on every save.
+    private static func normalizedKeywords(_ keywords: [String]) -> [String] {
+        var seenLowercased = Set<String>()
+        var result: [String] = []
+        for keyword in keywords {
+            let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard seenLowercased.insert(trimmed.lowercased()).inserted else { continue }
+            result.append(trimmed)
+        }
+        return result
+    }
+
+    private func backupURL(for url: URL) -> URL {
+        url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent + "_original")
+    }
+
+    private func cleanupBackup(for url: URL) {
+        try? FileManager.default.removeItem(at: backupURL(for: url))
+    }
+
+    private func restoreBackupIfPresent(for url: URL) {
+        let backup = backupURL(for: url)
+        guard FileManager.default.fileExists(atPath: backup.path) else { return }
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.moveItem(at: backup, to: url)
+    }
+
     /// Homebrew install locations to fall back to when `PATH` doesn't resolve exiftool. macOS
     /// launches .app bundles (Dock/Finder) with a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`)
     /// that excludes these, so a `PATH`-only lookup that works when run from Xcode/a terminal
@@ -102,7 +250,33 @@ struct ExifToolClient {
         return "exiftool"
     }()
 
-    private func run(arguments: [String]) async throws -> Data {
+    /// `Process.terminationHandler` and the timeout's `DispatchWorkItem` both run on background
+    /// queues concurrently with each other, so the flag they race on needs its own lock rather than
+    /// a plain captured `var` (which the Swift 6 concurrency checker correctly flags as unsafe).
+    private final class TimeoutState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var didTimeOut = false
+        var workItem: DispatchWorkItem?
+
+        /// Called from the timeout's `DispatchWorkItem` — `Process.terminate()` on an
+        /// already-exited process is a harmless no-op, so no race check is needed here.
+        func markTimedOut() {
+            lock.lock()
+            defer { lock.unlock() }
+            didTimeOut = true
+        }
+
+        /// Called from `terminationHandler`. Cancels the timeout (it's moot once the process has
+        /// exited on its own) and reports whether the timeout had already fired.
+        func cancelAndCheckTimedOut() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            workItem?.cancel()
+            return didTimeOut
+        }
+    }
+
+    private func run(arguments: [String], timeoutSeconds: Double? = nil) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: Self.exiftoolPath)
@@ -113,8 +287,15 @@ struct ExifToolClient {
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
 
+            let timeoutState = TimeoutState()
+
             process.terminationHandler = { finished in
+                let didTimeOut = timeoutState.cancelAndCheckTimedOut()
                 let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                if didTimeOut {
+                    continuation.resume(throwing: ExifToolError.timedOut)
+                    return
+                }
                 guard finished.terminationStatus == 0 else {
                     let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
                     let stderr = String(data: stderrData, encoding: .utf8) ?? ""
@@ -126,6 +307,14 @@ struct ExifToolClient {
 
             do {
                 try process.run()
+                if let timeoutSeconds {
+                    let workItem = DispatchWorkItem {
+                        timeoutState.markTimedOut()
+                        process.terminate()
+                    }
+                    timeoutState.workItem = workItem
+                    DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds, execute: workItem)
+                }
             } catch {
                 continuation.resume(throwing: error)
             }

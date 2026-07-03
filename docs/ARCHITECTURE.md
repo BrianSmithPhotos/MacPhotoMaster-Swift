@@ -104,6 +104,14 @@ type conforming to `AIProvider`.
 - Verify a copy (size + SHA-256, `CryptoKit.SHA256`) before treating a source file as safely
   handled — see `SPEC.md` §5.
 
+`ProcessMoveService` is the reference implementation of this section for the copy/move step
+(`SPEC.md` §5): it copies a source into `<library>/<M Month>/<DD>/` (JPEGs one level deeper into
+`jpg/`, matching the reference app's destination routing), verifies size + SHA-256 before writing
+metadata to the destination, and trashes the partial destination copy — never the source — on any
+verification or write failure. It composes `RenameService` (destination filename) and
+`ExifToolClient` (destination metadata write); scope resolution (single/capture-set/selection/
+session) and skip-on-success wiring are left to the calling ViewModel.
+
 ## Testing
 
 Favor testing the `Services/` and `Models/` layers directly (pure logic, no UI) — this is where the

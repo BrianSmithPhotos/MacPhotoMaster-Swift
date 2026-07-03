@@ -49,9 +49,9 @@ struct SourcePanelView: View {
                                 CaptureTileView(
                                     asset: representative,
                                     memberCount: captureSet.members.count,
-                                    isSelected: viewModel.selectedAssetID == representative.id
+                                    isSelected: viewModel.selectedAssetID == representative.id,
+                                    onSelect: { viewModel.selectedAssetID = representative.id }
                                 )
-                                .onTapGesture { viewModel.selectedAssetID = representative.id }
                                 .contextMenu {
                                     Button("Skip") { viewModel.skip(captureSet) }
                                 }
@@ -139,37 +139,44 @@ private struct CaptureTileView: View {
     let asset: PhotoAsset
     let memberCount: Int
     let isSelected: Bool
+    let onSelect: () -> Void
 
     @State private var thumbnail: CGImage?
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(.quaternary)
-                .aspectRatio(1, contentMode: .fit)
-                .overlay {
-                    if let thumbnail {
-                        Image(decorative: thumbnail, scale: 1)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+        // A real Button (rather than a plain view with `.onTapGesture`) so the tap action and the
+        // accessibility frame/press-action live on the same node — otherwise VoiceOver and
+        // AXPress-based UI automation see a properly framed element with no action wired to it.
+        Button(action: onSelect) {
+            ZStack(alignment: .bottomTrailing) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(.quaternary)
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay {
+                        if let thumbnail {
+                            Image(decorative: thumbnail, scale: 1)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
                     }
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 3)
-                }
-                .clipped()
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 3)
+                    }
+                    .clipped()
 
-            if memberCount > 1 {
-                Text("\(memberCount)")
-                    .font(.caption2.bold())
-                    .padding(4)
-                    .background(.black.opacity(0.6), in: Circle())
-                    .foregroundStyle(.white)
-                    .padding(4)
+                if memberCount > 1 {
+                    Text("\(memberCount)")
+                        .font(.caption2.bold())
+                        .padding(4)
+                        .background(.black.opacity(0.6), in: Circle())
+                        .foregroundStyle(.white)
+                        .padding(4)
+                }
             }
         }
+        .buttonStyle(.plain)
         // `.task(id:)` re-runs whenever `asset.id` changes (SwiftUI diffs the id, not just
         // presence) and auto-cancels the previous run — important here because ForEach reuses
         // this view's identity across scroll/relayout, and without the id keying, a fast scroll
@@ -178,6 +185,14 @@ private struct CaptureTileView: View {
         .task(id: asset.id) {
             thumbnail = try? await NativeMetadataReader().extractPreviewAsync(at: asset.url, maxPixelSize: 256)
         }
+        // Without this, VoiceOver (and UI-automation hit-testing) only see the badge Text as a
+        // leaf element with a bogus position inside the LazyVGrid's virtualized content — not the
+        // tile itself. Combining into one element gives it the button's real on-screen frame.
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("captureTile.\(asset.id.lastPathComponent)")
+        .accessibilityLabel(
+            memberCount > 1 ? "\(asset.url.lastPathComponent), \(memberCount) items" : asset.url.lastPathComponent)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

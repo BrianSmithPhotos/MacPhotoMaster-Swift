@@ -14,6 +14,12 @@ import Foundation
 @MainActor
 final class SourceBrowserViewModel: ObservableObject {
     @Published private(set) var captureSets: [CaptureSet] = []
+    /// Capture sets skipped in the current folder — populated alongside `captureSets` in `load(_:)`
+    /// and kept in sync by `skip(_:)`/`unskip(_:)`. Only ever shown by `SourcePanelView`'s
+    /// "Skipped" segmented-filter view; not selectable for editing or process/move.
+    @Published private(set) var skippedCaptureSets: [CaptureSet] = []
+    /// Which of `captureSets`/`skippedCaptureSets` `SourcePanelView`'s grid currently displays.
+    @Published var sourceViewFilter: SourceViewFilter = .active
     @Published private(set) var subfolders: [URL] = []
     /// The path from the folder the user opened down to the folder currently displayed — e.g.
     /// `[card, DCIM, 100OLYMP]`. Drives the breadcrumb bar; see docs/SPEC.md §1 "folder tree" and
@@ -239,8 +245,12 @@ final class SourceBrowserViewModel: ObservableObject {
                     guard let representativePath = set.representative?.url.path else { return true }
                     return !skippedPaths.contains(representativePath)
                 }
+                skippedCaptureSets = allSets.filter { set in
+                    guard let representativePath = set.representative?.url.path else { return false }
+                    return skippedPaths.contains(representativePath)
+                }
                 folderPathByCaptureSetID = Dictionary(
-                    uniqueKeysWithValues: captureSets.map { ($0.id, folderURL.path) })
+                    uniqueKeysWithValues: allSets.map { ($0.id, folderURL.path) })
                 subfolders = folders
                 selectFirstTile()
             } catch {
@@ -249,9 +259,10 @@ final class SourceBrowserViewModel: ObservableObject {
         }
     }
 
-    /// Hides every member of `captureSet` from the current view and persists that choice so it
-    /// stays hidden if this folder is reopened later. Never touches the files on disk — see
-    /// `SkipStateStore`'s doc comment for why "skip" is view-only.
+    /// Hides every member of `captureSet` from the active view and persists that choice so it
+    /// stays hidden if this folder is reopened later — moves it into `skippedCaptureSets`, visible
+    /// via `SourcePanelView`'s "Skipped" filter and restorable with `unskip(_:)`. Never touches the
+    /// files on disk — see `SkipStateStore`'s doc comment for why "skip" is view-only.
     func skip(_ captureSet: CaptureSet) {
         guard let folderPath = folderPathByCaptureSetID[captureSet.id] else { return }
         Task {
@@ -260,7 +271,8 @@ final class SourceBrowserViewModel: ObservableObject {
             try? await store.skip(assetPaths: assetPaths, inFolder: folderPath)
 
             captureSets.removeAll { $0.id == captureSet.id }
-            folderPathByCaptureSetID.removeValue(forKey: captureSet.id)
+            skippedCaptureSets.append(captureSet)
+            sortByCaptureOrder(&skippedCaptureSets)
             if let representativeID = captureSet.representative?.id {
                 multiSelectedIDs.remove(representativeID)
             }
@@ -269,6 +281,32 @@ final class SourceBrowserViewModel: ObservableObject {
             } else {
                 refreshVariantStrip()
             }
+        }
+    }
+
+    /// Restores `captureSet` from `skippedCaptureSets` back into the active `captureSets` — the
+    /// inverse of `skip(_:)`, reachable from `SourcePanelView`'s "Skipped" filter view. Skipped
+    /// items aren't selectable, so there's no selection/filmstrip state to reconcile here.
+    func unskip(_ captureSet: CaptureSet) {
+        guard let folderPath = folderPathByCaptureSetID[captureSet.id] else { return }
+        Task {
+            guard let store = await ensureSkipStore() else { return }
+            let assetPaths = captureSet.members.map(\.url.path)
+            try? await store.unskip(assetPaths: assetPaths, inFolder: folderPath)
+
+            skippedCaptureSets.removeAll { $0.id == captureSet.id }
+            captureSets.append(captureSet)
+            sortByCaptureOrder(&captureSets)
+        }
+    }
+
+    /// Restores grouping order (ascending by representative capture time) after `skip(_:)`/
+    /// `unskip(_:)` splice a set into the middle of `captureSets`/`skippedCaptureSets` rather than
+    /// rebuilding from a fresh `CaptureGroupingService.group(_:)` call — see that type for the
+    /// canonical ordering this mirrors.
+    private func sortByCaptureOrder(_ sets: inout [CaptureSet]) {
+        sets.sort {
+            ($0.representative?.capturedAt ?? .distantPast) < ($1.representative?.capturedAt ?? .distantPast)
         }
     }
 

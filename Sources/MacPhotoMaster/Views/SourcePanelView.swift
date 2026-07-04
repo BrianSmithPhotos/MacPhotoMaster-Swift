@@ -12,6 +12,21 @@ struct SourcePanelView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 96), spacing: 8)]
 
+    private var displayedCaptureSets: [CaptureSet] {
+        switch viewModel.sourceViewFilter {
+        case .active: viewModel.captureSets
+        case .skipped: viewModel.skippedCaptureSets
+        }
+    }
+
+    private var emptyStateMessage: String {
+        guard !viewModel.breadcrumb.isEmpty else { return "Open a folder to browse photos." }
+        switch viewModel.sourceViewFilter {
+        case .active: return "No supported photos in this folder."
+        case .skipped: return "No skipped items in this folder."
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -29,34 +44,52 @@ struct SourcePanelView: View {
                 SubfolderStrip(folders: viewModel.subfolders) { viewModel.navigate(to: $0) }
             }
 
+            // Segmented rather than a toggle button so "Active" and "Skipped" read as two distinct
+            // views of the same folder, not a hide/show flag layered on top of one grid.
+            Picker("View", selection: $viewModel.sourceViewFilter) {
+                Text("Active").tag(SourceViewFilter.active)
+                Text("Skipped (\(viewModel.skippedCaptureSets.count))").tag(SourceViewFilter.skipped)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 240)
+
             if viewModel.isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity)
             } else if let message = viewModel.loadErrorMessage {
                 Text(message)
                     .foregroundStyle(.red)
-            } else if viewModel.captureSets.isEmpty {
-                Text(
-                    viewModel.breadcrumb.isEmpty
-                        ? "Open a folder to browse photos."
-                        : "No supported photos in this folder."
-                )
-                .foregroundStyle(.secondary)
+            } else if displayedCaptureSets.isEmpty {
+                Text(emptyStateMessage)
+                    .foregroundStyle(.secondary)
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 8) {
-                        ForEach(viewModel.captureSets) { captureSet in
+                        ForEach(displayedCaptureSets) { captureSet in
                             if let representative = captureSet.representative {
                                 CaptureTileView(
                                     asset: representative,
                                     memberCount: captureSet.members.count,
-                                    isSelected: viewModel.multiSelectedIDs.contains(representative.id),
+                                    isSelected:
+                                        viewModel.sourceViewFilter == .active
+                                        && viewModel.multiSelectedIDs.contains(representative.id),
                                     onSelect: { modifiers in
-                                        viewModel.selectTile(representative.id, modifiers: modifiers)
+                                        switch viewModel.sourceViewFilter {
+                                        case .active:
+                                            viewModel.selectTile(representative.id, modifiers: modifiers)
+                                        case .skipped:
+                                            viewModel.unskip(captureSet)
+                                        }
                                     }
                                 )
                                 .contextMenu {
-                                    Button("Skip") { viewModel.skip(captureSet) }
+                                    switch viewModel.sourceViewFilter {
+                                    case .active:
+                                        Button("Skip") { viewModel.skip(captureSet) }
+                                    case .skipped:
+                                        Button("Un-skip") { viewModel.unskip(captureSet) }
+                                    }
                                 }
                             }
                         }

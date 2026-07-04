@@ -92,10 +92,11 @@ rather than failing the whole parse; the result feeds `TimelineLocationCache.imp
 ## Provider pattern (AI)
 
 Mirror the reference app's split: a small `AIProvider` protocol (async chat/vision call, given an
-image + prompt, returning parsed suggestions) with concrete implementations per backend (e.g. an
-Ollama-backed local provider, an OpenRouter-backed cloud provider). Prompting and response-parsing
-logic lives in one shared place and stays backend-agnostic; adding a backend means adding one new
-type conforming to `AIProvider`.
+image + prompt, returning parsed suggestions) with concrete implementations per backend. Prompting
+and response-parsing logic lives in one shared place and stays backend-agnostic; adding a backend
+means adding one new type conforming to `AIProvider`. Three backends exist: `OllamaProvider` (local
+HTTP daemon), `OpenRouterProvider` (cloud HTTP), and `MLXNativeProvider` (native in-process
+inference via `mlx-swift-lm`, no server/daemon/Python involved — see `docs/MLX_PROVIDER.md`).
 
 ## File safety
 

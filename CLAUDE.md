@@ -14,7 +14,9 @@ compare against for logic that's being ported (e.g. Timeline JSON parsing, GPS m
 ## Stack & Tooling
 
 - macOS 14+, Swift 5.10, SwiftUI. `swift build` / `swift run` / `swift test` from the repo root, or
-  open `Package.swift` directly in Xcode.
+  open `Package.swift` directly in Xcode. `Package.swift` itself declares `swift-tools-version: 6.1`
+  (required for `mlx-swift-lm`'s macro target) but pins `swiftLanguageModes: [.v5]`, so the app's own
+  code still writes and behaves like Swift 5.10 — the manifest-format bump isn't a language bump.
 - `exiftool` on `PATH` (`brew install exiftool`) — all metadata read/write goes through it via
   `Process`, same as the Python sibling app. See `ExifToolClient` and `docs/ARCHITECTURE.md`
   "exiftool integration" for the batching/PATH-resolution pattern.
@@ -47,10 +49,8 @@ Full detail in `docs/ARCHITECTURE.md`.
 
 ## Deliberately deferred scope
 
-- **Metadata write-back via ImageIO** (`NativeMetadataReader` is read-only by design) and **MLX
-  integration for local AI inference** are both explicitly deferred — don't start on either without
-  the user asking directly. Current AI-provider plan is Ollama (see "Hardware & model notes" below);
-  MLX may become relevant later if Apple ships an "M5 Ultra" or similar high-bandwidth part.
+- **Metadata write-back via ImageIO** (`NativeMetadataReader` is read-only by design) is explicitly
+  deferred — don't start on it without the user asking directly.
 - Anything in the Python sibling app's backlog that hasn't shipped there yet shouldn't be assumed as
   a requirement here (see `docs/SPEC.md` "Deliberately out of scope").
 
@@ -59,9 +59,15 @@ Full detail in `docs/ARCHITECTURE.md`.
 User's dev machine is a Mac Studio **M1 Ultra, 128GB unified memory** — not the latest Apple
 Silicon, but memory bandwidth (819 GB/s) still beats the M5 generation (base M5: 154 GB/s; M5 Max
 best config: up to 614 GB/s) for sustained local-LLM token generation, which is bandwidth-bound
-rather than compute-bound. Decision: stay on this hardware and on **Ollama** (which added an MLX
-backend on Apple Silicon as of v0.19, March 2026) rather than upgrading, until Apple ships something
-like an "M5 Ultra" with bandwidth clearly ahead of the M1 Ultra.
+rather than compute-bound. Decision: stay on this hardware rather than upgrading, until Apple ships
+something like an "M5 Ultra" with bandwidth clearly ahead of the M1 Ultra.
+
+Two independent local-inference paths exist and both run on this reasoning: **Ollama**
+(`OllamaProvider`, added an MLX backend on Apple Silicon as of v0.19, March 2026) and the native
+**`mlx:` provider** (`MLXNativeProvider`, built directly on `mlx-swift-lm`, in-process via Metal, no
+Ollama daemon involved). The `mlx:` provider was added as an exercise in the native MLX stack, not
+because Ollama's own MLX backend was found lacking — see `docs/MLX_PROVIDER.md` for the decision
+record and current model allowlist.
 
 ## File Safety
 

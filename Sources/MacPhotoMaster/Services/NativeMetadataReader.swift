@@ -13,9 +13,10 @@ enum NativeMetadataError: Error {
 /// so there's no coordinate-parsing logic to port from the reference app's `_parse_dms_coordinate`.
 ///
 /// Scope note: this does not reach manufacturer maker-note fields (Olympus's
-/// ArtFilterEffect/PictureMode/StackedImage tags used for the reference app's art-filter
-/// detection — see docs/SPEC.md §2). ImageIO only exposes maker-note dictionaries it has a
-/// built-in decoder for, and Olympus's proprietary tags aren't among them; `exiftool` remains the
+/// ArtFilterEffect/PictureMode/StackedImage/FocusDistance tags used for the reference app's
+/// art-filter detection and this app's Focus Distance display — see docs/SPEC.md §2). ImageIO only
+/// exposes maker-note dictionaries it has a built-in decoder for, and Olympus's proprietary tags
+/// aren't among them; `exiftool` remains the
 /// only reliable source for those, so this reader is a prototype for the *standard* EXIF/IPTC/GPS
 /// field set, not a full `ExifToolClient` replacement yet.
 ///

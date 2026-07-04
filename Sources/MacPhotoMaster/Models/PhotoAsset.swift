@@ -15,6 +15,10 @@ struct PhotoAsset: Identifiable, Hashable {
     var shutterSpeed: String = ""
     var focalLength: String = ""
     var iso: String = ""
+    /// Olympus/OM System maker-note field (e.g. "16.03 m") — like `artFilterToken`, standard EXIF
+    /// doesn't carry this reliably, so `NativeMetadataReader`'s ImageIO scan can't read it; it's
+    /// filled in the same lazy per-selection `exiftool` pass as `artFilterToken`.
+    var focusDistance: String = ""
 
     var capturedAt: Date?
     var artFilterToken: String?

@@ -91,10 +91,10 @@ final class SourceBrowserViewModel: ObservableObject {
     /// refresh button so a slow/timed-out USGS EPQS call can't be fired twice concurrently.
     @Published private(set) var isLookingUpAltitude = false
 
-    /// Local Ollama vision model used for AI-assisted description/keyword suggestions
-    /// (docs/SPEC.md §6) — editable so the user can point at a different pulled model without a
-    /// rebuild.
-    @Published var aiModelText: String = OllamaProvider.defaultModel
+    /// AI vision model used for AI-assisted description/keyword suggestions (docs/SPEC.md §6), in
+    /// `"<provider>:<model>"` form (see `AIModelSelection`) — editable so the user can point at any
+    /// pulled Ollama model or OpenRouter model id without a rebuild.
+    @Published var aiModelText: String = AIModelSelection.presets[0]
     /// True while `suggestAI()` has a request (and its immediate auto-save) in flight — disables
     /// the Suggest button so a slow local-model response can't be fired twice concurrently.
     @Published private(set) var isSuggestingAI = false
@@ -109,7 +109,8 @@ final class SourceBrowserViewModel: ObservableObject {
     private let timelineImportParser = TimelineImportParser()
     private let elevationService = ElevationLookupService()
     private let reverseGeocodeService = ReverseGeocodeService()
-    private let aiProvider: AIProvider = OllamaProvider()
+    private let ollamaProvider: AIProvider = OllamaProvider()
+    private let openRouterProvider: AIProvider = OpenRouterProvider()
     private let aiSuggestionService = AISuggestionService()
 
     /// Reverse-geocode context text (docs/SPEC.md §6/§7), keyed by capture-set representative id so
@@ -554,15 +555,22 @@ final class SourceBrowserViewModel: ObservableObject {
     }
 
     /// Sends the AI-source representative image (docs/SPEC.md §6: prefer RAW over a heavily
-    /// in-camera-filtered JPEG) to the local Ollama provider and fills the description/keywords
-    /// fields with its response, then auto-saves immediately — matching the Python reference
-    /// app's behavior exactly, per user direction (there is no separate accept/apply step). When
+    /// in-camera-filtered JPEG) to whichever provider `aiModelText` selects (see
+    /// `AIModelSelection`) and fills the description/keywords fields with its response, then
+    /// auto-saves immediately — matching the Python reference app's behavior exactly, per user
+    /// direction (there is no separate accept/apply step). When
     /// the grid has a multi-capture-set selection active, the suggestion is applied and saved to
     /// every member of every selected set, but the image sent to the model is always drawn from
     /// the *first* selected set (grid order) — picking a dissimilar mix of sets to suggest across
     /// is the user's own responsibility, not something this method tries to detect.
     func suggestAI() async {
         guard !isSuggestingAI, let id = selectedAssetID else { return }
+        guard let selection = AIModelSelection.parse(aiModelText) else {
+            aiStatusMessage =
+                "Invalid AI model — expected \"ollama:<model>\" or \"openrouter:<model>\""
+            return
+        }
+        let provider: AIProvider = selection.providerID == .ollama ? ollamaProvider : openRouterProvider
 
         let targetAssets: [PhotoAsset]
         let sourceSetMembers: [PhotoAsset]
@@ -594,7 +602,7 @@ final class SourceBrowserViewModel: ObservableObject {
         do {
             let cgImage = try await NativeMetadataReader().extractPreviewAsync(at: sourceAsset.url)
             let result = try await aiSuggestionService.suggest(
-                provider: aiProvider, model: aiModelText, image: cgImage,
+                provider: provider, model: selection.modelName, image: cgImage,
                 existingDescription: editableDescription, existingKeywords: editableKeywords,
                 locationContext: locationContext)
             guard selectedAssetID == id else { return }
@@ -602,7 +610,11 @@ final class SourceBrowserViewModel: ObservableObject {
             editableKeywords = result.keywords.joined(separator: ", ")
             aiStatusMessage =
                 result.timeoutRetrySucceeded ? "Suggested (after retry); saving…" : "Suggested; saving…"
-            saveMetadata(scope: .manualSelection(targetAssets))
+            let saveStatus = await performSave(scope: .manualSelection(targetAssets))
+            guard selectedAssetID == id else { return }
+            if let saveStatus {
+                aiStatusMessage = "Suggested; \(saveStatus)"
+            }
         } catch {
             guard selectedAssetID == id else { return }
             aiStatusMessage = "AI suggestion failed: \(error.localizedDescription)"
@@ -759,6 +771,7 @@ final class SourceBrowserViewModel: ObservableObject {
         guard selectedAssetID == id else { return }
         updateAsset(id) { current in
             current.artFilterToken = ArtFilterTokenParsing.token(from: metadata)
+            current.focusDistance = (metadata["Olympus:FocusDistance"] as? String) ?? ""
             if let correctedDescription = metadata["IPTC:Caption-Abstract"] as? String,
                 !correctedDescription.isEmpty, correctedDescription != current.descriptionText {
                 current.descriptionText = correctedDescription
@@ -781,7 +794,10 @@ final class SourceBrowserViewModel: ObservableObject {
         let results = (try? await exifTool.readMetadata(at: missing.map(\.url))) ?? [:]
         for asset in missing {
             guard case .success(let metadata) = results[asset.url] else { continue }
-            updateAsset(asset.id) { $0.artFilterToken = ArtFilterTokenParsing.token(from: metadata) }
+            updateAsset(asset.id) { current in
+                current.artFilterToken = ArtFilterTokenParsing.token(from: metadata)
+                current.focusDistance = (metadata["Olympus:FocusDistance"] as? String) ?? ""
+            }
         }
     }
 
@@ -812,7 +828,17 @@ final class SourceBrowserViewModel: ObservableObject {
     ///
     /// No-op while a previous save is still running.
     func saveMetadata(scope: MetadataSaveScope) {
-        guard !isSavingMetadata else { return }
+        Task { await performSave(scope: scope) }
+    }
+
+    /// Does the actual save, returning the final status text (`nil` if a save was already running
+    /// or there was nothing to save) — factored out of `saveMetadata(scope:)` so `suggestAI()` can
+    /// `await` this directly and fold the outcome into its own status caption, instead of the
+    /// caption getting stuck on "saving…" while a fire-and-forget `Task` finishes in the
+    /// background.
+    @discardableResult
+    private func performSave(scope: MetadataSaveScope) async -> String? {
+        guard !isSavingMetadata else { return nil }
         let description = editableDescription
         let keywords = MetadataEditParsing.parseKeywords(editableKeywords)
         let gps = MetadataEditParsing.parseGPS(
@@ -825,59 +851,61 @@ final class SourceBrowserViewModel: ObservableObject {
         case .captureSet(let captureSet): targets = captureSet.members
         case .manualSelection(let assets): targets = assets
         }
-        guard !targets.isEmpty else { return }
+        guard !targets.isEmpty else { return nil }
 
         isSavingMetadata = true
         saveStatusMessage = "Saving…"
-        Task {
-            defer { isSavingMetadata = false }
-            await loadArtFilterTokens(for: targets)
-            let assetByID = Dictionary(
-                uniqueKeysWithValues: captureSets.flatMap(\.members).map { ($0.id, $0) })
+        defer { isSavingMetadata = false }
 
-            var groupedTargets: [AutoMetadataGroupKey: [(id: PhotoAsset.ID, url: URL)]] = [:]
-            for target in targets {
-                let asset = assetByID[target.id] ?? target
-                let soocToken = AutoMetadataRules.soocToken(for: asset.url)
-                let finalKeywords = AutoMetadataRules.keywordsWithAutoTokens(
-                    keywords, artFilterToken: asset.artFilterToken, cameraToken: asset.cameraModel,
-                    lensToken: asset.lensModel, soocToken: soocToken)
-                let finalDescription = AutoMetadataRules.descriptionWithArtFilterNote(
-                    description, artFilterToken: asset.artFilterToken)
-                let key = AutoMetadataGroupKey(description: finalDescription, keywords: finalKeywords)
-                groupedTargets[key, default: []].append((id: asset.id, url: asset.url))
-            }
+        await loadArtFilterTokens(for: targets)
+        let assetByID = Dictionary(
+            uniqueKeysWithValues: captureSets.flatMap(\.members).map { ($0.id, $0) })
 
-            do {
-                var failureCount = 0
-                for (key, entries) in groupedTargets {
-                    let results = try await exifTool.write(
-                        description: key.description, keywords: key.keywords, gps: gps,
-                        to: entries.map(\.url))
-                    for entry in entries {
-                        switch results[entry.url] {
-                        case .success:
-                            updateAsset(entry.id) { asset in
-                                asset.descriptionText = key.description
-                                asset.keywords = key.keywords
-                                if let gps {
-                                    asset.gpsLatitude = gps.latitude
-                                    asset.gpsLongitude = gps.longitude
-                                }
+        var groupedTargets: [AutoMetadataGroupKey: [(id: PhotoAsset.ID, url: URL)]] = [:]
+        for target in targets {
+            let asset = assetByID[target.id] ?? target
+            let soocToken = AutoMetadataRules.soocToken(for: asset.url)
+            let finalKeywords = AutoMetadataRules.keywordsWithAutoTokens(
+                keywords, artFilterToken: asset.artFilterToken, cameraToken: asset.cameraModel,
+                lensToken: asset.lensModel, soocToken: soocToken)
+            let finalDescription = AutoMetadataRules.descriptionWithArtFilterNote(
+                description, artFilterToken: asset.artFilterToken)
+            let key = AutoMetadataGroupKey(description: finalDescription, keywords: finalKeywords)
+            groupedTargets[key, default: []].append((id: asset.id, url: asset.url))
+        }
+
+        let finalStatus: String
+        do {
+            var failureCount = 0
+            for (key, entries) in groupedTargets {
+                let results = try await exifTool.write(
+                    description: key.description, keywords: key.keywords, gps: gps,
+                    to: entries.map(\.url))
+                for entry in entries {
+                    switch results[entry.url] {
+                    case .success:
+                        updateAsset(entry.id) { asset in
+                            asset.descriptionText = key.description
+                            asset.keywords = key.keywords
+                            if let gps {
+                                asset.gpsLatitude = gps.latitude
+                                asset.gpsLongitude = gps.longitude
                             }
-                        default:
-                            failureCount += 1
                         }
+                    default:
+                        failureCount += 1
                     }
                 }
-                saveStatusMessage =
-                    failureCount == 0
-                    ? "Saved to \(targets.count) file(s)."
-                    : "Saved \(targets.count - failureCount)/\(targets.count) file(s); \(failureCount) failed."
-            } catch {
-                saveStatusMessage = "Save failed: \(error.localizedDescription)"
             }
+            finalStatus =
+                failureCount == 0
+                ? "Saved to \(targets.count) file(s)."
+                : "Saved \(targets.count - failureCount)/\(targets.count) file(s); \(failureCount) failed."
+        } catch {
+            finalStatus = "Save failed: \(error.localizedDescription)"
         }
+        saveStatusMessage = finalStatus
+        return finalStatus
     }
 }
 

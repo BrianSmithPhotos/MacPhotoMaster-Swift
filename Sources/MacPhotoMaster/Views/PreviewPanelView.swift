@@ -58,7 +58,7 @@ private struct SelectedImagesStripView: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal, showsIndicators: true) {
             HStack(spacing: 6) {
                 ForEach(members) { member in
                     VariantTileView(
@@ -72,7 +72,7 @@ private struct SelectedImagesStripView: View {
             }
             .padding(.vertical, 4)
         }
-        .frame(height: 68)
+        .frame(height: 80)
     }
 }
 

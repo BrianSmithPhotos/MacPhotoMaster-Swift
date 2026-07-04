@@ -33,8 +33,20 @@ struct MetadataPanelView: View {
                     LabeledContent("Title", value: viewModel.titlePreview)
                     TextField("Description", text: $viewModel.editableDescription, axis: .vertical)
                         .lineLimit(3...6)
-                    TextField("Keywords", text: $viewModel.editableKeywords)
-                    TextField("AI Model", text: $viewModel.aiModelText)
+                    TextField("Keywords", text: $viewModel.editableKeywords, axis: .vertical)
+                        .lineLimit(3...8)
+                    HStack {
+                        TextField("AI Model", text: $viewModel.aiModelText)
+                        Menu {
+                            ForEach(AIModelSelection.presets, id: \.self) { preset in
+                                Button(preset) { viewModel.aiModelText = preset }
+                            }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                    }
                     Button {
                         Task { await viewModel.suggestAI() }
                     } label: {
@@ -56,6 +68,7 @@ struct MetadataPanelView: View {
                     LabeledContent("Shutter", value: asset.shutterSpeed)
                     LabeledContent("Focal length", value: asset.focalLength)
                     LabeledContent("ISO", value: asset.iso)
+                    LabeledContent("Focus distance", value: asset.focusDistance)
                     if let capturedAt = asset.capturedAt {
                         LabeledContent("Captured", value: capturedAt.formatted())
                     }

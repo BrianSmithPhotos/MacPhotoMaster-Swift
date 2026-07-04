@@ -15,7 +15,10 @@ let package = Package(
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift")
             ],
-            path: "Sources/MacPhotoMaster"
+            path: "Sources/MacPhotoMaster",
+            resources: [
+                .copy("Resources/AppIcon.png")
+            ]
         ),
         .testTarget(
             name: "MacPhotoMasterTests",

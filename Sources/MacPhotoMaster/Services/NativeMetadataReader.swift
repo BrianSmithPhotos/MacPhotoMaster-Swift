@@ -18,6 +18,16 @@ enum NativeMetadataError: Error {
 /// built-in decoder for, and Olympus's proprietary tags aren't among them; `exiftool` remains the
 /// only reliable source for those, so this reader is a prototype for the *standard* EXIF/IPTC/GPS
 /// field set, not a full `ExifToolClient` replacement yet.
+///
+/// Second known gap, confirmed against a real OM SYSTEM camera JPEG (not reproducible with a bare
+/// synthetic fixture): ImageIO can fail to read back `Caption-Abstract`/description on these files
+/// even when the on-disk IPTC bytes are correct (checked by parsing the raw IPTC IIM dataset
+/// directly — the `2:120` entry is present with the right value; `exiftool`'s own read agrees).
+/// Both `CGImageSourceCopyPropertiesAtIndex`'s IPTC dictionary and
+/// `CGImageMetadataCreateFromXMPData`'s `dc:description` come back empty; byline/copyright/keywords
+/// in the same file read correctly. `SourceBrowserViewModel.loadArtFilterTokenIfNeeded()` papers
+/// over this the same way it already does for maker-note fields: one lazy `exiftool` read per
+/// selected asset corrects `descriptionText` if this reader got it wrong.
 struct NativeMetadataReader {
     /// Reads the raw ImageIO property dictionary (EXIF/IPTC/GPS/TIFF sub-dictionaries) for one
     /// file. Works on JPEG and on RAW formats macOS has a built-in decoder for, including ORF.

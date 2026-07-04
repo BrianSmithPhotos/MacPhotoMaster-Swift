@@ -59,12 +59,19 @@ struct ProcessMoveService {
 
         let title = (proposedName as NSString).deletingPathExtension
 
+        let soocToken = AutoMetadataRules.soocToken(for: asset.url)
+        let description = AutoMetadataRules.descriptionWithArtFilterNote(
+            asset.descriptionText, artFilterToken: asset.artFilterToken)
+        let keywords = AutoMetadataRules.keywordsWithAutoTokens(
+            asset.keywords, artFilterToken: asset.artFilterToken, cameraToken: asset.cameraModel,
+            lensToken: asset.lensModel, soocToken: soocToken)
+
         do {
             try Self.verifyCopy(source: asset.url, destination: destinationURL)
             try await exifTool.write(
                 title: title,
-                description: asset.descriptionText,
-                keywords: asset.keywords,
+                description: description,
+                keywords: keywords,
                 gps: Self.gpsCoordinate(for: asset),
                 to: destinationURL)
         } catch {

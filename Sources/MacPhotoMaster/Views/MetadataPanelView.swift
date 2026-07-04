@@ -34,6 +34,22 @@ struct MetadataPanelView: View {
                     TextField("Description", text: $viewModel.editableDescription, axis: .vertical)
                         .lineLimit(3...6)
                     TextField("Keywords", text: $viewModel.editableKeywords)
+                    TextField("AI Model", text: $viewModel.aiModelText)
+                    Button {
+                        Task { await viewModel.suggestAI() }
+                    } label: {
+                        if viewModel.isSuggestingAI {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Suggest Description + Keywords")
+                        }
+                    }
+                    .disabled(viewModel.selectedAsset == nil || viewModel.isSuggestingAI)
+                    if let aiStatusMessage = viewModel.aiStatusMessage {
+                        Text(aiStatusMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     LabeledContent("Camera", value: asset.cameraModel)
                     LabeledContent("Lens", value: asset.lensModel)
                     LabeledContent("Aperture", value: asset.aperture)
@@ -88,6 +104,7 @@ struct MetadataPanelView: View {
         .task(id: viewModel.selectedAssetID) {
             await viewModel.loadArtFilterTokenIfNeeded()
             await viewModel.suggestGPSIfNeeded()
+            await viewModel.lookupLocationKeywordsIfNeeded()
         }
         .fileImporter(isPresented: $isChoosingLibraryFolder, allowedContentTypes: [.folder]) { result in
             guard case let .success(url) = result else { return }

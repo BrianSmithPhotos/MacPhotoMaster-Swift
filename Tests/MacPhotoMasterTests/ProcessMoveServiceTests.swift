@@ -84,7 +84,10 @@ final class ProcessMoveServiceTests: XCTestCase {
         XCTAssertEqual(
             metadata["IPTC:ObjectName"] as? String, "1010042_Yosemite_20260702_1405_OM-1_12-40mm-F2.8")
         XCTAssertEqual(metadata["IPTC:Caption-Abstract"] as? String, "My description")
-        XCTAssertEqual(metadata["IPTC:Keywords"] as? [String], ["mountain", "sunrise"])
+        // docs/SPEC.md §6's auto-applied metadata rules (`AutoMetadataRules`) append camera/lens/
+        // SOOC tokens at write time — see `ProcessMoveService.processAndCopy`.
+        XCTAssertEqual(
+            metadata["IPTC:Keywords"] as? [String], ["mountain", "sunrise", "OM-1", "12-40mm F2.8", "sooc"])
         XCTAssertEqual(metadata["GPS:GPSLatitudeRef"] as? String, "North")
     }
 

@@ -114,6 +114,9 @@ deterministically, and copy files into local storage.
 - Auto-applied metadata rules at save/process time (not shown live in the editable fields):
   e.g. a "straight out of camera" keyword on unedited JPEGs, and an appended note when an in-camera
   filter/effect was active.
+- Location context: once a capture set has GPS (embedded or Timeline-suggested), reverse-geocode it
+  to city/county/state, add those as keywords, and pass them to the AI prompt as scene context (helps
+  with plausible local wildlife/plant identification) — see §7.
 
 ## 7. GPS enrichment from Timeline export
 
@@ -131,6 +134,9 @@ deterministically, and copy files into local storage.
   altitude blank from timeline matching and separately look it up from a ground-elevation service
   (e.g. USGS EPQS) keyed by the applied lat/lon. Cache elevation lookups by rounded coordinate to
   avoid redundant network calls for capture sets shot at the same spot.
+- Reverse geocoding: once GPS is set (embedded or Timeline-suggested), look up city/county/state
+  (via OpenStreetMap Nominatim) once per capture set per session, merge the non-blank fields into the
+  keyword edit buffer, and keep the result available as AI prompt context (§6).
 
 ## 8. Privacy / repo hygiene
 

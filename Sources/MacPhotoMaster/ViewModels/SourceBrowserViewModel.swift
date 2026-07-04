@@ -91,6 +91,15 @@ final class SourceBrowserViewModel: ObservableObject {
     /// refresh button so a slow/timed-out USGS EPQS call can't be fired twice concurrently.
     @Published private(set) var isLookingUpAltitude = false
 
+    /// Local Ollama vision model used for AI-assisted description/keyword suggestions
+    /// (docs/SPEC.md §6) — editable so the user can point at a different pulled model without a
+    /// rebuild.
+    @Published var aiModelText: String = OllamaProvider.defaultModel
+    /// True while `suggestAI()` has a request (and its immediate auto-save) in flight — disables
+    /// the Suggest button so a slow local-model response can't be fired twice concurrently.
+    @Published private(set) var isSuggestingAI = false
+    @Published var aiStatusMessage: String?
+
     private let loader = PhotoAssetLoader()
     private let folderBrowser = FolderBrowser()
     private let grouping = CaptureGroupingService()
@@ -99,6 +108,17 @@ final class SourceBrowserViewModel: ObservableObject {
     private let renameService = RenameService()
     private let timelineImportParser = TimelineImportParser()
     private let elevationService = ElevationLookupService()
+    private let reverseGeocodeService = ReverseGeocodeService()
+    private let aiProvider: AIProvider = OllamaProvider()
+    private let aiSuggestionService = AISuggestionService()
+
+    /// Reverse-geocode context text (docs/SPEC.md §6/§7), keyed by capture-set representative id so
+    /// `suggestAI()` can pass along location context for whichever set it's sourcing the AI image
+    /// from. Populated by `lookupLocationKeywordsIfNeeded()`.
+    private var locationContextByRepresentativeID: [PhotoAsset.ID: String] = [:]
+    /// Guards against re-querying Nominatim for the same capture set more than once per session —
+    /// mirrors the reference app's `_geocode_auto_applied_paths`.
+    private var geocodeAppliedRepresentativeIDs: Set<PhotoAsset.ID> = []
 
     /// The manual per-session label `RenameService` needs for its filename pattern (docs/SPEC.md
     /// §4) — not GPS-derived, so it lives here rather than on `PhotoAsset`. Defaults to empty, in
@@ -498,6 +518,97 @@ final class SourceBrowserViewModel: ObservableObject {
         await lookupElevation(for: id, latitude: latitude, longitude: longitude)
     }
 
+    /// Reverse-geocodes the selected asset's GPS (embedded or freshly Timeline-suggested) into
+    /// city/county/state, merges those into the keyword edit buffer, and keeps the result around
+    /// keyed by capture-set representative so `suggestAI()` can pass it to the model as location
+    /// context — docs/SPEC.md §6/§7, mirrors the reference app's `_start_reverse_geocode`/
+    /// `_on_reverse_geocoded`. No-ops without GPS in the edit buffer, and only looks up once per
+    /// capture set per session so re-selecting the same set doesn't re-hit the network. Meant to run
+    /// after `suggestGPSIfNeeded()` in the same `.task(id:)` chain, so embedded GPS (already in the
+    /// buffer from `loadEditBuffer`) and Timeline-suggested GPS (just written by that call) are both
+    /// covered by one guard.
+    func lookupLocationKeywordsIfNeeded() async {
+        guard let id = selectedAssetID,
+            let latitude = Double(editableLatitudeText.trimmingCharacters(in: .whitespacesAndNewlines)),
+            let longitude = Double(editableLongitudeText.trimmingCharacters(in: .whitespacesAndNewlines)),
+            let representativeID = selectedCaptureSet?.representative?.id,
+            !geocodeAppliedRepresentativeIDs.contains(representativeID)
+        else { return }
+        geocodeAppliedRepresentativeIDs.insert(representativeID)
+
+        guard
+            let result = try? await reverseGeocodeService.lookupLocation(
+                latitude: latitude, longitude: longitude)
+        else { return }
+        locationContextByRepresentativeID[representativeID] = result.contextText
+
+        let tokens = result.keywordTokens
+        guard !tokens.isEmpty, selectedAssetID == id else { return }
+        var keywords = MetadataEditParsing.parseKeywords(editableKeywords)
+        var seenLowercased = Set(keywords.map { $0.lowercased() })
+        for token in tokens where seenLowercased.insert(token.lowercased()).inserted {
+            keywords.append(token)
+        }
+        editableKeywords = keywords.joined(separator: ", ")
+        gpsSuggestionStatusMessage = "Added location keywords: \(tokens.joined(separator: ", "))"
+    }
+
+    /// Sends the AI-source representative image (docs/SPEC.md §6: prefer RAW over a heavily
+    /// in-camera-filtered JPEG) to the local Ollama provider and fills the description/keywords
+    /// fields with its response, then auto-saves immediately — matching the Python reference
+    /// app's behavior exactly, per user direction (there is no separate accept/apply step). When
+    /// the grid has a multi-capture-set selection active, the suggestion is applied and saved to
+    /// every member of every selected set, but the image sent to the model is always drawn from
+    /// the *first* selected set (grid order) — picking a dissimilar mix of sets to suggest across
+    /// is the user's own responsibility, not something this method tries to detect.
+    func suggestAI() async {
+        guard !isSuggestingAI, let id = selectedAssetID else { return }
+
+        let targetAssets: [PhotoAsset]
+        let sourceSetMembers: [PhotoAsset]
+        let sourceRepresentativeID: PhotoAsset.ID?
+        if hasMultiSelection {
+            targetAssets = manualSelectionAssets
+            guard
+                let firstSelectedSet = captureSets.first(where: {
+                    guard let representativeID = $0.representative?.id else { return false }
+                    return multiSelectedIDs.contains(representativeID)
+                })
+            else { return }
+            sourceSetMembers = firstSelectedSet.members
+            sourceRepresentativeID = firstSelectedSet.representative?.id
+        } else {
+            guard let captureSet = selectedCaptureSet else { return }
+            targetAssets = captureSet.members
+            sourceSetMembers = captureSet.members
+            sourceRepresentativeID = captureSet.representative?.id
+        }
+        guard !targetAssets.isEmpty,
+            let sourceAsset = AISuggestionSourcePicker.pickSourceAsset(from: sourceSetMembers)
+        else { return }
+        let locationContext = sourceRepresentativeID.flatMap { locationContextByRepresentativeID[$0] } ?? ""
+
+        isSuggestingAI = true
+        aiStatusMessage = "Generating AI suggestions…"
+        defer { isSuggestingAI = false }
+        do {
+            let cgImage = try await NativeMetadataReader().extractPreviewAsync(at: sourceAsset.url)
+            let result = try await aiSuggestionService.suggest(
+                provider: aiProvider, model: aiModelText, image: cgImage,
+                existingDescription: editableDescription, existingKeywords: editableKeywords,
+                locationContext: locationContext)
+            guard selectedAssetID == id else { return }
+            editableDescription = result.description
+            editableKeywords = result.keywords.joined(separator: ", ")
+            aiStatusMessage =
+                result.timeoutRetrySucceeded ? "Suggested (after retry); saving…" : "Suggested; saving…"
+            saveMetadata(scope: .manualSelection(targetAssets))
+        } catch {
+            guard selectedAssetID == id else { return }
+            aiStatusMessage = "AI suggestion failed: \(error.localizedDescription)"
+        }
+    }
+
     var selectedAsset: PhotoAsset? {
         captureSets
             .flatMap(\.members)
@@ -628,13 +739,35 @@ final class SourceBrowserViewModel: ObservableObject {
     /// `nil` even when no art filter was found, so this never re-reads the same file twice. Batch
     /// scopes (capture set / session / manual selection) use `loadArtFilterTokens(for:)` below
     /// instead, since a per-asset read there would be one `exiftool` process launch per file.
+    ///
+    /// Also corrects `descriptionText` from this same `exiftool` read: real camera-original JPEGs
+    /// (confirmed against an actual OM SYSTEM card file, not just synthetic fixtures) have an
+    /// ImageIO limitation where `CGImageSourceCopyPropertiesAtIndex`'s IPTC dictionary — and even
+    /// `CGImageMetadataCreateFromXMPData`'s `dc:description` — comes back as an empty string for
+    /// `Caption-Abstract`/`XMP-dc:Description` despite the on-disk IPTC bytes being correct (verified
+    /// by parsing the raw IPTC IIM dataset directly: the `2:120` Caption-Abstract entry is present
+    /// with the right value). Byline/copyright/keywords in the same file parse fine via ImageIO, so
+    /// this is narrowly a `Caption-Abstract`/description read gap, not a general IPTC failure.
+    /// `NativeMetadataReader`'s initial scan (`PhotoAssetLoader`) is the path affected, since it
+    /// never shells out to `exiftool`; this only overwrites `editableDescription` if the user
+    /// hasn't already started typing into it since selecting this asset.
     func loadArtFilterTokenIfNeeded() async {
         guard let id = selectedAssetID, let asset = selectedAsset, asset.artFilterToken == nil
         else { return }
+        let descriptionBeforeFetch = asset.descriptionText
         guard let metadata = try? await exifTool.readMetadata(at: asset.url) else { return }
         guard selectedAssetID == id else { return }
-        updateAsset(id) { $0.artFilterToken = ArtFilterTokenParsing.token(from: metadata) }
+        updateAsset(id) { current in
+            current.artFilterToken = ArtFilterTokenParsing.token(from: metadata)
+            if let correctedDescription = metadata["IPTC:Caption-Abstract"] as? String,
+                !correctedDescription.isEmpty, correctedDescription != current.descriptionText {
+                current.descriptionText = correctedDescription
+            }
+        }
         updateRenamePreview()
+        if editableDescription == descriptionBeforeFetch {
+            editableDescription = selectedAsset?.descriptionText ?? editableDescription
+        }
     }
 
     /// Batch-fills `artFilterToken` for every asset in `assets` that doesn't have one loaded yet,
@@ -669,10 +802,13 @@ final class SourceBrowserViewModel: ObservableObject {
     /// Title is deliberately not part of this action — per the Python reference app, it is never
     /// user-typed at all, only ever written at Process & Move time from the rename candidate's stem
     /// (see `ProcessMoveService`). Description/keywords/GPS are genuinely shared across a capture
-    /// set, so they go out in one batched `exiftool` invocation across every target — see
-    /// docs/ARCHITECTURE.md "exiftool integration" for why grouping same-value writes into one
-    /// invocation matters. `ExifToolClient`'s batched write already reports per-file success/failure
-    /// without letting one bad file cost the group its write, so this just relays that.
+    /// set, but the auto-applied tokens (docs/SPEC.md §6: SOOC keyword, art-filter note) can differ
+    /// per file within that same scope — a RAW file gets no SOOC token, a filtered JPEG sibling
+    /// does — so targets are grouped by their *computed* (description, keywords) pair and each
+    /// group goes out in its own batched `exiftool` invocation, rather than one invocation with
+    /// identical values for the whole scope. `ExifToolClient`'s batched write already reports
+    /// per-file success/failure without letting one bad file cost its group the write, so this just
+    /// relays that per group.
     ///
     /// No-op while a previous save is still running.
     func saveMetadata(scope: MetadataSaveScope) {
@@ -687,6 +823,7 @@ final class SourceBrowserViewModel: ObservableObject {
         switch scope {
         case .singleAsset(let asset): targets = [asset]
         case .captureSet(let captureSet): targets = captureSet.members
+        case .manualSelection(let assets): targets = assets
         }
         guard !targets.isEmpty else { return }
 
@@ -694,23 +831,43 @@ final class SourceBrowserViewModel: ObservableObject {
         saveStatusMessage = "Saving…"
         Task {
             defer { isSavingMetadata = false }
+            await loadArtFilterTokens(for: targets)
+            let assetByID = Dictionary(
+                uniqueKeysWithValues: captureSets.flatMap(\.members).map { ($0.id, $0) })
+
+            var groupedTargets: [AutoMetadataGroupKey: [(id: PhotoAsset.ID, url: URL)]] = [:]
+            for target in targets {
+                let asset = assetByID[target.id] ?? target
+                let soocToken = AutoMetadataRules.soocToken(for: asset.url)
+                let finalKeywords = AutoMetadataRules.keywordsWithAutoTokens(
+                    keywords, artFilterToken: asset.artFilterToken, cameraToken: asset.cameraModel,
+                    lensToken: asset.lensModel, soocToken: soocToken)
+                let finalDescription = AutoMetadataRules.descriptionWithArtFilterNote(
+                    description, artFilterToken: asset.artFilterToken)
+                let key = AutoMetadataGroupKey(description: finalDescription, keywords: finalKeywords)
+                groupedTargets[key, default: []].append((id: asset.id, url: asset.url))
+            }
+
             do {
-                let results = try await exifTool.write(
-                    description: description, keywords: keywords, gps: gps, to: targets.map(\.url))
                 var failureCount = 0
-                for target in targets {
-                    switch results[target.url] {
-                    case .success:
-                        updateAsset(target.id) { asset in
-                            asset.descriptionText = description
-                            asset.keywords = keywords
-                            if let gps {
-                                asset.gpsLatitude = gps.latitude
-                                asset.gpsLongitude = gps.longitude
+                for (key, entries) in groupedTargets {
+                    let results = try await exifTool.write(
+                        description: key.description, keywords: key.keywords, gps: gps,
+                        to: entries.map(\.url))
+                    for entry in entries {
+                        switch results[entry.url] {
+                        case .success:
+                            updateAsset(entry.id) { asset in
+                                asset.descriptionText = key.description
+                                asset.keywords = key.keywords
+                                if let gps {
+                                    asset.gpsLatitude = gps.latitude
+                                    asset.gpsLongitude = gps.longitude
+                                }
                             }
+                        default:
+                            failureCount += 1
                         }
-                    default:
-                        failureCount += 1
                     }
                 }
                 saveStatusMessage =
@@ -722,4 +879,12 @@ final class SourceBrowserViewModel: ObservableObject {
             }
         }
     }
+}
+
+/// Groups `saveMetadata`'s write targets by their computed (description, keywords) pair, since
+/// `AutoMetadataRules` tokens can differ per file within one save scope — see that method's doc
+/// comment.
+private struct AutoMetadataGroupKey: Hashable {
+    var description: String
+    var keywords: [String]
 }

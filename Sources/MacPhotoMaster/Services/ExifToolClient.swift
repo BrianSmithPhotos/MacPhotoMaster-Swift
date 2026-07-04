@@ -250,6 +250,67 @@ struct ExifToolClient {
         return "exiftool"
     }()
 
+    /// Coordinates `run(arguments:timeoutSeconds:)`'s three independent async completion sources
+    /// (stdout drained to EOF, stderr drained to EOF, process termination) and resumes the
+    /// continuation exactly once all three have reported in — see that method's doc comment for
+    /// why stdout/stderr must be drained on their own background reads rather than only inside
+    /// `terminationHandler`.
+    private final class RunCompletionState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stdoutData: Data?
+        private var stderrData: Data?
+        private var termination: (status: Int32, didTimeOut: Bool)?
+        private var resumed = false
+        private let continuation: CheckedContinuation<Data, Error>
+
+        init(continuation: CheckedContinuation<Data, Error>) {
+            self.continuation = continuation
+        }
+
+        func receiveStdout(_ data: Data) {
+            lock.lock()
+            stdoutData = data
+            lock.unlock()
+            tryResume()
+        }
+
+        func receiveStderr(_ data: Data) {
+            lock.lock()
+            stderrData = data
+            lock.unlock()
+            tryResume()
+        }
+
+        func receiveTermination(status: Int32, didTimeOut: Bool) {
+            lock.lock()
+            termination = (status, didTimeOut)
+            lock.unlock()
+            tryResume()
+        }
+
+        private func tryResume() {
+            lock.lock()
+            guard !resumed, let stdoutData, let stderrData, let termination else {
+                lock.unlock()
+                return
+            }
+            resumed = true
+            lock.unlock()
+
+            if termination.didTimeOut {
+                continuation.resume(throwing: ExifToolError.timedOut)
+                return
+            }
+            guard termination.status == 0 else {
+                let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+                continuation.resume(
+                    throwing: ExifToolError.processFailed(status: termination.status, stderr: stderr))
+                return
+            }
+            continuation.resume(returning: stdoutData)
+        }
+    }
+
     /// `Process.terminationHandler` and the timeout's `DispatchWorkItem` both run on background
     /// queues concurrently with each other, so the flag they race on needs its own lock rather than
     /// a plain captured `var` (which the Swift 6 concurrency checker correctly flags as unsafe).
@@ -276,6 +337,17 @@ struct ExifToolClient {
         }
     }
 
+    /// Runs `exiftool` and returns its stdout, or throws on a nonzero exit/timeout.
+    ///
+    /// stdout/stderr are drained on their own background reads started right after `process.run()`,
+    /// not from inside `terminationHandler` — `readDataToEndOfFile()` blocks on each `read()` until
+    /// data is available or EOF, so this drains continuously as exiftool writes rather than waiting
+    /// for the process to exit first. That distinction matters: a `-j -G1 -a -s` read across even a
+    /// couple of files can push stdout past the pipe's ~64KB kernel buffer (Olympus/OM System
+    /// MakerNotes are especially verbose), and if that's left undrained until termination, exiftool
+    /// blocks on its own `write()` into the full pipe and can never reach exit — deadlocking this
+    /// call forever. `RunCompletionState` resumes the continuation once stdout, stderr, and
+    /// termination have all reported in, however they interleave.
     private func run(arguments: [String], timeoutSeconds: Double? = nil) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
@@ -288,21 +360,18 @@ struct ExifToolClient {
             process.standardError = stderrPipe
 
             let timeoutState = TimeoutState()
+            let completion = RunCompletionState(continuation: continuation)
+
+            DispatchQueue.global(qos: .utility).async {
+                completion.receiveStdout(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
+            }
+            DispatchQueue.global(qos: .utility).async {
+                completion.receiveStderr(stderrPipe.fileHandleForReading.readDataToEndOfFile())
+            }
 
             process.terminationHandler = { finished in
                 let didTimeOut = timeoutState.cancelAndCheckTimedOut()
-                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                if didTimeOut {
-                    continuation.resume(throwing: ExifToolError.timedOut)
-                    return
-                }
-                guard finished.terminationStatus == 0 else {
-                    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                    let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-                    continuation.resume(throwing: ExifToolError.processFailed(status: finished.terminationStatus, stderr: stderr))
-                    return
-                }
-                continuation.resume(returning: stdoutData)
+                completion.receiveTermination(status: finished.terminationStatus, didTimeOut: didTimeOut)
             }
 
             do {

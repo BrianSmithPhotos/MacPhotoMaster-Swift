@@ -8,14 +8,27 @@ import MLXVLM
 /// against — keep it in sync with `AIModelSelection.presets` by hand; nothing enforces that link
 /// at compile time.
 ///
-/// Values come from `VLMRegistry.shared`'s curated static configurations rather than constructing
-/// `ModelConfiguration(id:)` directly, so this allowlist inherits the same EOS-token overrides
-/// mlx-swift-lm ships for each model.
+/// Where `VLMRegistry.shared` has a matching curated static configuration, values come from there
+/// so this allowlist inherits the same EOS-token overrides mlx-swift-lm ships for each model. For
+/// repos `VLMRegistry` doesn't carry (e.g. community fine-tunes), a `ModelConfiguration(id:)`
+/// literal is constructed directly here, matching the `extraEOSTokens`/`defaultPrompt` convention
+/// the library uses for other models sharing the same architecture. Either way, the dictionary key
+/// is just a lookup label — it's the `ModelConfiguration`'s own `id` that determines what actually
+/// downloads, so a key and its value's `id` must refer to the same HF repo.
 enum MLXModelRegistry {
     static let configurations: [String: ModelConfiguration] = [
-        "mlx-community/Qwen2.5-VL-3B-Instruct-4bit": VLMRegistry.qwen2_5VL3BInstruct4Bit,
-        "mlx-community/Qwen3-VL-4B-Instruct-8bit": VLMRegistry.qwen3VL4BInstruct8Bit,
         "mlx-community/gemma-3-12b-it-qat-4bit": VLMRegistry.gemma3_12B_qat_4bit,
+        "mlx-community/gemma-4-26b-a4b-it-4bit": VLMRegistry.gemma4_26BA4B_it_4bit,
+        "mlx-community/Qwen3.6-35B-A3B-4.4bit-msq": ModelConfiguration(
+            id: "mlx-community/Qwen3.6-35B-A3B-4.4bit-msq",
+            defaultPrompt: "Describe the image in English",
+            extraEOSTokens: ["<|im_end|>"]
+        ),
+        "mlx-community/Ornith-1.0-35B-bf16": ModelConfiguration(
+            id: "mlx-community/Ornith-1.0-35B-bf16",
+            defaultPrompt: "Describe the image in English",
+            extraEOSTokens: ["<|im_end|>"]
+        ),
     ]
 
     static func configuration(for modelID: String) -> ModelConfiguration? {

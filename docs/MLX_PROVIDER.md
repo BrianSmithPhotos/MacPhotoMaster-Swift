@@ -39,16 +39,24 @@ for the public `mlx-community/*` repos this app uses.
 .ensureVisionCapable` and `MLXModelManager` resolve against, keyed by the exact Hugging Face repo id
 used after the `mlx:` prefix in `AIModelSelection`. Keep it in sync with
 `AIModelSelection.presets`'s `mlx:` entries by hand — nothing enforces that link at compile time.
+Where `VLMRegistry.shared` has a matching curated static, the entry reuses it; where it doesn't
+(community fine-tunes not shipped by mlx-swift-lm), the entry is a `ModelConfiguration(id:)` literal
+built directly against the real HF repo id — either way the dictionary key and the value's `id` must
+name the same repo, since it's the `id` that's actually downloaded, not the key.
 
 | HF repo id | Size | Notes |
 |---|---|---|
-| `mlx-community/Qwen2.5-VL-3B-Instruct-4bit` | ~2 GB | Smallest/fastest — good first-download choice |
-| `mlx-community/Qwen3-VL-4B-Instruct-8bit` | ~4-5 GB | Recommended default `mlx:` preset |
-| `mlx-community/gemma-3-12b-it-qat-4bit` | ~7 GB | "Quality" option, slower |
+| `mlx-community/gemma-3-12b-it-qat-4bit` | ~7 GB | Manually verified: loads and returns a description, though accuracy was mediocre |
+| `mlx-community/gemma-4-26b-a4b-it-4bit` | ~15 GB | Untested as of this writing |
+| `mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` | ~21 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static; untested as of this writing |
+| `mlx-community/Ornith-1.0-35B-bf16` | ~70 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static; untested as of this writing |
 
-Larger `VLMRegistry` entries (27B/35B) are reachable by typing the id directly in the free-text
-model field but are intentionally left out of the curated preset list — large download, slower
-iteration for what's meant to stay a learning exercise.
+**Removed from the preset list after manual testing**: `mlx-community/Qwen2.5-VL-3B-Instruct-4bit`
+and `mlx-community/Qwen3-VL-4B-Instruct-8bit` both returned an empty response (never a crash) against
+a real photo — the smaller Qwen2/2.5/3-VL models in this mlx-swift-lm version appear to hit this
+regardless of prompt content. Root cause not yet investigated (would need to trace `Qwen25VL.swift`/
+`Qwen3VL.swift`'s processor/generation path against a live repro). Both ids are still reachable by
+typing them directly into the free-text model field if this is worth revisiting later.
 
 ## Known v1 limitations
 

@@ -9,10 +9,13 @@ in this one.
 ## Requirements
 
 - macOS 14+
-- Xcode (recommended, for SwiftUI Previews and eventual entitlements/signing) or the Swift toolchain
-  via Xcode Command Line Tools (`xcode-select --install`) if working from another editor.
+- Xcode (recommended, for SwiftUI Previews) or the Swift toolchain via Xcode Command Line Tools
+  (`xcode-select --install`) if working from another editor.
 - [`exiftool`](https://exiftool.org/) on `PATH` (`brew install exiftool`) — all metadata read/write
   goes through it, same as the Python sibling app.
+- Optional, for AI-assisted suggestions: a running [Ollama](https://ollama.com) server with a
+  vision-capable model, and/or an [OpenRouter](https://openrouter.ai) API key (read from the
+  process environment — see `docs/SPEC.md` §6).
 
 ## Getting started
 
@@ -25,13 +28,36 @@ swift test
 ```
 
 `swift run` launches the app as a plain process (no `.app` bundle yet — no custom icon/Dock
-identity). That's fine for early development; packaging as a proper signed `.app` is a later step,
-likely via an actual Xcode project once there's entitlements (sandboxed file access, network) to
-configure.
+identity, and no stable code-signing identity across rebuilds). That's fine for day-to-day
+development, but it means macOS privacy grants (e.g. Files and Folders access to a Google Drive
+folder for Timeline sync) tied to the ad-hoc signature can need re-granting after a rebuild.
+Packaging as a proper signed `.app` is a later step.
 
 ## Status
 
-Skeleton stage: a three-pane `NavigationSplitView` shell (source / preview / metadata, matching
-`docs/SPEC.md` §1) and one working service (`ExifToolClient`, wrapping the `exiftool` binary) to
-prove out the Process/async I/O pattern described in `docs/ARCHITECTURE.md`. Everything else in
-`docs/SPEC.md` is still to build.
+Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works end to end:
+
+- **Source browsing** (§1): folder navigation, capture-set grouping (RAW+JPEG pairs grouped by
+  capture timestamp), a Stacked thumbnail grid, capture-group-aware multi-select, and a preview
+  filmstrip with ring-selection. Skip/un-skip is persisted per folder, with an Active/Skipped
+  segmented filter to review and restore skipped items.
+- **Metadata read/write** (§2–3): full EXIF/IPTC/XMP read and dual-tag write via `ExifToolClient`,
+  batched across files, idempotent keyword writes, and save scopes for a single file, a capture
+  set, or the current manual selection.
+- **Rename** (§4): deterministic destination filenames, including the in-camera art-filter token
+  parsed from maker notes.
+- **Process & move** (§5): verified copy (size + SHA-256) to a library folder routed by file type.
+  Auto-skipping successfully processed files (per `docs/SPEC.md` §5) isn't wired yet.
+- **AI-assisted suggestions** (§6): pluggable provider interface with both a local Ollama backend
+  and an OpenRouter backend, vision pre-check, retry-with-crop fallback, and group-aware
+  description/keyword application.
+- **GPS enrichment from Google Timeline** (§7): Drive-synced `Timeline.json` imported idempotently
+  into a local GRDB/SQLite cache, nearest-timestamp matching within a bounded window, ground-truth
+  elevation lookup (never trusting Timeline altitude), and reverse geocoding for location keywords
+  and AI prompt context. Sync runs on launch, on folder navigation, and via a manual "Refresh
+  Timeline" button in Settings (Cmd+,).
+- A native, read-only `NativeMetadataReader` (ImageIO-based) exists alongside `ExifToolClient` as a
+  faster-path prototype for reads/previews — see its header doc for scope.
+
+Not yet built: a packaged `.app` bundle with stable signing/entitlements, and the deferred items
+noted in `CLAUDE.md` (ImageIO metadata write-back, local MLX inference).

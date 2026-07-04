@@ -47,9 +47,12 @@ name the same repo, since it's the `id` that's actually downloaded, not the key.
 | HF repo id | Size | Notes |
 |---|---|---|
 | `mlx-community/gemma-3-12b-it-qat-4bit` | ~7 GB | Manually verified: loads and returns a description, though accuracy was mediocre |
+| `mlx-community/gemma-3-27b-it-qat-4bit` | ~16 GB | Untested as of this writing — `VLMRegistry` static, no registry work needed |
 | `mlx-community/gemma-4-26b-a4b-it-4bit` | ~15 GB | Untested as of this writing |
-| `mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` | ~21 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static; untested as of this writing |
+| `mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` | ~21 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static. Manually verified: loads and returns a usable (imperfect) description, noticeably slower than gemma-3-12b |
 | `mlx-community/Ornith-1.0-35B-bf16` | ~70 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static; untested as of this writing |
+| `mlx-community/Qwen3-VL-8B-Instruct-4bit` | ~5 GB | `ModelConfiguration(id:)` literal. One size up from the 4B that returned empty (below) — untested whether that carries over |
+| `mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit` | ~13 GB | `ModelConfiguration(id:)` literal, `mistral3` architecture — a different vision-model family entirely, not Qwen/Gemma-derived. Untested as of this writing |
 
 **Removed from the preset list after manual testing**: `mlx-community/Qwen2.5-VL-3B-Instruct-4bit`
 and `mlx-community/Qwen3-VL-4B-Instruct-8bit` both returned an empty response (never a crash) against
@@ -57,6 +60,15 @@ a real photo — the smaller Qwen2/2.5/3-VL models in this mlx-swift-lm version 
 regardless of prompt content. Root cause not yet investigated (would need to trace `Qwen25VL.swift`/
 `Qwen3VL.swift`'s processor/generation path against a live repro). Both ids are still reachable by
 typing them directly into the free-text model field if this is worth revisiting later.
+
+**Researched and deliberately excluded — would fail to load, not just be slow**: any
+`Qwen3-VL-30B-A3B-*`/`Qwen3-VL-235B-A22B-*` variant and `mlx-community/GLM-4.5V-3bit`. Checked each
+repo's `config.json` directly: these report `model_type: "qwen3_vl_moe"` and `"glm4v_moe"`
+respectively, and `VLMTypeRegistry.shared` in this pinned mlx-swift-lm version (3.31.4) only
+registers dense `"qwen3_vl"` and a narrower `"glm_ocr"` type — neither MoE variant has a matching
+entry, so `#huggingFaceLoadModelContainer` would throw an unrecognized-architecture error before any
+inference. Worth revisiting only if a future mlx-swift-lm bump adds `"qwen3_vl_moe"`/`"glm4v_moe"` to
+`VLMTypeRegistry`.
 
 ## Known v1 limitations
 
@@ -83,7 +95,7 @@ typing them directly into the free-text model field if this is worth revisiting 
 
 1. `swift build`, then `swift run`.
 2. In the AI Model field, pick or type an `mlx:` preset (e.g.
-   `mlx:mlx-community/Qwen2.5-VL-3B-Instruct-4bit` — smallest, fastest first download).
+   `mlx:mlx-community/gemma-3-12b-it-qat-4bit` — smallest currently-preset, fastest first download).
 3. Select a photo, click "Suggest Description + Keywords".
 4. First run against a new model downloads it to `~/.cache/huggingface` — this can take a while with
    no progress indicator (see limitations above); subsequent runs against the same model are fast.

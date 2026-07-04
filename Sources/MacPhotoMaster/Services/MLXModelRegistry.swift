@@ -18,6 +18,7 @@ import MLXVLM
 enum MLXModelRegistry {
     static let configurations: [String: ModelConfiguration] = [
         "mlx-community/gemma-3-12b-it-qat-4bit": VLMRegistry.gemma3_12B_qat_4bit,
+        "mlx-community/gemma-3-27b-it-qat-4bit": VLMRegistry.gemma3_27B_qat_4bit,
         "mlx-community/gemma-4-26b-a4b-it-4bit": VLMRegistry.gemma4_26BA4B_it_4bit,
         "mlx-community/Qwen3.6-35B-A3B-4.4bit-msq": ModelConfiguration(
             id: "mlx-community/Qwen3.6-35B-A3B-4.4bit-msq",
@@ -28,6 +29,14 @@ enum MLXModelRegistry {
             id: "mlx-community/Ornith-1.0-35B-bf16",
             defaultPrompt: "Describe the image in English",
             extraEOSTokens: ["<|im_end|>"]
+        ),
+        "mlx-community/Qwen3-VL-8B-Instruct-4bit": ModelConfiguration(
+            id: "mlx-community/Qwen3-VL-8B-Instruct-4bit",
+            defaultPrompt: "Describe the image in English",
+            extraEOSTokens: ["<|im_end|>"]
+        ),
+        "mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit": ModelConfiguration(
+            id: "mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit"
         ),
     ]
 

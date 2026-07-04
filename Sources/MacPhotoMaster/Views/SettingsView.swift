@@ -1,9 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// App preferences (Cmd+,). Currently just the process/move destination root (docs/SPEC.md §5) —
-/// a "set once, rarely change" value, so it lives in its own Settings scene rather than a header
-/// button in the main window.
+/// App preferences (Cmd+,). Currently the process/move destination root (docs/SPEC.md §5) and the
+/// manual Timeline Drive-sync trigger — both "rarely touched" actions, so they live in their own
+/// Settings scene rather than a header button in the main window.
 struct SettingsView: View {
     @ObservedObject var viewModel: SourceBrowserViewModel
     @State private var isChoosingFolder = false
@@ -17,6 +17,18 @@ struct SettingsView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Button("Choose…") { isChoosingFolder = true }
+                }
+            }
+
+            LabeledContent("Timeline") {
+                VStack(alignment: .trailing, spacing: 4) {
+                    Button("Refresh Timeline") { Task { await viewModel.refreshTimeline() } }
+                        .disabled(viewModel.isSyncingTimeline)
+                    if let message = viewModel.timelineSyncStatusMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }

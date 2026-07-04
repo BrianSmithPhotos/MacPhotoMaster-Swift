@@ -83,9 +83,18 @@ final class SourceBrowserViewModel: ObservableObject {
 
     /// Status text for the Timeline-derived GPS suggestion (docs/SPEC.md §7) shown under the
     /// lat/long fields — e.g. "Nearest GPS 3m 20s away (GPS, accuracy 12m)". Set by
-    /// `suggestGPSIfNeeded()`; there's no equivalent surface for the background Drive sync itself,
-    /// which stays silent on success just like the reference app.
+    /// `suggestGPSIfNeeded()` or by reverse-geocode keyword lookup; cleared on every selection
+    /// change by `loadEditBuffer()` so a message from one photo never lingers under another.
     @Published var gpsSuggestionStatusMessage: String?
+
+    /// True while a manually-triggered `refreshTimeline()` Drive sync/import is in flight —
+    /// disables the "Refresh Timeline" button so it can't be fired twice concurrently.
+    @Published private(set) var isSyncingTimeline = false
+
+    /// Result text for a manually-triggered `refreshTimeline()` — e.g. "Imported 214 Timeline
+    /// points." or "Timeline is already up to date." The silent per-launch/per-folder-load sync
+    /// (`syncAndImportTimelineIfNeeded()`) never touches this; it's only for the explicit button.
+    @Published var timelineSyncStatusMessage: String?
 
     /// True while `refreshAltitude()` has an elevation lookup in flight — disables the manual
     /// refresh button so a slow/timed-out USGS EPQS call can't be fired twice concurrently.
@@ -161,8 +170,9 @@ final class SourceBrowserViewModel: ObservableObject {
         }
         let sourceRootPath =
             UserDefaults.standard.string(forKey: Self.sourceRootDefaultsKey) ?? Self.defaultSourceRootPath
+        // `openFolder` -> `load(_:)` already triggers `syncAndImportTimelineIfNeeded()`, covering
+        // the launch-time sync too.
         openFolder(at: URL(fileURLWithPath: sourceRootPath))
-        Task { await syncAndImportTimelineIfNeeded() }
     }
 
     /// Called from the library-folder picker, both on first pick and on later changes.
@@ -216,6 +226,7 @@ final class SourceBrowserViewModel: ObservableObject {
     private func load(_ folderURL: URL) {
         isLoading = true
         loadErrorMessage = nil
+        Task { await syncAndImportTimelineIfNeeded() }
         Task {
             defer { isLoading = false }
             do {
@@ -422,18 +433,24 @@ final class SourceBrowserViewModel: ObservableObject {
         }
     }
 
-    /// Silently copies down a fresher `Timeline.json` from Google Drive (if present) and imports it
-    /// into `timelineCache`, mirroring the reference app's launch-time sync — see docs/SPEC.md §7
-    /// and `TimelineDriveSync`'s doc comment for why this has no UI surface at all, success or
-    /// failure. Best-effort: any failure here just means GPS suggestions stay unavailable until the
-    /// next launch, not a user-facing error.
-    private func syncAndImportTimelineIfNeeded() async {
-        guard let localCopyPath = try? TimelineDriveSync.resolveLocalCopyPath() else { return }
+    private enum TimelineSyncOutcome {
+        case imported(sampleCount: Int)
+        case upToDate
+        case sourceNotFound
+        case failed
+    }
+
+    /// Copies down a fresher `Timeline.json` from Google Drive (if present) and imports it into
+    /// `timelineCache` when its (path, size, mtime) signature has changed — see docs/SPEC.md §7 and
+    /// `TimelineLocationCache.isImportNeeded`. Shared by the silent per-launch/per-folder-load sync
+    /// (`syncAndImportTimelineIfNeeded()`) and the explicit `refreshTimeline()` button action.
+    private func performTimelineSync() async -> TimelineSyncOutcome {
+        guard let localCopyPath = try? TimelineDriveSync.resolveLocalCopyPath() else { return .failed }
         if let driveSourcePath = TimelineDriveSync.resolveDriveSourcePath() {
             _ = try? TimelineDriveSync.syncIfNewer(driveSource: driveSourcePath, localCopy: localCopyPath)
         }
-        guard FileManager.default.fileExists(atPath: localCopyPath.path) else { return }
-        guard let cache = await ensureTimelineCache() else { return }
+        guard FileManager.default.fileExists(atPath: localCopyPath.path) else { return .sourceNotFound }
+        guard let cache = await ensureTimelineCache() else { return .failed }
 
         do {
             let attributes = try FileManager.default.attributesOfItem(atPath: localCopyPath.path)
@@ -445,15 +462,42 @@ final class SourceBrowserViewModel: ObservableObject {
                 try await cache.isImportNeeded(
                     sourcePath: localCopyPath.path, sourceSize: size,
                     sourceModificationNanoseconds: modificationNanoseconds)
-            else { return }
+            else { return .upToDate }
 
             let samples = try timelineImportParser.parseSamples(fromFileAt: localCopyPath)
             let sha256 = try FileHashing.sha256(of: localCopyPath)
             try await cache.importSamples(
                 samples, sourcePath: localCopyPath.path, sourceSize: size,
                 sourceModificationNanoseconds: modificationNanoseconds, sourceSHA256: sha256)
+            return .imported(sampleCount: samples.count)
         } catch {
-            return
+            return .failed
+        }
+    }
+
+    /// Silent best-effort Timeline sync/import called from `init` and from every `load(_:)` (i.e.
+    /// on folder open/navigate), so replacing `Timeline.json` on Drive mid-session doesn't require
+    /// an app relaunch to be picked up. Failure just means GPS suggestions stay unavailable, not a
+    /// user-facing error — see `TimelineDriveSync`'s doc comment.
+    private func syncAndImportTimelineIfNeeded() async {
+        _ = await performTimelineSync()
+    }
+
+    /// Explicit "Refresh Timeline" button action — runs the same sync/import as
+    /// `syncAndImportTimelineIfNeeded()` but reports the outcome via `timelineSyncStatusMessage`
+    /// instead of staying silent, since a user pressing a button expects to see what happened.
+    func refreshTimeline() async {
+        isSyncingTimeline = true
+        defer { isSyncingTimeline = false }
+        switch await performTimelineSync() {
+        case .imported(let sampleCount):
+            timelineSyncStatusMessage = "Imported \(sampleCount) Timeline point(s)."
+        case .upToDate:
+            timelineSyncStatusMessage = "Timeline is already up to date."
+        case .sourceNotFound:
+            timelineSyncStatusMessage = "No Timeline.json found."
+        case .failed:
+            timelineSyncStatusMessage = "Timeline refresh failed."
         }
     }
 
@@ -696,8 +740,12 @@ final class SourceBrowserViewModel: ObservableObject {
 
     /// Resets the metadata edit buffer to `selectedAsset`'s current field values (or clears it when
     /// nothing's selected) — called from `selectedAssetID`'s `didSet` so the form always reflects
-    /// whichever photo is currently shown large.
+    /// whichever photo is currently shown large. Also clears `gpsSuggestionStatusMessage`, since
+    /// it's a shared status line for both the Timeline-GPS-suggestion and reverse-geocode-keyword
+    /// features — without this it would keep showing the previous photo's message (e.g. a geocoded
+    /// location) for a newly selected photo that has no GPS at all.
     private func loadEditBuffer() {
+        gpsSuggestionStatusMessage = nil
         guard let asset = selectedAsset else {
             editableDescription = ""
             editableKeywords = ""

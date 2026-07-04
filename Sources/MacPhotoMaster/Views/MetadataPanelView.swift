@@ -143,6 +143,13 @@ struct MetadataPanelView: View {
                     viewModel.saveMetadata(scope: .captureSet(captureSet))
                 }
                 .disabled(viewModel.selectedCaptureSet == nil || viewModel.isSavingMetadata)
+
+                Button("Save (Current Selection)") {
+                    let assets = viewModel.manualSelectionAssets
+                    guard !assets.isEmpty else { return }
+                    viewModel.saveMetadata(scope: .manualSelection(assets))
+                }
+                .disabled(!viewModel.hasCurrentSelection || viewModel.isSavingMetadata)
             }
 
             if let saveStatusMessage = viewModel.saveStatusMessage {

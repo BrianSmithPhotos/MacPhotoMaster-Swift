@@ -59,8 +59,9 @@ deterministically, and copy files into local storage.
 
 - Idempotent keyword writes — re-saving must not duplicate existing keywords.
 - Roll back cleanly if the underlying `exiftool` write fails partway.
-- Save scopes: single file, or a full capture set (propagates the same edited fields to every
-  member).
+- Save scopes: single file, a full capture set, or the current manual selection (propagates the
+  same edited fields to every member of every selected capture set — see §5's `.manualSelection`
+  scope, which this reuses).
 - When saving a capture set, files sharing identical write values (the common case: same
   description/keywords/GPS across the set) should be written in one batched `exiftool` invocation
   instead of one per file — see docs/ARCHITECTURE.md "exiftool integration". Files needing a
@@ -120,9 +121,11 @@ deterministically, and copy files into local storage.
 
 ## 7. GPS enrichment from Timeline export
 
-- Source: a Google Timeline JSON export, imported idempotently into a local SQLite cache (via
-  GRDB.swift — see `TimelineLocationCache`) keyed by a normalized record identity, so re-imports
-  don't duplicate rows.
+- Source: a Google Timeline JSON export, synced down from Google Drive and imported idempotently
+  into a local SQLite cache (via GRDB.swift — see `TimelineLocationCache`) keyed by a normalized
+  record identity, so re-imports don't duplicate rows. The sync/import check runs on app launch,
+  on every folder open/navigate, and on demand via the "Refresh Timeline" button, so a
+  `Timeline.json` replaced mid-session is picked up without relaunching.
 - Matching: nearest-timestamp lookup, but **only within a bounded window** (30 minutes in the
   reference app — tune based on real coverage density). No match within the window → leave GPS
   blank; never guess.

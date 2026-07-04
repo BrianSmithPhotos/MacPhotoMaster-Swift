@@ -1,9 +1,12 @@
 import Foundation
 
 /// Copies a fresher `Timeline.json` from Google Drive over the local working copy, mirroring the
-/// reference app's `TimelineSyncService` exactly (see docs/SPEC.md §7) — no settings UI, no manual
-/// trigger, just a silent background check on every launch. Path resolution is split from the copy
-/// itself so it's unit-testable without touching `~/Library/CloudStorage`.
+/// reference app's `TimelineSyncService` (see docs/SPEC.md §7) — no settings UI for the Drive/local
+/// paths themselves, but the check now runs on every launch *and* folder open/navigate
+/// (`SourceBrowserViewModel.load(_:)`), plus on demand via the "Refresh Timeline" button
+/// (`SourceBrowserViewModel.refreshTimeline()`), so replacing `Timeline.json` mid-session doesn't
+/// require a relaunch. Path resolution is split from the copy itself so it's unit-testable without
+/// touching `~/Library/CloudStorage`.
 enum TimelineDriveSync {
     private static let driveGlobDirectoryPrefix = "GoogleDrive-"
     private static let driveGlobSuffixComponents = ["My Drive", "AI", "Gps", "Timeline.json"]

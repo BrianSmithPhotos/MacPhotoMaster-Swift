@@ -126,6 +126,7 @@ final class SourceBrowserViewModel: ObservableObject {
     private let reverseGeocodeService = ReverseGeocodeService()
     private let ollamaProvider: AIProvider = OllamaProvider()
     private let openRouterProvider: AIProvider = OpenRouterProvider()
+    private let mlxProvider: AIProvider = MLXNativeProvider()
     private let aiSuggestionService = AISuggestionService()
 
     /// Reverse-geocode context text (docs/SPEC.md §6/§7), keyed by capture-set representative id so
@@ -649,10 +650,15 @@ final class SourceBrowserViewModel: ObservableObject {
         guard !isSuggestingAI, let id = selectedAssetID else { return }
         guard let selection = AIModelSelection.parse(aiModelText) else {
             aiStatusMessage =
-                "Invalid AI model — expected \"ollama:<model>\" or \"openrouter:<model>\""
+                "Invalid AI model — expected \"ollama:<model>\", \"openrouter:<model>\", or \"mlx:<model>\""
             return
         }
-        let provider: AIProvider = selection.providerID == .ollama ? ollamaProvider : openRouterProvider
+        let provider: AIProvider
+        switch selection.providerID {
+        case .ollama: provider = ollamaProvider
+        case .openRouter: provider = openRouterProvider
+        case .mlx: provider = mlxProvider
+        }
 
         let targetAssets: [PhotoAsset]
         let sourceSetMembers: [PhotoAsset]

@@ -4,6 +4,7 @@ import Foundation
 enum AIProviderID: String {
     case ollama
     case openRouter = "openrouter"
+    case mlx
 }
 
 /// Parses the `"<provider>:<model>"` convention `SourceBrowserViewModel.aiModelText` uses (e.g.
@@ -41,5 +42,8 @@ struct AIModelSelection {
         "openrouter:mistralai/mistral-medium-3-5",
         "ollama:gemma4:12b",
         "ollama:moondream:latest",
+        "mlx:mlx-community/Qwen3-VL-4B-Instruct-8bit",
+        "mlx:mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
+        "mlx:mlx-community/gemma-3-12b-it-qat-4bit",
     ]
 }

@@ -677,11 +677,25 @@ final class SourceBrowserViewModel: ObservableObject {
     /// global taxonomy, and stores the formatted candidate list for `suggestAI()` to pass along.
     /// No-ops without a `stateRegionCode` (Nominatim didn't report one for this coordinate) or if the
     /// eBird cache can't be opened; any other failure here just means the AI prompt goes out without
-    /// a candidate list, matching `lookupLocationKeywordsIfNeeded`'s best-effort posture.
+    /// a candidate list, matching `lookupLocationKeywordsIfNeeded`'s best-effort posture. Every
+    /// no-op path logs why — a silent no-op here previously cost a debugging session tracing a
+    /// fabricated species name back to a missing `EBIRD_API_KEY` in the run process's environment
+    /// (Xcode/Dock-launched processes don't inherit a shell's `.zshrc` exports).
     private func lookupBirdCandidates(
         representativeID: PhotoAsset.ID, county: String, stateRegionCode: String?
     ) async {
-        guard let stateRegionCode, let cache = await ensureEBirdCache() else { return }
+        guard let stateRegionCode else {
+            Self.ebirdLogger.log("Bird candidates skipped: no eBird state region code for this location")
+            return
+        }
+        guard ProcessInfo.processInfo.environment["EBIRD_API_KEY"] != nil else {
+            Self.ebirdLogger.log("Bird candidates skipped: EBIRD_API_KEY not set in this process's environment")
+            return
+        }
+        guard let cache = await ensureEBirdCache() else {
+            Self.ebirdLogger.log("Bird candidates skipped: could not open EBirdCache")
+            return
+        }
 
         var regionCode = stateRegionCode
         if !county.isEmpty,
@@ -690,15 +704,31 @@ final class SourceBrowserViewModel: ObservableObject {
             let matched = EBirdCandidateFormatting.matchRegion(countyName: county, in: regions)
         {
             regionCode = matched.code
+        } else {
+            Self.ebirdLogger.log(
+                "Bird candidates: county \(county, privacy: .public) not resolved, falling back to state region \(stateRegionCode, privacy: .public)"
+            )
         }
 
-        guard let codes = await birdSpeciesCodes(forRegionCode: regionCode, cache: cache),
-            let taxonomy = await birdTaxonomyEntries(forSpeciesCodes: codes, cache: cache)
-        else { return }
+        guard let codes = await birdSpeciesCodes(forRegionCode: regionCode, cache: cache) else {
+            Self.ebirdLogger.log(
+                "Bird candidates skipped: species-code fetch failed for region=\(regionCode, privacy: .public)"
+            )
+            return
+        }
+        guard let taxonomy = await birdTaxonomyEntries(forSpeciesCodes: codes, cache: cache) else {
+            Self.ebirdLogger.log("Bird candidates skipped: taxonomy fetch failed")
+            return
+        }
 
         let candidateList = EBirdCandidateFormatting.buildCandidateList(
             speciesCodes: codes, taxonomy: taxonomy, limit: Self.birdCandidateListLimit)
-        guard !candidateList.isEmpty else { return }
+        guard !candidateList.isEmpty else {
+            Self.ebirdLogger.log(
+                "Bird candidates skipped: 0 taxonomy matches for \(codes.count, privacy: .public) species codes in region=\(regionCode, privacy: .public)"
+            )
+            return
+        }
         birdCandidateSpeciesByRepresentativeID[representativeID] = candidateList
         Self.ebirdLogger.log(
             "Bird candidates: region=\(regionCode, privacy: .public) speciesCodes=\(codes.count, privacy: .public) matched=\(taxonomy.count, privacy: .public)"

@@ -62,6 +62,14 @@ struct MetadataPanelView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    if let aiEvaluatedImage = viewModel.aiEvaluatedImage {
+                        LabeledContent("Evaluated") {
+                            Image(decorative: aiEvaluatedImage, scale: 1, orientation: .up)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxHeight: 160)
+                        }
+                    }
                     LabeledContent("Camera", value: asset.cameraModel)
                     LabeledContent("Lens", value: asset.lensModel)
                     LabeledContent("Aperture", value: asset.aperture)

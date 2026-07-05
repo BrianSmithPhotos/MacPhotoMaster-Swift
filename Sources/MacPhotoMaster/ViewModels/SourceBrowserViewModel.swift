@@ -114,6 +114,10 @@ final class SourceBrowserViewModel: ObservableObject {
     /// the Suggest button so a slow local-model response can't be fired twice concurrently.
     @Published private(set) var isSuggestingAI = false
     @Published var aiStatusMessage: String?
+    /// The exact image the last `suggestAI()` call sent to the model (post `SubjectIsolationService`
+    /// crop, when one was found) — shown in the Metadata panel so a misidentification is diagnosable
+    /// (was the model looking at the subject, or a diluted full frame?).
+    @Published private(set) var aiEvaluatedImage: CGImage?
 
     private let loader = PhotoAssetLoader()
     private let folderBrowser = FolderBrowser()
@@ -689,19 +693,25 @@ final class SourceBrowserViewModel: ObservableObject {
         defer { isSuggestingAI = false }
         do {
             let cgImage = try await NativeMetadataReader().extractPreviewAsync(at: sourceAsset.url)
+            let evaluatedImage = SubjectIsolationService.isolateSubject(in: cgImage) ?? cgImage
+            guard selectedAssetID == id else { return }
+            aiEvaluatedImage = evaluatedImage
             let result = try await aiSuggestionService.suggest(
-                provider: provider, model: selection.modelName, image: cgImage,
+                provider: provider, model: selection.modelName, image: evaluatedImage,
                 existingDescription: editableDescription, existingKeywords: editableKeywords,
                 locationContext: locationContext)
             guard selectedAssetID == id else { return }
             editableDescription = result.description
             editableKeywords = result.keywords.joined(separator: ", ")
+            aiEvaluatedImage = result.evaluatedImage
+            let categorySuffix = result.sceneCategory == .other ? "" : " [\(result.sceneCategory.rawValue)]"
             aiStatusMessage =
-                result.timeoutRetrySucceeded ? "Suggested (after retry); saving…" : "Suggested; saving…"
+                (result.timeoutRetrySucceeded ? "Suggested (after retry)" : "Suggested")
+                + categorySuffix + "; saving…"
             let saveStatus = await performSave(scope: .manualSelection(targetAssets))
             guard selectedAssetID == id else { return }
             if let saveStatus {
-                aiStatusMessage = "Suggested; \(saveStatus)"
+                aiStatusMessage = "Suggested\(categorySuffix); \(saveStatus)"
             }
         } catch {
             guard selectedAssetID == id else { return }

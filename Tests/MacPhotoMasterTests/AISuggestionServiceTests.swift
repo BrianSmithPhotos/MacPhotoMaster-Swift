@@ -62,6 +62,40 @@ final class AISuggestionServiceTests: XCTestCase {
         XCTAssertNil(AISuggestionService.parse(text))
     }
 
+    // MARK: - buildUserPrompt / scene category
+
+    func testBuildUserPromptForOtherCategoryUsesGenericWordLimitButStillIncludesSpeciesInstruction() {
+        let prompt = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .other)
+
+        XCTAssertTrue(prompt.contains("at most 30 words"))
+        // Species-ID instructions are always sent (phrased conditionally) since Vision's triage
+        // confidence isn't reliable enough to gate them on — see AISuggestionService's doc comment.
+        XCTAssertTrue(prompt.contains("If the primary subject is a bird"))
+        XCTAssertTrue(prompt.contains("Latin binomial"))
+        XCTAssertTrue(prompt.contains("never invent one"))
+    }
+
+    func testBuildUserPromptForBirdCategoryUsesHigherWordLimit() {
+        let prompt = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .bird)
+
+        XCTAssertTrue(prompt.contains("at most 60 words"))
+        XCTAssertTrue(prompt.contains("If the primary subject is a bird"))
+        XCTAssertTrue(prompt.contains("Latin binomial"))
+        XCTAssertTrue(prompt.contains("never invent one"))
+    }
+
+    func testBuildUserPromptForFlowerCategoryUsesHigherWordLimit() {
+        let prompt = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .flower)
+
+        XCTAssertTrue(prompt.contains("at most 60 words"))
+        XCTAssertTrue(prompt.contains("If the primary subject is a flower or flowering plant"))
+        XCTAssertTrue(prompt.contains("Latin binomial"))
+        XCTAssertTrue(prompt.contains("never invent one"))
+    }
+
     // MARK: - suggest / fallback
 
     func testSuggestReturnsPrimaryResultWithoutRetryFlags() async throws {

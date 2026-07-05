@@ -177,6 +177,37 @@ final class AISuggestionServiceTests: XCTestCase {
         XCTAssertFalse(prompt.contains("Location context"))
     }
 
+    func testSuggestIncludesBirdCandidateSpeciesInPromptWhenProvided() async throws {
+        let provider = FakeAIProvider()
+        provider.chatResponses = [
+            .success(#"{"description": "A red bird on a branch.", "keywords": ["red bird", "branch"]}"#)
+        ]
+        let service = AISuggestionService()
+
+        _ = try await service.suggest(
+            provider: provider, model: "qwen3.6:35b", image: makeImage(), existingDescription: "",
+            existingKeywords: "",
+            birdCandidateSpecies: "Common Raven (Corvus corax), House Finch (Haemorhous mexicanus)")
+
+        let prompt = try XCTUnwrap(provider.userPromptsPerCall.first)
+        XCTAssertTrue(prompt.contains("Common Raven (Corvus corax), House Finch (Haemorhous mexicanus)"))
+    }
+
+    func testSuggestOmitsBirdCandidateSpeciesLineWhenBlank() async throws {
+        let provider = FakeAIProvider()
+        provider.chatResponses = [
+            .success(#"{"description": "A red bird on a branch.", "keywords": ["red bird", "branch"]}"#)
+        ]
+        let service = AISuggestionService()
+
+        _ = try await service.suggest(
+            provider: provider, model: "qwen3.6:35b", image: makeImage(), existingDescription: "",
+            existingKeywords: "")
+
+        let prompt = try XCTUnwrap(provider.userPromptsPerCall.first)
+        XCTAssertFalse(prompt.contains("verified as ever recorded"))
+    }
+
     func testSuggestPropagatesVisionCheckFailureWithoutSendingChat() async {
         let provider = FakeAIProvider()
         provider.visionCheckError = AISuggestionError.provider("not vision-capable")

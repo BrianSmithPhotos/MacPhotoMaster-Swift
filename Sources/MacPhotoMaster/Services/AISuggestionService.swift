@@ -29,17 +29,21 @@ struct AISuggestionService {
     /// once with a center-cropped, lower-effort request if the primary attempt times out or comes
     /// back empty (docs/SPEC.md §6's fallback chain). A retry failure, or any error other than a
     /// timeout/empty response, propagates directly — a real parse/provider error isn't worth
-    /// burning a second request on.
+    /// burning a second request on. `birdCandidateSpecies` is `SourceBrowserViewModel`'s eBird
+    /// region-species candidate list (see `EBirdCandidateFormatting`) — when non-empty, it gives the
+    /// model a verified list of species actually recorded near the photo's GPS fix, rather than
+    /// relying on free recall for the Latin binomial.
     func suggest(
         provider: AIProvider, model: String, image: CGImage, existingDescription: String,
-        existingKeywords: String, locationContext: String = ""
+        existingKeywords: String, locationContext: String = "", birdCandidateSpecies: String = ""
     ) async throws -> AISuggestionResult {
         try await provider.ensureVisionCapable(model: model)
 
         let category = SceneTriageService.classify(image)
         let userPrompt = Self.buildUserPrompt(
             existingDescription: existingDescription, existingKeywords: existingKeywords,
-            locationContext: locationContext, category: category)
+            locationContext: locationContext, category: category,
+            birdCandidateSpecies: birdCandidateSpecies)
 
         do {
             var result = try await requestAndParse(
@@ -90,7 +94,7 @@ struct AISuggestionService {
 
     static func buildUserPrompt(
         existingDescription: String, existingKeywords: String, locationContext: String,
-        category: SceneCategory
+        category: SceneCategory, birdCandidateSpecies: String = ""
     ) -> String {
         let descriptionWordLimit =
             category == .other ? genericDescriptionWordLimit : categorizedDescriptionWordLimit
@@ -135,6 +139,15 @@ struct AISuggestionService {
                     + "species that is native to or commonly recorded in that region over a visually "
                     + "similar species that isn't found there — only name the non-local species if "
                     + "field marks clearly rule out the locally expected one.")
+        }
+        let trimmedBirdCandidates = birdCandidateSpecies.trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        if !trimmedBirdCandidates.isEmpty {
+            lines.append(
+                "If the primary subject is a bird, it has been verified as ever recorded in this "
+                    + "location's eBird region. Strongly prefer a species from this list, using its "
+                    + "exact common and scientific name as given, over any other species: "
+                    + trimmedBirdCandidates)
         }
         return lines.joined(separator: "\n")
     }

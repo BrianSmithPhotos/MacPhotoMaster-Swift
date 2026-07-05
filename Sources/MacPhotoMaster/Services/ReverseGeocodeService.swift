@@ -12,6 +12,11 @@ struct ReverseGeocodeResult: Equatable {
     var city: String
     var county: String
     var state: String
+    /// Nominatim's `ISO3166-2-lvl4` field (e.g. `"US-CA"`) — happens to be exactly eBird's
+    /// subnational1 region-code format, so `EBirdSpeciesListService` reuses it directly rather than
+    /// deriving a country/state code some other way. `nil` when Nominatim doesn't report an
+    /// admin-level-4 boundary for the coordinate (some countries use a different admin level).
+    var stateRegionCode: String? = nil
 
     var keywordTokens: [String] {
         [city, county, state]
@@ -77,7 +82,9 @@ struct ReverseGeocodeService {
         guard !city.isEmpty || !county.isEmpty || !state.isEmpty else {
             throw ReverseGeocodeError.noLocationFound
         }
-        return ReverseGeocodeResult(city: city, county: county, state: state)
+        let stateRegionCode = address["ISO3166-2-lvl4"] as? String
+        return ReverseGeocodeResult(
+            city: city, county: county, state: state, stateRegionCode: stateRegionCode)
     }
 
     private static func firstNonEmpty(_ address: [String: Any], keys: [String]) -> String {

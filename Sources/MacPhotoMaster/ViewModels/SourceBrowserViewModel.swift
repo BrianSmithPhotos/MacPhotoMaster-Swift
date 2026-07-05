@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import os
 
 /// Holds the currently-browsed folder's capture sets and the current selection. Views bind to
 /// this via `@StateObject`/`@ObservedObject`; it owns no I/O itself — it kicks off `Service` calls
@@ -128,15 +129,22 @@ final class SourceBrowserViewModel: ObservableObject {
     private let timelineImportParser = TimelineImportParser()
     private let elevationService = ElevationLookupService()
     private let reverseGeocodeService = ReverseGeocodeService()
+    private let ebirdService = EBirdSpeciesListService()
     private let ollamaProvider: AIProvider = OllamaProvider()
     private let openRouterProvider: AIProvider = OpenRouterProvider()
     private let mlxProvider: AIProvider = MLXNativeProvider()
     private let aiSuggestionService = AISuggestionService()
+    private static let ebirdLogger = Logger(subsystem: "MacPhotoMaster", category: "EBirdSpecies")
 
     /// Reverse-geocode context text (docs/SPEC.md §6/§7), keyed by capture-set representative id so
     /// `suggestAI()` can pass along location context for whichever set it's sourcing the AI image
     /// from. Populated by `lookupLocationKeywordsIfNeeded()`.
     private var locationContextByRepresentativeID: [PhotoAsset.ID: String] = [:]
+    /// eBird candidate-species list text (see `EBirdCandidateFormatting`/`AISuggestionService`'s doc
+    /// comment for why), keyed the same way as `locationContextByRepresentativeID` and populated
+    /// alongside it since both come from the same GPS fix. Not part of docs/SPEC.md or the reference
+    /// app — added to improve wildlife identification accuracy beyond a single generic prompt.
+    private var birdCandidateSpeciesByRepresentativeID: [PhotoAsset.ID: String] = [:]
     /// Guards against re-querying Nominatim for the same capture set more than once per session —
     /// mirrors the reference app's `_geocode_auto_applied_paths`.
     private var geocodeAppliedRepresentativeIDs: Set<PhotoAsset.ID> = []
@@ -476,6 +484,20 @@ final class SourceBrowserViewModel: ObservableObject {
         }
     }
 
+    private var ebirdCache: EBirdCache?
+
+    private func ensureEBirdCache() async -> EBirdCache? {
+        if let ebirdCache { return ebirdCache }
+        do {
+            let databasePath = try AppSupportDirectory.url(forFileNamed: "ebird_cache.sqlite3")
+            let cache = try EBirdCache(databasePath: databasePath)
+            ebirdCache = cache
+            return cache
+        } catch {
+            return nil
+        }
+    }
+
     private enum TimelineSyncOutcome {
         case imported(sampleCount: Int)
         case upToDate
@@ -629,6 +651,9 @@ final class SourceBrowserViewModel: ObservableObject {
                 latitude: latitude, longitude: longitude)
         else { return }
         locationContextByRepresentativeID[representativeID] = result.contextText
+        await lookupBirdCandidates(
+            representativeID: representativeID, county: result.county,
+            stateRegionCode: result.stateRegionCode)
 
         let tokens = result.keywordTokens
         guard !tokens.isEmpty, selectedAssetID == id else { return }
@@ -639,6 +664,69 @@ final class SourceBrowserViewModel: ObservableObject {
         }
         editableKeywords = keywords.joined(separator: ", ")
         gpsSuggestionStatusMessage = "Added location keywords: \(tokens.joined(separator: ", "))"
+    }
+
+    private static let birdRegionSpeciesMaxAge: TimeInterval = 30 * 24 * 60 * 60
+    private static let birdTaxonomyMaxAge: TimeInterval = 90 * 24 * 60 * 60
+    /// Safety valve against prompt-token growth for the noisy state-level fallback case (a raw state
+    /// species list can exceed 1,000 codes) — see `EBirdCandidateFormatting.buildCandidateList`.
+    private static let birdCandidateListLimit = 500
+
+    /// Resolves `county` (falling back to the bare `stateRegionCode` when county resolution fails or
+    /// isn't available) to an eBird region code, fetches/caches that region's species list and the
+    /// global taxonomy, and stores the formatted candidate list for `suggestAI()` to pass along.
+    /// No-ops without a `stateRegionCode` (Nominatim didn't report one for this coordinate) or if the
+    /// eBird cache can't be opened; any other failure here just means the AI prompt goes out without
+    /// a candidate list, matching `lookupLocationKeywordsIfNeeded`'s best-effort posture.
+    private func lookupBirdCandidates(
+        representativeID: PhotoAsset.ID, county: String, stateRegionCode: String?
+    ) async {
+        guard let stateRegionCode, let cache = await ensureEBirdCache() else { return }
+
+        var regionCode = stateRegionCode
+        if !county.isEmpty,
+            let regions = try? await ebirdService.fetchSubnational2Regions(
+                parentCode: stateRegionCode),
+            let matched = EBirdCandidateFormatting.matchRegion(countyName: county, in: regions)
+        {
+            regionCode = matched.code
+        }
+
+        guard let codes = await birdSpeciesCodes(forRegionCode: regionCode, cache: cache),
+            let taxonomy = await birdTaxonomyEntries(forSpeciesCodes: codes, cache: cache)
+        else { return }
+
+        let candidateList = EBirdCandidateFormatting.buildCandidateList(
+            speciesCodes: codes, taxonomy: taxonomy, limit: Self.birdCandidateListLimit)
+        guard !candidateList.isEmpty else { return }
+        birdCandidateSpeciesByRepresentativeID[representativeID] = candidateList
+        Self.ebirdLogger.log(
+            "Bird candidates: region=\(regionCode, privacy: .public) speciesCodes=\(codes.count, privacy: .public) matched=\(taxonomy.count, privacy: .public)"
+        )
+    }
+
+    private func birdSpeciesCodes(forRegionCode regionCode: String, cache: EBirdCache) async -> [String]? {
+        if let cached = try? await cache.cachedSpeciesCodes(regionCode: regionCode),
+            Date().timeIntervalSince(cached.fetchedAt) < Self.birdRegionSpeciesMaxAge
+        {
+            return cached.codes
+        }
+        guard let codes = try? await ebirdService.fetchSpeciesCodes(regionCode: regionCode) else {
+            return nil
+        }
+        try? await cache.storeSpeciesCodes(codes, regionCode: regionCode)
+        return codes
+    }
+
+    private func birdTaxonomyEntries(
+        forSpeciesCodes codes: [String], cache: EBirdCache
+    ) async -> [EBirdTaxonEntry]? {
+        let taxonomyFetchedAt = try? await cache.taxonomyFetchedAt()
+        let isFresh = taxonomyFetchedAt.map { Date().timeIntervalSince($0) < Self.birdTaxonomyMaxAge } ?? false
+        if !isFresh, let taxonomy = try? await ebirdService.fetchTaxonomy() {
+            try? await cache.replaceTaxonomy(taxonomy)
+        }
+        return try? await cache.taxonomyEntries(forSpeciesCodes: codes)
     }
 
     /// Sends the AI-source representative image (docs/SPEC.md §6: prefer RAW over a heavily
@@ -687,6 +775,8 @@ final class SourceBrowserViewModel: ObservableObject {
             let sourceAsset = AISuggestionSourcePicker.pickSourceAsset(from: sourceSetMembers)
         else { return }
         let locationContext = sourceRepresentativeID.flatMap { locationContextByRepresentativeID[$0] } ?? ""
+        let birdCandidateSpecies =
+            sourceRepresentativeID.flatMap { birdCandidateSpeciesByRepresentativeID[$0] } ?? ""
 
         isSuggestingAI = true
         aiStatusMessage = "Generating AI suggestions…"
@@ -699,7 +789,7 @@ final class SourceBrowserViewModel: ObservableObject {
             let result = try await aiSuggestionService.suggest(
                 provider: provider, model: selection.modelName, image: evaluatedImage,
                 existingDescription: editableDescription, existingKeywords: editableKeywords,
-                locationContext: locationContext)
+                locationContext: locationContext, birdCandidateSpecies: birdCandidateSpecies)
             guard selectedAssetID == id else { return }
             editableDescription = result.description
             editableKeywords = result.keywords.joined(separator: ", ")

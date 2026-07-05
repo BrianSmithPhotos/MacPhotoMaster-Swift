@@ -41,6 +41,33 @@ final class ReverseGeocodeServiceTests: XCTestCase {
         XCTAssertEqual(result.state, "Oregon")
     }
 
+    func testLookupLocationParsesISO3166Lvl4AsStateRegionCode() async throws {
+        MockURLProtocol.requestHandler = { [self] request in
+            jsonResponse(
+                for: request,
+                body: #"""
+                {"address": {"city": "San Rafael", "county": "Marin County", "state": "California",
+                              "ISO3166-2-lvl4": "US-CA"}}
+                """#)
+        }
+        let service = ReverseGeocodeService(session: makeSession())
+
+        let result = try await service.lookupLocation(latitude: 37.9735, longitude: -122.5311)
+
+        XCTAssertEqual(result.stateRegionCode, "US-CA")
+    }
+
+    func testLookupLocationLeavesStateRegionCodeNilWhenAbsent() async throws {
+        MockURLProtocol.requestHandler = { [self] request in
+            jsonResponse(for: request, body: #"{"address": {"state": "Oregon"}}"#)
+        }
+        let service = ReverseGeocodeService(session: makeSession())
+
+        let result = try await service.lookupLocation(latitude: 45.5, longitude: -122.6)
+
+        XCTAssertNil(result.stateRegionCode)
+    }
+
     func testLookupLocationFallsBackThroughLocalityKeysWhenCityIsMissing() async throws {
         MockURLProtocol.requestHandler = { [self] request in
             jsonResponse(

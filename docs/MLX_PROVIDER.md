@@ -49,6 +49,7 @@ name the same repo, since it's the `id` that's actually downloaded, not the key.
 | `mlx-community/gemma-3-12b-it-qat-4bit` | ~7 GB | Manually verified: loads and returns a description, though accuracy was mediocre |
 | `mlx-community/gemma-3-27b-it-qat-4bit` | ~16 GB | Untested as of this writing — `VLMRegistry` static, no registry work needed |
 | `mlx-community/gemma-4-26b-a4b-it-4bit` | ~15 GB | Untested as of this writing |
+| `mlx-community/gemma-4-31b-it-4bit` | ~18 GB | `VLMRegistry` static, dense `gemma4` architecture (registered in this pinned mlx-swift-lm version). Untested as of this writing — pick this over the `-bf16` release of the same model (~62.5 GB, unquantized) unless accuracy testing shows the 4-bit quant is the problem |
 | `mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` | ~21 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static. Manually verified: loads and returns a usable (imperfect) description, noticeably slower than gemma-3-12b |
 | `mlx-community/Ornith-1.0-35B-bf16` | ~70 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static; untested as of this writing |
 | `mlx-community/Qwen3-VL-8B-Instruct-4bit` | ~5 GB | `ModelConfiguration(id:)` literal. One size up from the 4B that returned empty (below) — untested whether that carries over |

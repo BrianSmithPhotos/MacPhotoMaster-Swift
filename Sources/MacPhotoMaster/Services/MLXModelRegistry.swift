@@ -20,6 +20,7 @@ enum MLXModelRegistry {
         "mlx-community/gemma-3-12b-it-qat-4bit": VLMRegistry.gemma3_12B_qat_4bit,
         "mlx-community/gemma-3-27b-it-qat-4bit": VLMRegistry.gemma3_27B_qat_4bit,
         "mlx-community/gemma-4-26b-a4b-it-4bit": VLMRegistry.gemma4_26BA4B_it_4bit,
+        "mlx-community/gemma-4-31b-it-4bit": VLMRegistry.gemma4_31B_it_4bit,
         "mlx-community/Qwen3.6-35B-A3B-4.4bit-msq": ModelConfiguration(
             id: "mlx-community/Qwen3.6-35B-A3B-4.4bit-msq",
             defaultPrompt: "Describe the image in English",

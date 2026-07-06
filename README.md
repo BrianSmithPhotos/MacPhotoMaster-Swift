@@ -15,7 +15,12 @@ in this one.
   goes through it, same as the Python sibling app.
 - Optional, for AI-assisted suggestions: a running [Ollama](https://ollama.com) server with a
   vision-capable model, and/or an [OpenRouter](https://openrouter.ai) API key (read from the
-  process environment — see `docs/SPEC.md` §6).
+  process environment — see `docs/SPEC.md` §6). A third, native in-process MLX backend
+  (`mlx-swift-lm`, no server/API key needed) is also available — see `docs/MLX_PROVIDER.md`.
+- Optional, for eBird-verified bird-species candidate lists in AI prompts: an
+  [eBird](https://ebird.org) API key, read from the process environment as `EBIRD_API_KEY`. Note
+  that a shell-exported value won't reach an Xcode/Dock-launched process — set it via Xcode's
+  Product > Scheme > Edit Scheme > Run > Arguments > Environment Variables, or `launchctl setenv`.
 
 ## Getting started
 
@@ -48,9 +53,15 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
   parsed from maker notes.
 - **Process & move** (§5): verified copy (size + SHA-256) to a library folder routed by file type.
   Auto-skipping successfully processed files (per `docs/SPEC.md` §5) isn't wired yet.
-- **AI-assisted suggestions** (§6): pluggable provider interface with both a local Ollama backend
-  and an OpenRouter backend, vision pre-check, retry-with-crop fallback, and group-aware
-  description/keyword application.
+- **AI-assisted suggestions** (§6): pluggable provider interface with three backends — local
+  Ollama, cloud OpenRouter, and a native in-process MLX backend (`mlx-swift-lm`, see
+  `docs/MLX_PROVIDER.md`) — vision pre-check, retry-with-crop fallback, and group-aware
+  description/keyword application. Wildlife/plant identification is improved beyond the base spec
+  via `SubjectIsolationService` (crops to the Vision-detected subject before sending), and via an
+  eBird region-species candidate list (see `EBirdCandidateFormatting`) that verified-locally-recorded
+  species are drawn from instead of free model recall — gated off by default for a few
+  flagship/pay-per-token OpenRouter models to control input-token cost (per-model toggle in
+  Settings, Cmd+,), always on for the local Ollama/MLX backends.
 - **GPS enrichment from Google Timeline** (§7): Drive-synced `Timeline.json` imported idempotently
   into a local GRDB/SQLite cache, nearest-timestamp matching within a bounded window, ground-truth
   elevation lookup (never trusting Timeline altitude), and reverse geocoding for location keywords
@@ -60,4 +71,19 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
   faster-path prototype for reads/previews — see its header doc for scope.
 
 Not yet built: a packaged `.app` bundle with stable signing/entitlements, and the deferred items
-noted in `CLAUDE.md` (ImageIO metadata write-back, local MLX inference).
+noted in `CLAUDE.md` (ImageIO metadata write-back).
+
+## Next stages
+
+- **Metadata-panel vibrancy/collapsibility**: the right-hand Metadata pane can't take the same
+  translucent "sidebar" material or native collapse behavior the left Source pane gets for free,
+  because `NavigationSplitView` only applies those to its leading column. Fixing either requires
+  pulling `MetadataPanelView` out of the 3-column `NavigationSplitView` into a manually-managed
+  panel (own width/visibility state, no free native behavior) — a real structural change to
+  `ContentView`, not a toggle. Not started.
+- **MLX preset list pruning**: `AIModelSelection.presets`'s `mlx:` entries grew during exploratory
+  accuracy testing (see `docs/MLX_PROVIDER.md`); expect to trim to whichever models actually proved
+  worth keeping once testing settles.
+- **Auto-skip-on-process** (`docs/SPEC.md` §5's "successfully processed files auto-skip from the
+  current session view") is intentionally not wired up — the user prefers processed files staying
+  visible for now; revisit only if asked.

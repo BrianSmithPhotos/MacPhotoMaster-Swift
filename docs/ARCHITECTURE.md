@@ -98,6 +98,30 @@ means adding one new type conforming to `AIProvider`. Three backends exist: `Oll
 HTTP daemon), `OpenRouterProvider` (cloud HTTP), and `MLXNativeProvider` (native in-process
 inference via `mlx-swift-lm`, no server/daemon/Python involved — see `docs/MLX_PROVIDER.md`).
 
+`SourceBrowserViewModel.eBirdDisabledModels` gates the eBird candidate-species prompt addition
+(below) per OpenRouter model string, persisted in `UserDefaults` and editable via a per-model
+Toggle in `SettingsView` — the local Ollama/MLX backends always get the candidate list since it
+costs nothing extra there, but it's added input-token cost on a paid OpenRouter request, so a few
+flagship models default to off. Deliberately not a general model-management system: it's a `Set`
+checked against `AIModelSelection.presets`, nothing more.
+
+## eBird species-list cache
+
+`EBirdSpeciesListService` (network client for eBird's taxonomy/subnational2-region/species-list
+endpoints, API key from `ProcessInfo.processInfo.environment["EBIRD_API_KEY"]`) feeds
+`EBirdCache` (a GRDB actor mirroring `ElevationCache`'s shape — caller-enforced TTLs, 30 days for a
+region's species list, 90 days for the taxonomy) and `EBirdCandidateFormatting` (pure functions:
+county-name-to-region-code matching, and building a capped "Common Name (Genus species)" candidate
+string). `SourceBrowserViewModel.lookupBirdCandidates` resolves a capture set's county first
+(falling back to the bare state region code), fetches/caches, and stores the formatted list keyed
+by capture-set representative for `suggestAI()` to pass into `AISuggestionService.suggest`'s
+`birdCandidateSpecies` parameter — a verified-locally-recorded species list the model is told to
+strongly prefer over free recall. Not part of `docs/SPEC.md` or the reference app; added purely to
+improve wildlife-ID accuracy. Every no-op/failure branch logs why (`os.Logger`, category
+`"EBirdSpecies"`) — this integration's first real-world test silently produced a fabricated species
+name because `EBIRD_API_KEY` never reached an Xcode-launched process (shell `.zshrc` exports don't
+propagate there), so the failure path is deliberately loud now rather than a silent `try?`.
+
 ## File safety
 
 - Deleting a file goes through `NSWorkspace.shared.recycle(_:completionHandler:)` (or

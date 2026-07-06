@@ -118,6 +118,11 @@ deterministically, and copy files into local storage.
 - Location context: once a capture set has GPS (embedded or Timeline-suggested), reverse-geocode it
   to city/county/state, add those as keywords, and pass them to the AI prompt as scene context (helps
   with plausible local wildlife/plant identification) — see §7.
+- Beyond the reference app: an eBird region-species candidate list (verified actually recorded near
+  the photo's GPS fix) is added to the prompt for bird identification, and a `SubjectIsolationService`
+  crop is sent instead of the full frame when a subject is detected — both added to reduce
+  species-ID fabrication on small/distant subjects. See `docs/ARCHITECTURE.md` "eBird species-list
+  cache".
 
 ## 7. GPS enrichment from Timeline export
 

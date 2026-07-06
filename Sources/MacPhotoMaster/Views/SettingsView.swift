@@ -1,12 +1,19 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// App preferences (Cmd+,). Currently the process/move destination root (docs/SPEC.md §5) and the
-/// manual Timeline Drive-sync trigger — both "rarely touched" actions, so they live in their own
-/// Settings scene rather than a header button in the main window.
+/// App preferences (Cmd+,). Currently the process/move destination root (docs/SPEC.md §5), the
+/// manual Timeline Drive-sync trigger, and per-OpenRouter-model eBird candidate-list toggles — all
+/// "rarely touched" actions, so they live in their own Settings scene rather than a header button
+/// in the main window.
 struct SettingsView: View {
     @ObservedObject var viewModel: SourceBrowserViewModel
     @State private var isChoosingFolder = false
+
+    /// Only OpenRouter presets get a toggle here — Ollama/MLX always send the candidate list (it's
+    /// free, local compute), see `SourceBrowserViewModel.eBirdDisabledModels`'s doc comment.
+    private var openRouterPresets: [String] {
+        AIModelSelection.presets.filter { AIModelSelection.parse($0)?.providerID == .openRouter }
+    }
 
     var body: some View {
         Form {
@@ -29,6 +36,17 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                }
+            }
+
+            Section("eBird Candidate List (OpenRouter)") {
+                ForEach(openRouterPresets, id: \.self) { model in
+                    Toggle(
+                        model,
+                        isOn: Binding(
+                            get: { !viewModel.eBirdDisabledModels.contains(model) },
+                            set: { viewModel.setEBirdCandidateListEnabled($0, forModel: model) }
+                        ))
                 }
             }
         }

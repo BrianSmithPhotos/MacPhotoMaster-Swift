@@ -120,6 +120,23 @@ final class SourceBrowserViewModel: ObservableObject {
     /// (was the model looking at the subject, or a diluted full frame?).
     @Published private(set) var aiEvaluatedImage: CGImage?
 
+    /// OpenRouter model strings (matching the `"<provider>:<model>"` convention `aiModelText` uses,
+    /// e.g. `"openrouter:google/gemini-3.5-flash"`) for which the eBird candidate species list is
+    /// withheld from the prompt. The candidate list is extra input-token cost on every request; for
+    /// the free local Ollama/MLX providers that's irrelevant, so those always get it (never added
+    /// here), but for a few flagship pay-per-token models the user judged the accuracy gain isn't
+    /// worth the added cost by default. Persisted in `UserDefaults`; `SettingsView` exposes a
+    /// per-model Toggle via `setEBirdCandidateListEnabled(_:forModel:)`.
+    @Published private(set) var eBirdDisabledModels: Set<String>
+
+    /// Off-by-default set as of 2026-07-05 — the user's call, not derived from anything measurable;
+    /// revisit if the OpenRouter preset list (`AIModelSelection.presets`) changes these model names.
+    static let defaultEBirdDisabledModels: Set<String> = [
+        "openrouter:google/gemini-3.5-flash",
+        "openrouter:anthropic/claude-opus-4.6",
+        "openrouter:openai/gpt-5.5",
+    ]
+
     private let loader = PhotoAssetLoader()
     private let folderBrowser = FolderBrowser()
     private let grouping = CaptureGroupingService()
@@ -177,6 +194,7 @@ final class SourceBrowserViewModel: ObservableObject {
 
     private static let libraryRootDefaultsKey = "libraryRootPath"
     private static let sourceRootDefaultsKey = "sourceRootPath"
+    private static let eBirdDisabledModelsDefaultsKey = "eBirdDisabledModels"
     /// Falls back to the user's SD card mount point when no source folder has ever been opened.
     /// The card is swapped for a new one roughly every 10K images, far less often than the app is
     /// launched, so defaulting to (and, via `openFolder`, persisting) whatever was last opened
@@ -184,6 +202,13 @@ final class SourceBrowserViewModel: ObservableObject {
     private static let defaultSourceRootPath = "/Volumes/OM SYSTEM/DCIM/105OMSYS/"
 
     init() {
+        if let stored = UserDefaults.standard.array(forKey: Self.eBirdDisabledModelsDefaultsKey)
+            as? [String]
+        {
+            eBirdDisabledModels = Set(stored)
+        } else {
+            eBirdDisabledModels = Self.defaultEBirdDisabledModels
+        }
         if let path = UserDefaults.standard.string(forKey: Self.libraryRootDefaultsKey) {
             libraryRootURL = URL(fileURLWithPath: path)
         }
@@ -198,6 +223,17 @@ final class SourceBrowserViewModel: ObservableObject {
     func setLibraryRoot(_ url: URL) {
         libraryRootURL = url
         UserDefaults.standard.set(url.path, forKey: Self.libraryRootDefaultsKey)
+    }
+
+    /// Called from `SettingsView`'s per-model Toggle — see `eBirdDisabledModels`'s doc comment.
+    func setEBirdCandidateListEnabled(_ enabled: Bool, forModel model: String) {
+        if enabled {
+            eBirdDisabledModels.remove(model)
+        } else {
+            eBirdDisabledModels.insert(model)
+        }
+        UserDefaults.standard.set(
+            Array(eBirdDisabledModels), forKey: Self.eBirdDisabledModelsDefaultsKey)
     }
 
     /// Lazily created on first use rather than in `init` because `SkipStateStore.init` is
@@ -806,7 +842,9 @@ final class SourceBrowserViewModel: ObservableObject {
         else { return }
         let locationContext = sourceRepresentativeID.flatMap { locationContextByRepresentativeID[$0] } ?? ""
         let birdCandidateSpecies =
-            sourceRepresentativeID.flatMap { birdCandidateSpeciesByRepresentativeID[$0] } ?? ""
+            eBirdDisabledModels.contains(aiModelText)
+            ? ""
+            : sourceRepresentativeID.flatMap { birdCandidateSpeciesByRepresentativeID[$0] } ?? ""
 
         isSuggestingAI = true
         aiStatusMessage = "Generating AI suggestions…"

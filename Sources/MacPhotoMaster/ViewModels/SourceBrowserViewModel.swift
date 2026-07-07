@@ -129,6 +129,16 @@ final class SourceBrowserViewModel: ObservableObject {
     /// per-model Toggle via `setEBirdCandidateListEnabled(_:forModel:)`.
     @Published private(set) var eBirdDisabledModels: Set<String>
 
+    /// Whether `suggestAI()` crops to `SubjectIsolationService`'s detected subject before sending the
+    /// image to the AI. Good for a small/distant bird or flower filling little of the frame; bad for
+    /// a general scene (e.g. a street shot), where it can crop to an incidental foreground object —
+    /// a parked car, a lamp-post — instead of the scene the user meant to describe. Off by default;
+    /// the user flips it on for a bird/flower session and back off for general shooting. Persisted in
+    /// `UserDefaults`; `MetadataPanelView` exposes it as a Toggle next to the AI model picker (a
+    /// per-session choice, not a rarely-touched preference, so it lives there rather than
+    /// `SettingsView`).
+    @Published private(set) var subjectIsolationEnabled: Bool
+
     /// Off-by-default set as of 2026-07-05 — the user's call, not derived from anything measurable;
     /// revisit if the OpenRouter preset list (`AIModelSelection.presets`) changes these model names.
     static let defaultEBirdDisabledModels: Set<String> = [
@@ -195,6 +205,7 @@ final class SourceBrowserViewModel: ObservableObject {
     private static let libraryRootDefaultsKey = "libraryRootPath"
     private static let sourceRootDefaultsKey = "sourceRootPath"
     private static let eBirdDisabledModelsDefaultsKey = "eBirdDisabledModels"
+    private static let subjectIsolationEnabledDefaultsKey = "subjectIsolationEnabled"
     /// Falls back to the user's SD card mount point when no source folder has ever been opened.
     /// The card is swapped for a new one roughly every 10K images, far less often than the app is
     /// launched, so defaulting to (and, via `openFolder`, persisting) whatever was last opened
@@ -209,6 +220,8 @@ final class SourceBrowserViewModel: ObservableObject {
         } else {
             eBirdDisabledModels = Self.defaultEBirdDisabledModels
         }
+        subjectIsolationEnabled =
+            UserDefaults.standard.bool(forKey: Self.subjectIsolationEnabledDefaultsKey)
         if let path = UserDefaults.standard.string(forKey: Self.libraryRootDefaultsKey) {
             libraryRootURL = URL(fileURLWithPath: path)
         }
@@ -234,6 +247,13 @@ final class SourceBrowserViewModel: ObservableObject {
         }
         UserDefaults.standard.set(
             Array(eBirdDisabledModels), forKey: Self.eBirdDisabledModelsDefaultsKey)
+    }
+
+    /// Called from `MetadataPanelView`'s subject-crop Toggle — see `subjectIsolationEnabled`'s doc
+    /// comment.
+    func setSubjectIsolationEnabled(_ enabled: Bool) {
+        subjectIsolationEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.subjectIsolationEnabledDefaultsKey)
     }
 
     /// Lazily created on first use rather than in `init` because `SkipStateStore.init` is
@@ -851,9 +871,14 @@ final class SourceBrowserViewModel: ObservableObject {
         defer { isSuggestingAI = false }
         do {
             let cgImage = try await NativeMetadataReader().extractPreviewAsync(at: sourceAsset.url)
-            let evaluatedImage = SubjectIsolationService.isolateSubject(in: cgImage) ?? cgImage
+            let subjectCrop =
+                subjectIsolationEnabled ? SubjectIsolationService.isolateSubject(in: cgImage) : nil
+            let evaluatedImage = subjectCrop ?? cgImage
             guard selectedAssetID == id else { return }
-            aiEvaluatedImage = evaluatedImage
+            // Only show the "Evaluated" crop when it's actually a crop (subject-isolation found a
+            // subject) — with the toggle off, or no subject found, the full frame was sent and
+            // showing it back as "Evaluated" would just duplicate the source photo for no reason.
+            aiEvaluatedImage = subjectCrop
             let result = try await aiSuggestionService.suggest(
                 provider: provider, model: selection.modelName, image: evaluatedImage,
                 existingDescription: editableDescription, existingKeywords: editableKeywords,
@@ -861,7 +886,10 @@ final class SourceBrowserViewModel: ObservableObject {
             guard selectedAssetID == id else { return }
             editableDescription = result.description
             editableKeywords = result.keywords.joined(separator: ", ")
-            aiEvaluatedImage = result.evaluatedImage
+            // The timeout-retry crop (`AISuggestionService`'s separate fallback, unrelated to the
+            // subject-isolation toggle) is a genuine crop worth surfacing even if `subjectCrop` was
+            // nil; otherwise keep whatever `subjectCrop` decided above.
+            aiEvaluatedImage = result.timeoutRetrySucceeded ? result.evaluatedImage : subjectCrop
             let categorySuffix = result.sceneCategory == .other ? "" : " [\(result.sceneCategory.rawValue)]"
             aiStatusMessage =
                 (result.timeoutRetrySucceeded ? "Suggested (after retry)" : "Suggested")

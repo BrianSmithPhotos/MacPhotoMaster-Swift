@@ -47,6 +47,12 @@ struct MetadataPanelView: View {
                         .menuStyle(.borderlessButton)
                         .fixedSize()
                     }
+                    Toggle(
+                        "Crop to subject (bird/flower)",
+                        isOn: Binding(
+                            get: { viewModel.subjectIsolationEnabled },
+                            set: { viewModel.setSubjectIsolationEnabled($0) }
+                        ))
                     Button {
                         Task { await viewModel.suggestAI() }
                     } label: {

@@ -2,6 +2,27 @@
 
 Dev-tooling scripts, not part of the app build.
 
+## build-app-bundle.sh
+
+Wraps the SPM release executable in a real `MacPhotoMaster.app` bundle so it can be pinned to the
+Dock and double-clicked from Finder, instead of only being runnable via `swift run`.
+
+Why: `swift run` execs the bare binary with no `Info.plist`/bundle identity — no stable Dock icon,
+and a fresh ad-hoc code-signing identity on every rebuild that can force privacy grants (e.g. Files
+and Folders access for Google Drive Timeline sync) to be re-approved. A proper `.app` fixes both:
+a real `CFBundleIconFile` (built from `icons/purplegreenswallow1024x1024.png` via `iconutil`) and a
+consistent `CFBundleIdentifier` (`com.briansmithphotos.macphotomaster`) that ad-hoc codesign can
+re-sign identically across rebuilds.
+
+```
+scripts/build-app-bundle.sh
+```
+
+Builds `dist/MacPhotoMaster.app` (gitignored — a build artifact, not source). Drag it into
+`/Applications` or straight onto the Dock. Ad-hoc signed only (`codesign --sign -`, no Developer ID)
+— fine for running on this machine, not for distributing to others or passing Gatekeeper's
+`spctl` assessment on a machine where it'd carry a quarantine attribute.
+
 ## strip-app-metadata.sh
 
 Restores a folder of photos (typically a real SD card's DCIM folder) to a

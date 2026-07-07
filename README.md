@@ -32,11 +32,14 @@ swift run
 swift test
 ```
 
-`swift run` launches the app as a plain process (no `.app` bundle yet — no custom icon/Dock
-identity, and no stable code-signing identity across rebuilds). That's fine for day-to-day
-development, but it means macOS privacy grants (e.g. Files and Folders access to a Google Drive
-folder for Timeline sync) tied to the ad-hoc signature can need re-granting after a rebuild.
-Packaging as a proper signed `.app` is a later step.
+`swift run` launches the app as a plain process — no custom icon/Dock identity, and a fresh ad-hoc
+code-signing identity on every rebuild, so macOS privacy grants (e.g. Files and Folders access to a
+Google Drive folder for Timeline sync) tied to that signature can need re-granting. Fine for
+day-to-day development.
+
+For a real, Dock-pinnable app, run `scripts/build-app-bundle.sh` — see `scripts/README.md`
+"build-app-bundle.sh" — which builds `dist/MacPhotoMaster.app` (ad-hoc signed, not notarized/
+Developer ID, so it's for running on this machine, not distributing to others).
 
 ## Status
 
@@ -74,9 +77,12 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
   faster-path prototype for reads/previews — see its header doc for scope.
 - The Metadata pane is a `.inspector()` (not a third `NavigationSplitView` column), giving it the
   same translucent sidebar material as the Source pane plus a native collapse toggle in the toolbar.
+- `scripts/build-app-bundle.sh` packages a real, ad-hoc-signed `MacPhotoMaster.app` (custom icon,
+  stable identity across rebuilds) that can be pinned to the Dock — not a substitute for `swift run`
+  during day-to-day development, just the way to get a Dock-launchable build.
 
-Not yet built: a packaged `.app` bundle with stable signing/entitlements, and the deferred items
-noted in `CLAUDE.md` (ImageIO metadata write-back).
+Not yet built: a notarized/Developer ID-signed `.app` for distributing beyond this machine, and the
+deferred items noted in `CLAUDE.md` (ImageIO metadata write-back).
 
 ## Next stages
 

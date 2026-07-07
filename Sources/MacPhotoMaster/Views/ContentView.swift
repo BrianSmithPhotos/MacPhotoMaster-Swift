@@ -7,19 +7,30 @@ import SwiftUI
 /// `libraryRootURL`. See `MacPhotoMasterApp`'s doc comment for why.
 struct ContentView: View {
     @ObservedObject var browser: SourceBrowserViewModel
+    @State private var isMetadataPanelPresented = true
 
     var body: some View {
         NavigationSplitView {
             SourcePanelView(viewModel: browser)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
-        } content: {
+        } detail: {
             PreviewPanelView(viewModel: browser)
                 .navigationSplitViewColumnWidth(min: 400, ideal: 600)
-        } detail: {
-            MetadataPanelView(viewModel: browser)
-                .navigationSplitViewColumnWidth(min: 280, ideal: 320)
         }
         .navigationSplitViewStyle(.balanced)
+        .inspector(isPresented: $isMetadataPanelPresented) {
+            MetadataPanelView(viewModel: browser)
+                .inspectorColumnWidth(min: 280, ideal: 320)
+        }
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    isMetadataPanelPresented.toggle()
+                } label: {
+                    Label("Toggle Metadata Panel", systemImage: "sidebar.trailing")
+                }
+            }
+        }
     }
 }
 

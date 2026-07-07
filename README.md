@@ -72,23 +72,14 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
   Timeline" button in Settings (Cmd+,).
 - A native, read-only `NativeMetadataReader` (ImageIO-based) exists alongside `ExifToolClient` as a
   faster-path prototype for reads/previews — see its header doc for scope.
+- The Metadata pane is a `.inspector()` (not a third `NavigationSplitView` column), giving it the
+  same translucent sidebar material as the Source pane plus a native collapse toggle in the toolbar.
 
 Not yet built: a packaged `.app` bundle with stable signing/entitlements, and the deferred items
 noted in `CLAUDE.md` (ImageIO metadata write-back).
 
 ## Next stages
 
-- **Metadata-panel restructure (planned as "Phase B", not started)**: the right-hand Metadata pane
-  can't take the same translucent "sidebar" material or native collapse behavior the left Source
-  pane gets for free, because `NavigationSplitView` only applies those to its leading column.
-  Fixing either requires pulling `MetadataPanelView` out of the 3-column `NavigationSplitView` into
-  a manually-managed panel (own width/visibility state, no free native behavior) — a real
-  structural change to `ContentView`, not a toggle. Bundled with this: GitHub issue #6 ("Keywords
-  block not right-aligned" — the keywords field's right margin doesn't reach the pane's right edge
-  when the pane is widened; likely a `Form`/`LabeledContent` width-constraint quirk worth
-  revisiting once the panel is restructured anyway). Higher-risk structural change — do this on a
-  fresh feature branch per established project precedent (see `mlx-native-provider` in git
-  history), not directly on `main`.
 - **MLX preset list pruning**: `AIModelSelection.presets`'s `mlx:` entries grew during exploratory
   accuracy testing (see `docs/MLX_PROVIDER.md`); expect to trim to whichever models actually proved
   worth keeping once testing settles.

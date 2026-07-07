@@ -339,6 +339,7 @@ final class SourceBrowserViewModel: ObservableObject {
             let assetPaths = captureSet.members.map(\.url.path)
             try? await store.skip(assetPaths: assetPaths, inFolder: folderPath)
 
+            let removedIndex = captureSets.firstIndex { $0.id == captureSet.id } ?? 0
             captureSets.removeAll { $0.id == captureSet.id }
             skippedCaptureSets.append(captureSet)
             sortByCaptureOrder(&skippedCaptureSets)
@@ -346,7 +347,7 @@ final class SourceBrowserViewModel: ObservableObject {
                 multiSelectedIDs.remove(representativeID)
             }
             if selectedAssetID == captureSet.representative?.id {
-                selectFirstTile()
+                selectTileAfterSkip(previousIndex: removedIndex)
             } else {
                 refreshVariantStrip()
             }
@@ -388,6 +389,30 @@ final class SourceBrowserViewModel: ObservableObject {
             multiSelectedIDs = []
             rangeAnchorID = nil
             refreshVariantStrip()
+            return
+        }
+        selectedAssetID = id
+        multiSelectedIDs = [id]
+        rangeAnchorID = id
+        refreshVariantStrip()
+    }
+
+    /// Selects whichever capture set now sits at `previousIndex` in `captureSets` — the set that
+    /// took the just-skipped set's place, i.e. the *next* one in capture order, since `skip(_:)`
+    /// removes without re-sorting. Falls back to the new last set if the skipped one was last, or
+    /// clears selection if the grid is now empty. Used only by `skip(_:)`, so focus stays near
+    /// where the user was working instead of jumping back to the first tile in the folder.
+    private func selectTileAfterSkip(previousIndex: Int) {
+        guard !captureSets.isEmpty else {
+            selectedAssetID = nil
+            multiSelectedIDs = []
+            rangeAnchorID = nil
+            refreshVariantStrip()
+            return
+        }
+        let index = min(previousIndex, captureSets.count - 1)
+        guard let id = captureSets[index].representative?.id else {
+            selectFirstTile()
             return
         }
         selectedAssetID = id

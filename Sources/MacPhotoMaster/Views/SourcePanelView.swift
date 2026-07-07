@@ -71,17 +71,10 @@ struct SourcePanelView: View {
                                 CaptureTileView(
                                     asset: representative,
                                     memberCount: captureSet.members.count,
-                                    isSelected:
-                                        viewModel.sourceViewFilter == .active
-                                        && viewModel.multiSelectedIDs.contains(representative.id),
+                                    isSelected: viewModel.multiSelectedIDs.contains(representative.id),
                                     isProcessed: viewModel.isProcessed(captureSet),
                                     onSelect: { modifiers in
-                                        switch viewModel.sourceViewFilter {
-                                        case .active:
-                                            viewModel.selectTile(representative.id, modifiers: modifiers)
-                                        case .skipped:
-                                            viewModel.unskip(captureSet)
-                                        }
+                                        viewModel.selectTile(representative.id, modifiers: modifiers)
                                     }
                                 )
                                 .contextMenu {
@@ -111,11 +104,14 @@ struct SourcePanelView: View {
         // A visually hidden button is the standard SwiftUI way to attach a keyboard shortcut that
         // isn't tied to an on-screen control — `.hidden()` only affects rendering, so the shortcut
         // still registers with the window's responder chain. Mirrors the context-menu "Skip" action
-        // so the same set-level skip is reachable either by right-click or the Delete key.
+        // so the same set-level skip is reachable either by right-click or the Delete key. Disabled
+        // outside the Active filter — the Skipped filter's selection now previews a capture set the
+        // same way Active does (see `SourceBrowserViewModel.selectTile`), so without this the Delete
+        // key would re-skip an already-skipped set and duplicate it into `skippedCaptureSets`.
         .background {
             Button("Skip Selected", action: viewModel.skipSelected)
                 .keyboardShortcut(.delete, modifiers: [])
-                .disabled(viewModel.selectedCaptureSet == nil)
+                .disabled(viewModel.sourceViewFilter != .active || viewModel.selectedCaptureSet == nil)
                 .hidden()
         }
     }

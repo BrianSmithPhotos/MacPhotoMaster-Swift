@@ -53,7 +53,11 @@ private struct SelectedImagesStripView: View {
     @ObservedObject var viewModel: SourceBrowserViewModel
 
     private var members: [PhotoAsset] {
-        let assetByID = Dictionary(uniqueKeysWithValues: viewModel.captureSets.flatMap(\.members).map { ($0.id, $0) })
+        // Both lists, not just the currently-displayed filter — the active preview can be a
+        // skipped capture set (see `SourceBrowserViewModel.selectedAsset`), so a multi-file skipped
+        // set (e.g. a RAW+JPEG pair) still needs its members resolvable here.
+        let allMembers = (viewModel.captureSets + viewModel.skippedCaptureSets).flatMap(\.members)
+        let assetByID = Dictionary(uniqueKeysWithValues: allMembers.map { ($0.id, $0) })
         return viewModel.variantMemberIDs.compactMap { assetByID[$0] }
     }
 

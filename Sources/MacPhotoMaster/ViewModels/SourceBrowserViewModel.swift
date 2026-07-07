@@ -20,7 +20,17 @@ final class SourceBrowserViewModel: ObservableObject {
     /// "Skipped" segmented-filter view; not selectable for editing or process/move.
     @Published private(set) var skippedCaptureSets: [CaptureSet] = []
     /// Which of `captureSets`/`skippedCaptureSets` `SourcePanelView`'s grid currently displays.
-    @Published var sourceViewFilter: SourceViewFilter = .active
+    ///
+    /// `didSet` re-focuses selection onto the first item of whichever list is now shown — without
+    /// this, switching filters left the previous filter's selection/preview lingering (or nothing
+    /// selected at all the first time `.skipped` is shown), rather than the grid and preview
+    /// agreeing on what's focused.
+    @Published var sourceViewFilter: SourceViewFilter = .active {
+        didSet {
+            guard sourceViewFilter != oldValue else { return }
+            selectFirstTile()
+        }
+    }
     @Published private(set) var subfolders: [URL] = []
     /// The path from the folder the user opened down to the folder currently displayed — e.g.
     /// `[card, DCIM, 100OLYMP]`. Drives the breadcrumb bar; see docs/SPEC.md §1 "folder tree" and
@@ -348,7 +358,7 @@ final class SourceBrowserViewModel: ObservableObject {
                 multiSelectedIDs.remove(representativeID)
             }
             if selectedAssetID == captureSet.representative?.id {
-                selectTileAfterSkip(previousIndex: removedIndex)
+                selectTileAfterRemoval(from: captureSets, previousIndex: removedIndex)
             } else {
                 refreshVariantStrip()
             }
@@ -356,8 +366,11 @@ final class SourceBrowserViewModel: ObservableObject {
     }
 
     /// Restores `captureSet` from `skippedCaptureSets` back into the active `captureSets` — the
-    /// inverse of `skip(_:)`, reachable from `SourcePanelView`'s "Skipped" filter view. Skipped
-    /// items aren't selectable, so there's no selection/filmstrip state to reconcile here.
+    /// inverse of `skip(_:)`, reachable only via `SourcePanelView`'s "Skipped" filter's context-menu
+    /// "Un-skip" action (never a side effect of previewing/clicking a tile there). Reconciles
+    /// selection the same way `skip(_:)` does when the un-skipped item was the one currently
+    /// previewed, so un-skipping while reviewing the Skipped grid moves focus to the next skipped
+    /// item rather than leaving the preview pointed at something no longer in that list.
     func unskip(_ captureSet: CaptureSet) {
         guard let folderPath = folderPathByCaptureSetID[captureSet.id] else { return }
         Task {
@@ -365,9 +378,14 @@ final class SourceBrowserViewModel: ObservableObject {
             let assetPaths = captureSet.members.map(\.url.path)
             try? await store.unskip(assetPaths: assetPaths, inFolder: folderPath)
 
+            let removedIndex = skippedCaptureSets.firstIndex { $0.id == captureSet.id } ?? 0
             skippedCaptureSets.removeAll { $0.id == captureSet.id }
             captureSets.append(captureSet)
             sortByCaptureOrder(&captureSets)
+
+            if selectedAssetID == captureSet.representative?.id {
+                selectTileAfterRemoval(from: skippedCaptureSets, previousIndex: removedIndex)
+            }
         }
     }
 
@@ -381,11 +399,12 @@ final class SourceBrowserViewModel: ObservableObject {
         }
     }
 
-    /// Selects the first tile in the grid (or clears selection if the grid is empty), resetting
-    /// the multi-selection and filmstrip to match. Used on a fresh folder load and whenever the
-    /// active selection is skipped out from under it.
+    /// Selects the first tile in whichever list `sourceViewFilter` currently displays (or clears
+    /// selection if that list is empty), resetting the multi-selection and filmstrip to match. Used
+    /// on a fresh folder load and whenever `sourceViewFilter` changes, so the grid and the preview
+    /// always agree on what's focused.
     private func selectFirstTile() {
-        guard let id = captureSets.first?.representative?.id else {
+        guard let id = displayedCaptureSets.first?.representative?.id else {
             selectedAssetID = nil
             multiSelectedIDs = []
             rangeAnchorID = nil
@@ -398,21 +417,22 @@ final class SourceBrowserViewModel: ObservableObject {
         refreshVariantStrip()
     }
 
-    /// Selects whichever capture set now sits at `previousIndex` in `captureSets` — the set that
-    /// took the just-skipped set's place, i.e. the *next* one in capture order, since `skip(_:)`
-    /// removes without re-sorting. Falls back to the new last set if the skipped one was last, or
-    /// clears selection if the grid is now empty. Used only by `skip(_:)`, so focus stays near
-    /// where the user was working instead of jumping back to the first tile in the folder.
-    private func selectTileAfterSkip(previousIndex: Int) {
-        guard !captureSets.isEmpty else {
+    /// Selects whichever capture set now sits at `previousIndex` in `sets` — the set that took the
+    /// just-removed set's place, i.e. the *next* one in capture order, since `skip(_:)`/`unskip(_:)`
+    /// remove without re-sorting. Falls back to the new last set if the removed one was last, or
+    /// clears selection if `sets` is now empty. Shared by `skip(_:)` (passing `captureSets`) and
+    /// `unskip(_:)` (passing `skippedCaptureSets`) so focus stays near where the user was working
+    /// instead of jumping back to the first tile in the folder.
+    private func selectTileAfterRemoval(from sets: [CaptureSet], previousIndex: Int) {
+        guard !sets.isEmpty else {
             selectedAssetID = nil
             multiSelectedIDs = []
             rangeAnchorID = nil
             refreshVariantStrip()
             return
         }
-        let index = min(previousIndex, captureSets.count - 1)
-        guard let id = captureSets[index].representative?.id else {
+        let index = min(previousIndex, sets.count - 1)
+        guard let id = sets[index].representative?.id else {
             selectFirstTile()
             return
         }
@@ -422,11 +442,23 @@ final class SourceBrowserViewModel: ObservableObject {
         refreshVariantStrip()
     }
 
-    /// Maps every asset id to its full capture-group membership (including itself) — the lookup
-    /// `SelectionScope`'s pure functions need but don't own themselves.
+    /// Whichever of `captureSets`/`skippedCaptureSets` `sourceViewFilter` currently displays —
+    /// selection, range/multi-select, and the filmstrip all operate against this so browsing the
+    /// Skipped filter previews and (multi-)selects within that list exactly like the Active filter
+    /// does, without any of it touching skip state.
+    private var displayedCaptureSets: [CaptureSet] {
+        switch sourceViewFilter {
+        case .active: return captureSets
+        case .skipped: return skippedCaptureSets
+        }
+    }
+
+    /// Maps every asset id (within `displayedCaptureSets`) to its full capture-group membership
+    /// (including itself) — the lookup `SelectionScope`'s pure functions need but don't own
+    /// themselves.
     private var membersByAssetID: [PhotoAsset.ID: [PhotoAsset.ID]] {
         var map: [PhotoAsset.ID: [PhotoAsset.ID]] = [:]
-        for set in captureSets {
+        for set in displayedCaptureSets {
             let memberIDs = set.members.map(\.id)
             for id in memberIDs { map[id] = memberIDs }
         }
@@ -435,9 +467,11 @@ final class SourceBrowserViewModel: ObservableObject {
 
     /// Handles a click on a capture-set tile in the source grid: shift-click ranges from the last
     /// anchor, cmd-click toggles the tile in/out of the multi-selection, a plain click resets to a
-    /// single selection. Mirrors the reference Python app's `SourcePanel._on_tile_clicked`.
+    /// single selection. Mirrors the reference Python app's `SourcePanel._on_tile_clicked`. Used the
+    /// same way regardless of `sourceViewFilter` — previewing/multi-selecting a skipped item never
+    /// un-skips it; only `SourcePanelView`'s "Un-skip" context-menu action does that.
     func selectTile(_ id: PhotoAsset.ID, modifiers: NSEvent.ModifierFlags) {
-        let visibleIDs = captureSets.compactMap { $0.representative?.id }
+        let visibleIDs = displayedCaptureSets.compactMap { $0.representative?.id }
         if modifiers.contains(.shift), let anchor = rangeAnchorID {
             multiSelectedIDs = SelectionScope.rangeBetween(anchor: anchor, target: id, visible: visibleIDs)
         } else if modifiers.contains(.command) {
@@ -463,7 +497,7 @@ final class SourceBrowserViewModel: ObservableObject {
             variantSelectedIDs = []
             return
         }
-        let visibleIDs = captureSets.compactMap { $0.representative?.id }
+        let visibleIDs = displayedCaptureSets.compactMap { $0.representative?.id }
         let orderedMultiSelection = visibleIDs.filter { multiSelectedIDs.contains($0) }
         let scope = SelectionScope.resolveScope(
             selected: selectedAssetID, multiSelected: orderedMultiSelection, membersByID: membersByAssetID)
@@ -507,12 +541,12 @@ final class SourceBrowserViewModel: ObservableObject {
     /// is also meant to scope process/move. Falls back to the grid's manual multi-selection,
     /// expanded to full capture-group membership, when the filmstrip hasn't been narrowed.
     var manualSelectionAssets: [PhotoAsset] {
-        let assetByID = Dictionary(uniqueKeysWithValues: captureSets.flatMap(\.members).map { ($0.id, $0) })
+        let assetByID = Dictionary(uniqueKeysWithValues: displayedCaptureSets.flatMap(\.members).map { ($0.id, $0) })
         if hasPartialVariantSelection {
             return variantMemberIDs.filter { variantSelectedIDs.contains($0) }.compactMap { assetByID[$0] }
         }
         guard hasMultiSelection else { return [] }
-        let visibleIDs = captureSets.compactMap { $0.representative?.id }
+        let visibleIDs = displayedCaptureSets.compactMap { $0.representative?.id }
         let ordered = visibleIDs.filter { multiSelectedIDs.contains($0) }
         let expandedIDs = SelectionScope.expandToCaptureGroups(ordered, membersByID: membersByAssetID)
         return expandedIDs.compactMap { assetByID[$0] }
@@ -977,7 +1011,7 @@ final class SourceBrowserViewModel: ObservableObject {
     }
 
     var selectedAsset: PhotoAsset? {
-        captureSets
+        displayedCaptureSets
             .flatMap(\.members)
             .first { $0.id == selectedAssetID }
     }
@@ -986,11 +1020,12 @@ final class SourceBrowserViewModel: ObservableObject {
     /// `representative` because `setActivePreview` (a filmstrip click) can point `selectedAssetID`
     /// at a non-representative member, e.g. the RAW file behind a stacked JPEG representative.
     var selectedCaptureSet: CaptureSet? {
-        captureSets.first { set in set.members.contains { $0.id == selectedAssetID } }
+        displayedCaptureSets.first { set in set.members.contains { $0.id == selectedAssetID } }
     }
 
     /// Keyboard-shortcut entry point for skipping the current selection — see `SourcePanelView`'s
-    /// delete-key binding. No-op with nothing selected.
+    /// delete-key binding, which is disabled while browsing the Skipped filter so this can't be
+    /// invoked on a set that's already skipped. No-op with nothing selected.
     func skipSelected() {
         guard let selectedCaptureSet else { return }
         skip(selectedCaptureSet)

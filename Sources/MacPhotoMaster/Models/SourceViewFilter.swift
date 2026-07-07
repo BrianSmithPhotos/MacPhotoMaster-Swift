@@ -1,9 +1,9 @@
 import Foundation
 
 /// Which capture sets the source grid displays — see `SourceBrowserViewModel.captureSets` /
-/// `.skippedCaptureSets` and `SourcePanelView`'s segmented control. `.skipped` is a read-only,
-/// un-skip-only view: skipped items aren't selectable for editing/process, only restorable to
-/// `.active`.
+/// `.skippedCaptureSets` and `SourcePanelView`'s segmented control. Clicking a tile previews it the
+/// same way in both filters; restoring a skipped item back to `.active` is a right-click
+/// ("Un-skip") action only, never a side effect of previewing it.
 enum SourceViewFilter {
     case active
     case skipped

@@ -126,7 +126,11 @@ struct AISuggestionService {
         }
         let trimmedKeywords = existingKeywords.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedKeywords.isEmpty {
-            lines.append("Existing keywords for context: \(trimmedKeywords)")
+            lines.append(
+                "Existing keywords already identified for this photo — treat these as a strong, "
+                    + "trusted guide (the user has already confirmed them, often from an easier photo "
+                    + "of the same subject) and prefer them over an independent guess unless what's "
+                    + "shown clearly contradicts them: " + trimmedKeywords)
         }
         let trimmedLocation = locationContext.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedLocation.isEmpty {

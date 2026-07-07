@@ -147,6 +147,37 @@ final class AISuggestionServiceTests: XCTestCase {
         }
     }
 
+    func testSuggestIncludesExistingKeywordsAsStrongGuideInPromptWhenProvided() async throws {
+        let provider = FakeAIProvider()
+        provider.chatResponses = [
+            .success(#"{"description": "A red bird on a branch.", "keywords": ["red bird", "branch"]}"#)
+        ]
+        let service = AISuggestionService()
+
+        _ = try await service.suggest(
+            provider: provider, model: "qwen3.6:35b", image: makeImage(), existingDescription: "",
+            existingKeywords: "northern cardinal, cardinalis cardinalis")
+
+        let prompt = try XCTUnwrap(provider.userPromptsPerCall.first)
+        XCTAssertTrue(prompt.contains("strong, trusted guide"))
+        XCTAssertTrue(prompt.contains("northern cardinal, cardinalis cardinalis"))
+    }
+
+    func testSuggestOmitsExistingKeywordsLineWhenBlank() async throws {
+        let provider = FakeAIProvider()
+        provider.chatResponses = [
+            .success(#"{"description": "A red bird on a branch.", "keywords": ["red bird", "branch"]}"#)
+        ]
+        let service = AISuggestionService()
+
+        _ = try await service.suggest(
+            provider: provider, model: "qwen3.6:35b", image: makeImage(), existingDescription: "",
+            existingKeywords: "")
+
+        let prompt = try XCTUnwrap(provider.userPromptsPerCall.first)
+        XCTAssertFalse(prompt.contains("strong, trusted guide"))
+    }
+
     func testSuggestIncludesLocationContextInPromptWhenProvided() async throws {
         let provider = FakeAIProvider()
         provider.chatResponses = [

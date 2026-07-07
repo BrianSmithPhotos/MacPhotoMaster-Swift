@@ -1047,7 +1047,12 @@ final class SourceBrowserViewModel: ObservableObject {
     /// via `ExifToolClient`'s already-batched multi-file read rather than one `exiftool` launch per
     /// file — called before Process & Move so a full capture-set/session/manual-selection scope
     /// gets an accurate art-filter rename token even for files the user never individually selected
-    /// (the only thing that triggers `loadArtFilterTokenIfNeeded` above).
+    /// (the only thing that triggers `loadArtFilterTokenIfNeeded` above). Also applies that same
+    /// function's `descriptionText` correction (see its doc comment for the ImageIO
+    /// `Caption-Abstract` read gap) — without this, an asset the user never selected keeps whatever
+    /// empty/wrong description `PhotoAssetLoader`'s ImageIO-only scan produced, and Process & Move
+    /// would write just the art-filter note to the destination on top of that empty string, even
+    /// though the source file's on-disk description was always correct.
     private func loadArtFilterTokens(for assets: [PhotoAsset]) async {
         let missing = assets.filter { $0.artFilterToken == nil }
         guard !missing.isEmpty else { return }
@@ -1057,6 +1062,10 @@ final class SourceBrowserViewModel: ObservableObject {
             updateAsset(asset.id) { current in
                 current.artFilterToken = ArtFilterTokenParsing.token(from: metadata)
                 current.focusDistance = (metadata["Olympus:FocusDistance"] as? String) ?? ""
+                if let correctedDescription = metadata["IPTC:Caption-Abstract"] as? String,
+                    !correctedDescription.isEmpty, correctedDescription != current.descriptionText {
+                    current.descriptionText = correctedDescription
+                }
             }
         }
     }

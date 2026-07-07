@@ -74,6 +74,7 @@ struct SourcePanelView: View {
                                     isSelected:
                                         viewModel.sourceViewFilter == .active
                                         && viewModel.multiSelectedIDs.contains(representative.id),
+                                    isProcessed: viewModel.isProcessed(captureSet),
                                     onSelect: { modifiers in
                                         switch viewModel.sourceViewFilter {
                                         case .active:
@@ -175,6 +176,9 @@ private struct CaptureTileView: View {
     let asset: PhotoAsset
     let memberCount: Int
     let isSelected: Bool
+    /// Non-blocking hint that this set has already been through Process & Move at least once — see
+    /// `ProcessedStateStore`'s doc comment. Never disables re-selecting or reprocessing the tile.
+    let isProcessed: Bool
     /// Cmd-click toggles this tile in/out of the grid's multi-selection, shift-click ranges from
     /// the last clicked tile, a plain click resets to just this one — see
     /// `SourceBrowserViewModel.selectTile`. `NSEvent.modifierFlags` reads the real modifier-key
@@ -189,33 +193,49 @@ private struct CaptureTileView: View {
         // accessibility frame/press-action live on the same node — otherwise VoiceOver and
         // AXPress-based UI automation see a properly framed element with no action wired to it.
         Button(action: { onSelect(NSEvent.modifierFlags) }) {
-            ZStack(alignment: .bottomTrailing) {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(.quaternary)
-                    .aspectRatio(1, contentMode: .fit)
-                    .overlay {
-                        if let thumbnail {
-                            Image(decorative: thumbnail, scale: 1)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
+            RoundedRectangle(cornerRadius: 6)
+                .fill(.quaternary)
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    if let thumbnail {
+                        Image(decorative: thumbnail, scale: 1)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 3)
-                    }
-                    .clipped()
-
-                if memberCount > 1 {
-                    Text("\(memberCount)")
-                        .font(.caption2.bold())
-                        .padding(4)
-                        .background(.black.opacity(0.6), in: Circle())
-                        .foregroundStyle(.white)
-                        .padding(4)
                 }
-            }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 3)
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if memberCount > 1 {
+                        Text("\(memberCount)")
+                            .font(.caption2.bold())
+                            .padding(4)
+                            .background(.black.opacity(0.6), in: Circle())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 3)
+                            .padding(.bottom, 0)
+                    }
+                }
+                .overlay(alignment: .bottomLeading) {
+                    // Both badges are overlays on the same base shape (rather than ZStack siblings)
+                    // so `.bottomTrailing`/`.bottomLeading` resolve against identical bounds — a
+                    // separate positioning mechanism per badge drifted out of vertical alignment.
+                    // The checkmark glyph runs smaller than the count digit's font size because an
+                    // SF Symbol at a given point size renders visually heavier/larger than text.
+                    if isProcessed {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 6, weight: .bold))
+                            .padding(3)
+                            .background(.green.opacity(0.85), in: Circle())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 3)
+                            .padding(.bottom, 4)
+                    }
+                }
+                .clipped()
         }
         .buttonStyle(.plain)
         // `.task(id:)` re-runs whenever `asset.id` changes (SwiftUI diffs the id, not just

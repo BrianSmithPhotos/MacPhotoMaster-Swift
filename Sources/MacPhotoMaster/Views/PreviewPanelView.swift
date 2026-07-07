@@ -65,6 +65,7 @@ private struct SelectedImagesStripView: View {
                         asset: member,
                         isRingSelected: viewModel.variantSelectedIDs.contains(member.id),
                         isActive: viewModel.selectedAssetID == member.id,
+                        isProcessed: viewModel.isProcessed(member),
                         onPlainSelect: { viewModel.setActivePreview(member.id) },
                         onToggleSelect: { viewModel.toggleVariantSelection(member.id) }
                     )
@@ -82,6 +83,9 @@ private struct VariantTileView: View {
     let asset: PhotoAsset
     let isRingSelected: Bool
     let isActive: Bool
+    /// Non-blocking hint that this file has already been through Process & Move at least once —
+    /// see `ProcessedStateStore`'s doc comment. Never disables re-selecting or reprocessing it.
+    let isProcessed: Bool
     let onPlainSelect: () -> Void
     let onToggleSelect: () -> Void
 
@@ -112,6 +116,16 @@ private struct VariantTileView: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(isActive ? Color.accentColor : .clear, lineWidth: 3)
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if isProcessed {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 6, weight: .bold))
+                            .padding(2)
+                            .background(.green, in: Circle())
+                            .foregroundStyle(.white)
+                            .padding(3)
+                    }
                 }
                 .opacity(isRingSelected ? 1.0 : 0.4)
                 .clipped()

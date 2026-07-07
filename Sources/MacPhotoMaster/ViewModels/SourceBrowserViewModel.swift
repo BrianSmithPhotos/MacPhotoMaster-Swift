@@ -309,6 +309,7 @@ final class SourceBrowserViewModel: ObservableObject {
                 async let subfoldersTask = folderBrowser.subfolders(of: folderURL)
                 let (assets, folders) = try await (assetsTask, subfoldersTask)
                 let skippedPaths = await skippedAssetPaths(inFolder: folderURL)
+                processedAssetPaths = await loadProcessedAssetPaths(inFolder: folderURL)
                 let allSets = grouping.group(assets)
                 captureSets = allSets.filter { set in
                     guard let representativePath = set.representative?.url.path else { return true }
@@ -533,6 +534,51 @@ final class SourceBrowserViewModel: ObservableObject {
             loadErrorMessage = error.localizedDescription
             return nil
         }
+    }
+
+    /// Paths (within the currently loaded folder) that have already been through Process & Move at
+    /// least once — drives the non-blocking checkmark badge on `CaptureTileView`/`VariantTileView`.
+    /// Purely informational: unlike `skippedCaptureSets`, being in this set never hides or disables
+    /// anything, since reprocessing must stay freely available.
+    @Published private(set) var processedAssetPaths: Set<String> = []
+
+    /// Lazily created for the same reason as `skipStore` above.
+    private var processedStore: ProcessedStateStore?
+
+    private func ensureProcessedStore() async -> ProcessedStateStore? {
+        if let processedStore { return processedStore }
+        do {
+            let databasePath = try AppSupportDirectory.url(forFileNamed: "processed_state.sqlite3")
+            let store = try ProcessedStateStore(databasePath: databasePath)
+            processedStore = store
+            return store
+        } catch {
+            return nil
+        }
+    }
+
+    private func loadProcessedAssetPaths(inFolder folderURL: URL) async -> Set<String> {
+        guard let store = await ensureProcessedStore() else { return [] }
+        return (try? await store.processedAssetPaths(inFolder: folderURL.path)) ?? []
+    }
+
+    /// Persists `assetPaths` as processed for `folderPath` and updates the in-memory set so the
+    /// badge appears immediately, without waiting for the next folder load.
+    private func markAssetsProcessed(_ assetPaths: [String], inFolder folderPath: String) async {
+        guard let store = await ensureProcessedStore() else { return }
+        try? await store.markProcessed(assetPaths: assetPaths, inFolder: folderPath)
+        processedAssetPaths.formUnion(assetPaths)
+    }
+
+    /// Whether `asset` has already been through Process & Move at least once in this folder.
+    func isProcessed(_ asset: PhotoAsset) -> Bool {
+        processedAssetPaths.contains(asset.url.path)
+    }
+
+    /// Whether any member of `captureSet` has already been through Process & Move — a set is shown
+    /// as processed as soon as one member has, since the common case processes the whole set at once.
+    func isProcessed(_ captureSet: CaptureSet) -> Bool {
+        captureSet.members.contains { processedAssetPaths.contains($0.url.path) }
     }
 
     /// Lazily created for the same reason as `skipStore` above — `TimelineLocationCache.init` is
@@ -967,6 +1013,10 @@ final class SourceBrowserViewModel: ObservableObject {
         guard !isProcessing else { return }
         let assets = scope.assets
         guard !assets.isEmpty else { return }
+        // Captured now, not read from `breadcrumb.last` after the `Task` finishes — mirrors
+        // `skip(_:)`'s reasoning: the user could navigate to a different folder while this is
+        // still running.
+        let folderPath = breadcrumb.last?.path
 
         isProcessing = true
         processStatusMessage = "Processing \(assets.count) file(s)…"
@@ -976,6 +1026,7 @@ final class SourceBrowserViewModel: ObservableObject {
             let assetByID = Dictionary(
                 uniqueKeysWithValues: captureSets.flatMap(\.members).map { ($0.id, $0) })
             var failures: [String] = []
+            var processedPaths: [String] = []
             for asset in assets {
                 let asset = assetByID[asset.id] ?? asset
                 let context = RenameContext(
@@ -988,9 +1039,13 @@ final class SourceBrowserViewModel: ObservableObject {
                 do {
                     _ = try await processMoveService.processAndCopy(
                         asset: asset, renameContext: context, libraryRoot: libraryRoot)
+                    processedPaths.append(asset.url.path)
                 } catch {
                     failures.append("\(asset.url.lastPathComponent): \(error.localizedDescription)")
                 }
+            }
+            if let folderPath, !processedPaths.isEmpty {
+                await markAssetsProcessed(processedPaths, inFolder: folderPath)
             }
             let successCount = assets.count - failures.count
             if failures.isEmpty {

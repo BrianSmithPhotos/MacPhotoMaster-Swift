@@ -51,8 +51,11 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
   set, or the current manual selection.
 - **Rename** (§4): deterministic destination filenames, including the in-camera art-filter token
   parsed from maker notes.
-- **Process & move** (§5): verified copy (size + SHA-256) to a library folder routed by file type.
-  Auto-skipping successfully processed files (per `docs/SPEC.md` §5) isn't wired yet.
+- **Process & move** (§5): verified copy (size + SHA-256) to a library folder routed by file type,
+  with a persisted, non-blocking "processed" checkmark badge on the source grid and preview
+  filmstrip (`ProcessedStateStore`) so a re-opened folder still shows what's already gone through
+  once — it never prevents reprocessing. Auto-skipping successfully processed files (per
+  `docs/SPEC.md` §5) isn't wired yet.
 - **AI-assisted suggestions** (§6): pluggable provider interface with three backends — local
   Ollama, cloud OpenRouter, and a native in-process MLX backend (`mlx-swift-lm`, see
   `docs/MLX_PROVIDER.md`) — vision pre-check, retry-with-crop fallback, and group-aware

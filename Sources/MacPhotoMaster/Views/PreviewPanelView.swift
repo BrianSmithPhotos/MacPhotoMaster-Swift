@@ -71,9 +71,14 @@ private struct SelectedImagesStripView: View {
                     )
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.top, 4)
+            // Top-aligned in a taller-than-content frame (rather than the default vertical
+            // centering) so the tiles sit near the top of the strip, leaving clear room below for
+            // the horizontal scroll bar instead of it overlapping the tiles' bottom edge — see
+            // GitHub issue #5.
+            .frame(maxHeight: .infinity, alignment: .top)
         }
-        .frame(height: 80)
+        .frame(height: 92)
     }
 }
 

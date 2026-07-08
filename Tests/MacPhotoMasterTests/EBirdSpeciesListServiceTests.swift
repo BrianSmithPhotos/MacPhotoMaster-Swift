@@ -6,14 +6,23 @@ import XCTest
 /// no dependency on a real `EBIRD_API_KEY` being set. Mirrors `ReverseGeocodeServiceTests.swift`'s
 /// mocking pattern.
 final class EBirdSpeciesListServiceTests: XCTestCase {
+    /// `APIKeyStore.resolve` falls back to the Keychain when the env var is unset, so a real key
+    /// saved via `SettingsView` on this machine would otherwise leak into
+    /// `testFetchTaxonomyThrowsMissingAPIKeyWhenUnset` — stash it away for the test and restore it
+    /// after, rather than assuming the Keychain is empty.
+    private var savedKeychainKey: String?
+
     override func setUp() {
         super.setUp()
+        savedKeychainKey = APIKeyStore.read(account: "EBIRD_API_KEY")
+        APIKeyStore.delete(account: "EBIRD_API_KEY")
         setenv("EBIRD_API_KEY", "test-key", 1)
     }
 
     override func tearDown() {
         MockEBirdURLProtocol.requestHandler = nil
         unsetenv("EBIRD_API_KEY")
+        APIKeyStore.save(savedKeychainKey, account: "EBIRD_API_KEY")
         super.tearDown()
     }
 

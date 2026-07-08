@@ -40,11 +40,10 @@ struct EBirdSpeciesListService {
         self.session = session
     }
 
-    /// Per CLAUDE.md's "read from process environment" rule, matching `OpenRouterProvider`'s
-    /// `OPENROUTER_API_KEY` convention — export `EBIRD_API_KEY` into the shell before `swift run`/
-    /// launching Xcode from a terminal.
+    /// `EBIRD_API_KEY` env var wins if set (terminal/`swift run` debugging), else the value saved
+    /// in `SettingsView`'s API Keys section (Keychain-backed) — see `APIKeyStore`.
     private static var apiKey: String? {
-        ProcessInfo.processInfo.environment["EBIRD_API_KEY"]
+        APIKeyStore.resolve(envVar: "EBIRD_API_KEY", account: "EBIRD_API_KEY")
     }
 
     /// eBird's full global taxonomy (~18,000 rows, ~6MB of JSON as of this writing) — fetched in

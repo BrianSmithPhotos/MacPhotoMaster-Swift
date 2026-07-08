@@ -6,14 +6,23 @@ import XCTest
 /// `URLSession` (`MockURLProtocol` below) rather than the live OpenRouter API — no network access
 /// or real API key needed in CI. Mirrors `OllamaProviderTests`' structure.
 final class OpenRouterProviderTests: XCTestCase {
+    /// `APIKeyStore.resolve` falls back to the Keychain when the env var is unset, so a real key
+    /// saved via `SettingsView` on this machine would otherwise leak into
+    /// `testChatThrowsProviderErrorWhenAPIKeyMissing` — stash it away for the test and restore it
+    /// after, rather than assuming the Keychain is empty.
+    private var savedKeychainKey: String?
+
     override func setUp() {
         super.setUp()
+        savedKeychainKey = APIKeyStore.read(account: "OPENROUTER_API_KEY")
+        APIKeyStore.delete(account: "OPENROUTER_API_KEY")
         setenv("OPENROUTER_API_KEY", "test-key", 1)
     }
 
     override func tearDown() {
         MockURLProtocol.requestHandler = nil
         unsetenv("OPENROUTER_API_KEY")
+        APIKeyStore.save(savedKeychainKey, account: "OPENROUTER_API_KEY")
         super.tearDown()
     }
 

@@ -20,11 +20,10 @@ struct OpenRouterProvider: AIProvider {
         self.session = session
     }
 
-    /// Per CLAUDE.md's "read from process environment" rule and the Python reference app's own
-    /// convention (its `.env` is deliberately not auto-loaded for this key) — export
-    /// `OPENROUTER_API_KEY` into the shell before `swift run`/launching Xcode from a terminal.
+    /// `OPENROUTER_API_KEY` env var wins if set (terminal/`swift run` debugging), else the value
+    /// saved in `SettingsView`'s API Keys section (Keychain-backed) — see `APIKeyStore`.
     private static var apiKey: String? {
-        ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"]
+        APIKeyStore.resolve(envVar: "OPENROUTER_API_KEY", account: "OPENROUTER_API_KEY")
     }
 
     /// Throws `.provider(...)` if `model` is blank, isn't in OpenRouter's catalog, or doesn't

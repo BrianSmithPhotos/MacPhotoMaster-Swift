@@ -8,14 +8,20 @@ cd "$(dirname "$0")/.."
 APP_NAME="MacPhotoMaster"
 BUNDLE_ID="com.briansmithphotos.macphotomaster"
 ICON_SOURCE="icons/purplegreenswallow1024x1024.png"
-BUILD_DIR=".build/release"
+DERIVED_DATA_DIR=".build/xcodebuild-release"
+BUILD_DIR="$DERIVED_DATA_DIR/Build/Products/Release"
 DIST_DIR="dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 VERSION="0.1"
 BUILD_NUMBER="$(git rev-list --count HEAD)"
 
-echo "Building release binary..."
-swift build -c release
+# `swift build -c release` cannot compile mlx-swift's Metal shaders (its own README says so
+# explicitly) — a plain SPM release build has no default.metallib, so MLXModelManager aborts the
+# whole process the instant it touches Metal. xcodebuild runs the same shader-compile step Xcode's
+# own build does, so it's required here even though it's slower than `swift build`.
+echo "Building release binary via xcodebuild (required for mlx-swift's Metal shaders)..."
+xcodebuild -scheme "$APP_NAME" -configuration Release -destination 'platform=macOS' \
+    -derivedDataPath "$DERIVED_DATA_DIR" build
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"

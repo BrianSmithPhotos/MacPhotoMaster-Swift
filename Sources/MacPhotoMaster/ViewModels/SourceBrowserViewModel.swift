@@ -840,8 +840,8 @@ final class SourceBrowserViewModel: ObservableObject {
     /// eBird cache can't be opened; any other failure here just means the AI prompt goes out without
     /// a candidate list, matching `lookupLocationKeywordsIfNeeded`'s best-effort posture. Every
     /// no-op path logs why — a silent no-op here previously cost a debugging session tracing a
-    /// fabricated species name back to a missing `EBIRD_API_KEY` in the run process's environment
-    /// (Xcode/Dock-launched processes don't inherit a shell's `.zshrc` exports).
+    /// fabricated species name back to a missing `EBIRD_API_KEY` (env var or Keychain, see
+    /// `APIKeyStore`).
     private func lookupBirdCandidates(
         representativeID: PhotoAsset.ID, county: String, stateRegionCode: String?
     ) async {
@@ -849,8 +849,8 @@ final class SourceBrowserViewModel: ObservableObject {
             Self.ebirdLogger.log("Bird candidates skipped: no eBird state region code for this location")
             return
         }
-        guard ProcessInfo.processInfo.environment["EBIRD_API_KEY"] != nil else {
-            Self.ebirdLogger.log("Bird candidates skipped: EBIRD_API_KEY not set in this process's environment")
+        guard APIKeyStore.resolve(envVar: "EBIRD_API_KEY", account: "EBIRD_API_KEY") != nil else {
+            Self.ebirdLogger.log("Bird candidates skipped: EBIRD_API_KEY not set (env or Keychain)")
             return
         }
         guard let cache = await ensureEBirdCache() else {

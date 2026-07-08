@@ -105,10 +105,13 @@ costs nothing extra there, but it's added input-token cost on a paid OpenRouter 
 flagship models default to off. Deliberately not a general model-management system: it's a `Set`
 checked against `AIModelSelection.presets`, nothing more.
 
+`OpenRouterProvider`'s API key resolves via `APIKeyStore` (below) rather than reading
+`ProcessInfo` directly.
+
 ## eBird species-list cache
 
 `EBirdSpeciesListService` (network client for eBird's taxonomy/subnational2-region/species-list
-endpoints, API key from `ProcessInfo.processInfo.environment["EBIRD_API_KEY"]`) feeds
+endpoints, API key via `APIKeyStore` — below) feeds
 `EBirdCache` (a GRDB actor mirroring `ElevationCache`'s shape — caller-enforced TTLs, 30 days for a
 region's species list, 90 days for the taxonomy) and `EBirdCandidateFormatting` (pure functions:
 county-name-to-region-code matching, and building a capped "Common Name (Genus species)" candidate
@@ -121,6 +124,21 @@ improve wildlife-ID accuracy. Every no-op/failure branch logs why (`os.Logger`, 
 `"EBirdSpecies"`) — this integration's first real-world test silently produced a fabricated species
 name because `EBIRD_API_KEY` never reached an Xcode-launched process (shell `.zshrc` exports don't
 propagate there), so the failure path is deliberately loud now rather than a silent `try?`.
+
+## API key storage (`APIKeyStore`)
+
+`APIKeyStore` resolves both `EBIRD_API_KEY` and `OPENROUTER_API_KEY` from the process environment
+first, then falls back to the macOS Keychain (`kSecClassGenericPassword`, service
+`com.briansmithphotos.macphotomaster.apikeys`). The environment-only approach broke for any
+GUI-launched process — Xcode's Run button, Finder, and Dock all inherit `launchd`'s environment,
+never a shell's `.zshrc` exports — so relying solely on it meant the packaged `.app` silently lost
+both keys regardless of what was exported in a terminal. `SettingsView`'s "API Keys" section reads/
+writes the Keychain side via `APIKeyStore.read`/`.save`; a `SecureField` is disabled (with an
+explanatory caption) when the matching env var is set, since the env var always wins and editing
+the field in that case would silently have no effect. Keychain was chosen over `UserDefaults`
+because a `UserDefaults`-backed secret is a cleartext plist under `~/Library/Preferences`, not
+appropriate for API keys — this is a deliberate exception to this doc's general preference for
+storing app state in `UserDefaults`/GRDB rather than the Keychain.
 
 ## File safety
 

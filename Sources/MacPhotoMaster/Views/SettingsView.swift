@@ -8,6 +8,8 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @ObservedObject var viewModel: SourceBrowserViewModel
     @State private var isChoosingFolder = false
+    @State private var eBirdAPIKey = ""
+    @State private var openRouterAPIKey = ""
 
     /// Only OpenRouter presets get a toggle here — Ollama/MLX always send the candidate list (it's
     /// free, local compute), see `SourceBrowserViewModel.eBirdDisabledModels`'s doc comment.
@@ -49,12 +51,50 @@ struct SettingsView: View {
                         ))
                 }
             }
+
+            Section("API Keys") {
+                apiKeyRow(
+                    title: "eBird", envVar: "EBIRD_API_KEY", account: "EBIRD_API_KEY",
+                    value: $eBirdAPIKey)
+                apiKeyRow(
+                    title: "OpenRouter", envVar: "OPENROUTER_API_KEY", account: "OPENROUTER_API_KEY",
+                    value: $openRouterAPIKey)
+            }
         }
         .padding()
         .frame(width: 420)
         .fileImporter(isPresented: $isChoosingFolder, allowedContentTypes: [.folder]) { result in
             if case let .success(url) = result {
                 viewModel.setLibraryRoot(url)
+            }
+        }
+        .task {
+            eBirdAPIKey = APIKeyStore.read(account: "EBIRD_API_KEY") ?? ""
+            openRouterAPIKey = APIKeyStore.read(account: "OPENROUTER_API_KEY") ?? ""
+        }
+    }
+
+    /// Stored in the Keychain via `APIKeyStore`, not `UserDefaults` — a cleartext plist isn't
+    /// appropriate for secrets. Disabled (and explained) when `envVar` is set in this process's
+    /// environment, since that always takes priority over whatever's saved here — editing the
+    /// field in that case would silently have no effect.
+    @ViewBuilder
+    private func apiKeyRow(title: String, envVar: String, account: String, value: Binding<String>)
+        -> some View
+    {
+        let envOverride = ProcessInfo.processInfo.environment[envVar]
+        LabeledContent(title) {
+            VStack(alignment: .trailing, spacing: 4) {
+                SecureField("Not set", text: value)
+                    .disabled(envOverride != nil)
+                    .onChange(of: value.wrappedValue) { _, newValue in
+                        APIKeyStore.save(newValue, account: account)
+                    }
+                if envOverride != nil {
+                    Text("Overridden by \(envVar) environment variable")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

@@ -14,13 +14,16 @@ in this one.
 - [`exiftool`](https://exiftool.org/) on `PATH` (`brew install exiftool`) — all metadata read/write
   goes through it, same as the Python sibling app.
 - Optional, for AI-assisted suggestions: a running [Ollama](https://ollama.com) server with a
-  vision-capable model, and/or an [OpenRouter](https://openrouter.ai) API key (read from the
-  process environment — see `docs/SPEC.md` §6). A third, native in-process MLX backend
-  (`mlx-swift-lm`, no server/API key needed) is also available — see `docs/MLX_PROVIDER.md`.
+  vision-capable model, and/or an [OpenRouter](https://openrouter.ai) API key (see
+  `docs/SPEC.md` §6). A third, native in-process MLX backend (`mlx-swift-lm`, no server/API key
+  needed) is also available — see `docs/MLX_PROVIDER.md`.
 - Optional, for eBird-verified bird-species candidate lists in AI prompts: an
-  [eBird](https://ebird.org) API key, read from the process environment as `EBIRD_API_KEY`. Note
-  that a shell-exported value won't reach an Xcode/Dock-launched process — set it via Xcode's
-  Product > Scheme > Edit Scheme > Run > Arguments > Environment Variables, or `launchctl setenv`.
+  [eBird](https://ebird.org) API key.
+- Both API keys are entered in Settings (Cmd+,) > API Keys, where they're stored in the macOS
+  Keychain via `APIKeyStore` — this is the reliable path for GUI-launched builds (Xcode's Run
+  button, Finder, Dock), none of which inherit a shell's `.zshrc` exports. Setting the process
+  environment variable directly (`EBIRD_API_KEY` / `OPENROUTER_API_KEY`) still works and takes
+  precedence over the Keychain, which is convenient for `swift run`/terminal debugging.
 
 ## Getting started
 
@@ -39,7 +42,10 @@ day-to-day development.
 
 For a real, Dock-pinnable app, run `scripts/build-app-bundle.sh` — see `scripts/README.md`
 "build-app-bundle.sh" — which builds `dist/MacPhotoMaster.app` (ad-hoc signed, not notarized/
-Developer ID, so it's for running on this machine, not distributing to others).
+Developer ID, so it's for running on this machine, not distributing to others). It builds via
+`xcodebuild` rather than `swift build -c release`: mlx-swift-lm's Metal shaders only get compiled
+into `default.metallib` by Xcode's build system, so a plain SwiftPM release build ships without it
+and the app silently aborts (no crash report) on first MLX use.
 
 ## Status
 
@@ -78,8 +84,12 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
 - The Metadata pane is a `.inspector()` (not a third `NavigationSplitView` column), giving it the
   same translucent sidebar material as the Source pane plus a native collapse toggle in the toolbar.
 - `scripts/build-app-bundle.sh` packages a real, ad-hoc-signed `MacPhotoMaster.app` (custom icon,
-  stable identity across rebuilds) that can be pinned to the Dock — not a substitute for `swift run`
-  during day-to-day development, just the way to get a Dock-launchable build.
+  stable identity across rebuilds, built via `xcodebuild` so mlx-swift-lm's Metal shaders compile
+  correctly) that can be pinned to the Dock — not a substitute for `swift run` during day-to-day
+  development, just the way to get a Dock-launchable build.
+- API keys (eBird, OpenRouter) resolve from the process environment first, then fall back to the
+  macOS Keychain via `APIKeyStore`, with a Settings (Cmd+,) > API Keys section to store them —
+  fixes GUI-launched builds (Xcode Run button, Finder, Dock) never seeing shell-exported env vars.
 
 Not yet built: a notarized/Developer ID-signed `.app` for distributing beyond this machine, and the
 deferred items noted in `CLAUDE.md` (ImageIO metadata write-back).

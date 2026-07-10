@@ -33,6 +33,18 @@ Model loading goes through the `#huggingFaceLoadModelContainer(configuration:)` 
 default `HubClient`/tokenizer integration — standard `~/.cache/huggingface` layout, no auth needed
 for the public `mlx-community/*` repos this app uses.
 
+### Sharing downloads with oMLX
+
+[oMLX](https://github.com/BrianSmithPhotos/omlx)'s Python inference server has its own, more
+robust model downloader and stores weights flat at `~/.omlx/models/<repo>/` — a different, non
+cache-format layout from this app's `~/.cache/huggingface/hub`, so the two don't share downloads
+automatically even for the same `mlx-community` repo. `MLXModelRegistry.configuration(for:)` checks
+`~/.omlx/models/<repo>` first and, if the repo is already there, loads it directly via
+`ModelConfiguration(directory:)` instead of re-downloading multi-GB weights through this app's own
+`HubClient`. **Recommended workflow**: pull a new model down via oMLX's model manager first, then
+add the same repo id to `MLXModelRegistry`/`AIModelSelection.presets` here — the fallback picks it
+up with no further wiring.
+
 ## Model allowlist
 
 `MLXModelRegistry.configurations` is the single source of truth both `MLXNativeProvider
@@ -42,7 +54,9 @@ used after the `mlx:` prefix in `AIModelSelection`. Keep it in sync with
 Where `VLMRegistry.shared` has a matching curated static, the entry reuses it; where it doesn't
 (community fine-tunes not shipped by mlx-swift-lm), the entry is a `ModelConfiguration(id:)` literal
 built directly against the real HF repo id — either way the dictionary key and the value's `id` must
-name the same repo, since it's the `id` that's actually downloaded, not the key.
+name the same repo, since it's the `id` that's actually downloaded, not the key (though at runtime
+`configuration(for:)` may swap that `id` for a local `.directory` if oMLX already has it — see
+above).
 
 | HF repo id | Size | Notes |
 |---|---|---|
@@ -50,10 +64,9 @@ name the same repo, since it's the `id` that's actually downloaded, not the key.
 | `mlx-community/gemma-3-27b-it-qat-4bit` | ~16 GB | Untested as of this writing — `VLMRegistry` static, no registry work needed |
 | `mlx-community/gemma-4-26b-a4b-it-4bit` | ~15 GB | Untested as of this writing |
 | `mlx-community/gemma-4-31b-it-4bit` | ~18 GB | `VLMRegistry` static, dense `gemma4` architecture (registered in this pinned mlx-swift-lm version). Untested as of this writing — pick this over the `-bf16` release of the same model (~62.5 GB, unquantized) unless accuracy testing shows the 4-bit quant is the problem |
+| `mlx-community/gemma-4-31b-8bit` | ~34 GB | `ModelConfiguration(id:)` literal (8-bit conversion of the same `google/gemma-4-31b` base as the 4-bit entry above). Untested as of this writing |
 | `mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` | ~21 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static. Manually verified: loads and returns a usable (imperfect) description, noticeably slower than gemma-3-12b |
-| `mlx-community/Ornith-1.0-35B-bf16` | ~70 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static; untested as of this writing |
-| `mlx-community/Qwen3-VL-8B-Instruct-4bit` | ~5 GB | `ModelConfiguration(id:)` literal. One size up from the 4B that returned empty (below) — untested whether that carries over |
-| `mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit` | ~13 GB | `ModelConfiguration(id:)` literal, `mistral3` architecture — a different vision-model family entirely, not Qwen/Gemma-derived. Untested as of this writing |
+| `mlx-community/Qwen3.6-35B-A3B-8bit` | ~38 GB | `ModelConfiguration(id:)` literal (8-bit conversion of the same `Qwen/Qwen3.6-35B-A3B` base as the 4.4bit-msq entry above). Untested as of this writing |
 
 **Removed from the preset list after manual testing**: `mlx-community/Qwen2.5-VL-3B-Instruct-4bit`
 and `mlx-community/Qwen3-VL-4B-Instruct-8bit` both returned an empty response (never a crash) against

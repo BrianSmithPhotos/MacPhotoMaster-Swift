@@ -16,7 +16,11 @@ in this one.
 - Optional, for AI-assisted suggestions: a running [Ollama](https://ollama.com) server with a
   vision-capable model, and/or an [OpenRouter](https://openrouter.ai) API key (see
   `docs/SPEC.md` §6). A third, native in-process MLX backend (`mlx-swift-lm`, no server/API key
-  needed) is also available — see `docs/MLX_PROVIDER.md`.
+  needed) is also available — see `docs/MLX_PROVIDER.md`. If a model is already downloaded via
+  [oMLX](https://github.com/BrianSmithPhotos/omlx)'s model manager (its downloader is the more
+  robust of the two), `MLXModelRegistry` picks it up straight from oMLX's local store instead of
+  re-downloading multi-GB weights a second time — see `docs/MLX_PROVIDER.md` "Sharing downloads
+  with oMLX".
 - Optional, for eBird-verified bird-species candidate lists in AI prompts: an
   [eBird](https://ebird.org) API key.
 - Both API keys are entered in Settings (Cmd+,) > API Keys, where they're stored in the macOS

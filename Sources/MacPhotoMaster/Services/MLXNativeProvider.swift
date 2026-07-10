@@ -53,6 +53,12 @@ struct MLXNativeProvider: AIProvider {
             let session = ChatSession(container, instructions: systemPrompt)
             let response = try await session.respond(
                 to: userPrompt, images: images, videos: [], audios: [])
+            // mlx-swift-lm's token loop checks `Task.isCancelled` every iteration and ends the
+            // stream (silently, with whatever partial text was generated) rather than throwing —
+            // so a `Task.cancel()` on the caller's task (see `SourceBrowserViewModel.cancelAISuggestion`)
+            // returns here promptly, but only this explicit check turns it into a clean
+            // `CancellationError` instead of a misleading empty/partial response.
+            try Task.checkCancellation()
             let elapsedSeconds = Date().timeIntervalSince(start)
             Self.logger.log(
                 "MLX chat: model=\(trimmedModel, privacy: .public) elapsed=\(elapsedSeconds, privacy: .public)s"
@@ -63,6 +69,8 @@ struct MLXNativeProvider: AIProvider {
             return trimmed
         } catch let error as AISuggestionError {
             throw error
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw AISuggestionError.provider("MLX inference failed: \(error.localizedDescription)")
         }

@@ -53,16 +53,23 @@ struct MetadataPanelView: View {
                             get: { viewModel.subjectIsolationEnabled },
                             set: { viewModel.setSubjectIsolationEnabled($0) }
                         ))
-                    Button {
-                        Task { await viewModel.suggestAI() }
-                    } label: {
+                    HStack {
+                        Button {
+                            viewModel.startAISuggestion()
+                        } label: {
+                            if viewModel.isSuggestingAI {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Text("Suggest Description + Keywords")
+                            }
+                        }
+                        .disabled(viewModel.selectedAsset == nil || viewModel.isSuggestingAI)
                         if viewModel.isSuggestingAI {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Text("Suggest Description + Keywords")
+                            Button("Stop") {
+                                viewModel.cancelAISuggestion()
+                            }
                         }
                     }
-                    .disabled(viewModel.selectedAsset == nil || viewModel.isSuggestingAI)
                     if let aiStatusMessage = viewModel.aiStatusMessage {
                         Text(aiStatusMessage)
                             .font(.caption)

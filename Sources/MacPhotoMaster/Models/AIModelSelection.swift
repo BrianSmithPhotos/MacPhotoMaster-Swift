@@ -46,7 +46,7 @@ struct AIModelSelection {
         "mlx:mlx-community/gemma-3-27b-it-qat-4bit",
         "mlx:mlx-community/gemma-4-26b-a4b-it-4bit",
         "mlx:mlx-community/gemma-4-31b-it-4bit",
-        "mlx:mlx-community/gemma-4-31b-8bit",
+        "mlx:mlx-community/gemma-4-31b-it-8bit",
         "mlx:mlx-community/Qwen3.6-35B-A3B-4.4bit-msq",
         "mlx:mlx-community/Qwen3.6-35B-A3B-8bit",
     ]

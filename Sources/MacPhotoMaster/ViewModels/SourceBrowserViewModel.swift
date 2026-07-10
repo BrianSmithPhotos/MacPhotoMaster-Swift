@@ -129,6 +129,12 @@ final class SourceBrowserViewModel: ObservableObject {
     /// crop, when one was found) — shown in the Metadata panel so a misidentification is diagnosable
     /// (was the model looking at the subject, or a diluted full frame?).
     @Published private(set) var aiEvaluatedImage: CGImage?
+    /// Handle to the in-flight `suggestAI()` `Task`, kept only so `cancelAISuggestion()` has
+    /// something to cancel — added because the native MLX backend has no request-level timeout
+    /// (a hung/OOM-prone local generation can otherwise spin indefinitely with no way to abort it
+    /// short of quitting the app). `MLXNativeProvider.chat` checks `Task.isCancelled` cooperatively,
+    /// same mechanism `mlx-swift-lm`'s own token loop uses internally.
+    private var suggestAITask: Task<Void, Never>?
 
     /// OpenRouter model strings (matching the `"<provider>:<model>"` convention `aiModelText` uses,
     /// e.g. `"openrouter:google/gemini-3.5-flash"`) for which the eBird candidate species list is
@@ -929,6 +935,9 @@ final class SourceBrowserViewModel: ObservableObject {
     /// every member of every selected set, but the image sent to the model is always drawn from
     /// the *first* selected set (grid order) — picking a dissimilar mix of sets to suggest across
     /// is the user's own responsibility, not something this method tries to detect.
+    ///
+    /// Call `startAISuggestion()` from the UI rather than this directly — it wraps this in the
+    /// cancellable `Task` `cancelAISuggestion()` needs.
     func suggestAI() async {
         guard !isSuggestingAI, let id = selectedAssetID else { return }
         guard let selection = AIModelSelection.parse(aiModelText) else {
@@ -1004,10 +1013,30 @@ final class SourceBrowserViewModel: ObservableObject {
             if let saveStatus {
                 aiStatusMessage = "Suggested\(categorySuffix); \(saveStatus)"
             }
+        } catch is CancellationError {
+            guard selectedAssetID == id else { return }
+            aiStatusMessage = "AI suggestion cancelled"
         } catch {
             guard selectedAssetID == id else { return }
             aiStatusMessage = "AI suggestion failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Starts `suggestAI()` as a cancellable `Task`, stashing the handle for `cancelAISuggestion()`.
+    /// The UI (`MetadataPanelView`'s "Suggest" button) calls this instead of running `suggestAI()`
+    /// directly.
+    func startAISuggestion() {
+        suggestAITask = Task { await suggestAI() }
+    }
+
+    /// The "break key" for a stuck local MLX generation (docs/MLX_PROVIDER.md "No request-level
+    /// timeout") — cancels the in-flight `suggestAI()` `Task`, which `MLXNativeProvider.chat`
+    /// observes cooperatively and unwinds from cleanly rather than waiting for a result that may
+    /// never come. `isSuggestingAI`'s existing `defer` in `suggestAI()` still resets it once the
+    /// cancelled task actually finishes unwinding, so the Suggest button re-enables promptly rather
+    /// than needing a second signal.
+    func cancelAISuggestion() {
+        suggestAITask?.cancel()
     }
 
     var selectedAsset: PhotoAsset? {

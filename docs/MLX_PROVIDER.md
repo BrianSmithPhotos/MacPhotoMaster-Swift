@@ -64,7 +64,7 @@ above).
 | `mlx-community/gemma-3-27b-it-qat-4bit` | ~16 GB | Untested as of this writing — `VLMRegistry` static, no registry work needed |
 | `mlx-community/gemma-4-26b-a4b-it-4bit` | ~15 GB | Untested as of this writing |
 | `mlx-community/gemma-4-31b-it-4bit` | ~18 GB | `VLMRegistry` static, dense `gemma4` architecture (registered in this pinned mlx-swift-lm version). Untested as of this writing — pick this over the `-bf16` release of the same model (~62.5 GB, unquantized) unless accuracy testing shows the 4-bit quant is the problem |
-| `mlx-community/gemma-4-31b-8bit` | ~34 GB | `ModelConfiguration(id:)` literal (8-bit conversion of the same `google/gemma-4-31b` base as the 4-bit entry above). Untested as of this writing |
+| `mlx-community/gemma-4-31b-it-8bit` | ~34 GB | `ModelConfiguration(id:)` literal, instruction-tuned 8-bit conversion of `google/gemma-4-31b-it`. Originally registered as `mlx-community/gemma-4-31b-8bit` (the *base*, non-instruction-tuned conversion) — swapped after that produced a "tokenizer does not have a chat template" error: `mlx-community/gemma-4-31b-8bit`/`google/gemma-4-31b` are pretrained-only repos and never shipped one, and neither does the already-registered `-it-4bit` entry above, but `Gemma4.swift`'s `prepare(input:)` has no fallback template and throws when it's missing. **When adding any gemma4 (or other) community conversion, confirm the repo is an `-it-`/instruction-tuned release before registering it** — a base-model conversion will hit this every time, not just for gemma4 |
 | `mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` | ~21 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static. Manually verified: loads and returns a usable (imperfect) description, noticeably slower than gemma-3-12b |
 | `mlx-community/Qwen3.6-35B-A3B-8bit` | ~38 GB | `ModelConfiguration(id:)` literal (8-bit conversion of the same `Qwen/Qwen3.6-35B-A3B` base as the 4.4bit-msq entry above). Untested as of this writing |
 
@@ -89,9 +89,17 @@ inference. Worth revisiting only if a future mlx-swift-lm bump adds `"qwen3_vl_m
 - **No think-mode differentiation.** `think` is a no-op for this backend — mlx-swift-lm has no
   native "thinking effort" concept, and `AISuggestionService`'s retry path already reduces effort by
   sending a center-cropped/downscaled image, not by requesting a cheaper generation mode.
-- **No request-level timeout.** There's no `URLSession` boundary to hang a timeout off of, and local
-  Metal inference on an already-loaded model doesn't fail the way flaky networking does. The
-  `.timeout` retry path in `AISuggestionService` simply never fires for this provider.
+- **No request-level timeout — manual cancel instead.** There's no `URLSession` boundary to hang a
+  timeout off of, and local Metal inference on an already-loaded model doesn't fail the way flaky
+  networking does, so the `.timeout` retry path in `AISuggestionService` never fires for this
+  provider. A stuck/runaway generation (observed once with `Qwen3.6-35B-A3B-8bit` — it never
+  returned and eventually triggered a system out-of-memory warning) has no automatic recovery, so
+  `SourceBrowserViewModel.cancelAISuggestion()` gives the user a manual "Stop" button next to
+  "Suggest" instead: it cancels the `Task` `startAISuggestion()` created, which
+  `MLXNativeProvider.chat` observes cooperatively via `Task.checkCancellation()` — the same
+  per-token `Task.isCancelled` check mlx-swift-lm's own generation loop (`Evaluate.swift`) already
+  uses internally, so cancellation lands within about one token's worth of latency rather than
+  waiting for the whole response.
 - **No download-progress UI.** First use of a model not yet cached locally is a slow, silent
   multi-GB download; the existing "Generating AI suggestions…" status message is the only feedback.
 - **Single-model-resident cache.** `MLXModelManager` holds at most one `ModelContainer` at a time —

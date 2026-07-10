@@ -33,8 +33,8 @@ enum MLXModelRegistry {
         "mlx-community/gemma-3-27b-it-qat-4bit": VLMRegistry.gemma3_27B_qat_4bit,
         "mlx-community/gemma-4-26b-a4b-it-4bit": VLMRegistry.gemma4_26BA4B_it_4bit,
         "mlx-community/gemma-4-31b-it-4bit": VLMRegistry.gemma4_31B_it_4bit,
-        "mlx-community/gemma-4-31b-8bit": ModelConfiguration(
-            id: "mlx-community/gemma-4-31b-8bit",
+        "mlx-community/gemma-4-31b-it-8bit": ModelConfiguration(
+            id: "mlx-community/gemma-4-31b-it-8bit",
             defaultPrompt: "Describe the image in English",
             extraEOSTokens: ["<turn|>"]
         ),

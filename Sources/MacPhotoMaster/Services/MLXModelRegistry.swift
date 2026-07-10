@@ -21,23 +21,20 @@ enum MLXModelRegistry {
         "mlx-community/gemma-3-27b-it-qat-4bit": VLMRegistry.gemma3_27B_qat_4bit,
         "mlx-community/gemma-4-26b-a4b-it-4bit": VLMRegistry.gemma4_26BA4B_it_4bit,
         "mlx-community/gemma-4-31b-it-4bit": VLMRegistry.gemma4_31B_it_4bit,
+        "mlx-community/gemma-4-31b-8bit": ModelConfiguration(
+            id: "mlx-community/gemma-4-31b-8bit",
+            defaultPrompt: "Describe the image in English",
+            extraEOSTokens: ["<turn|>"]
+        ),
         "mlx-community/Qwen3.6-35B-A3B-4.4bit-msq": ModelConfiguration(
             id: "mlx-community/Qwen3.6-35B-A3B-4.4bit-msq",
             defaultPrompt: "Describe the image in English",
             extraEOSTokens: ["<|im_end|>"]
         ),
-        "mlx-community/Ornith-1.0-35B-bf16": ModelConfiguration(
-            id: "mlx-community/Ornith-1.0-35B-bf16",
+        "mlx-community/Qwen3.6-35B-A3B-8bit": ModelConfiguration(
+            id: "mlx-community/Qwen3.6-35B-A3B-8bit",
             defaultPrompt: "Describe the image in English",
             extraEOSTokens: ["<|im_end|>"]
-        ),
-        "mlx-community/Qwen3-VL-8B-Instruct-4bit": ModelConfiguration(
-            id: "mlx-community/Qwen3-VL-8B-Instruct-4bit",
-            defaultPrompt: "Describe the image in English",
-            extraEOSTokens: ["<|im_end|>"]
-        ),
-        "mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit": ModelConfiguration(
-            id: "mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit"
         ),
     ]
 

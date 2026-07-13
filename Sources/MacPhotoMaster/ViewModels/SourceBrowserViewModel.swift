@@ -172,8 +172,10 @@ final class SourceBrowserViewModel: ObservableObject {
     /// revisit if the OpenRouter preset list (`AIModelSelection.presets`) changes these model names.
     static let defaultEBirdDisabledModels: Set<String> = [
         "openrouter:google/gemini-3.5-flash",
-        "openrouter:anthropic/claude-opus-4.6",
+        "openrouter:anthropic/claude-opus-4.8",
         "openrouter:openai/gpt-5.5",
+        "openrouter:openai/gpt-5.6-luna",
+        "openrouter:anthropic/claude-sonnet-5",
     ]
 
     private let loader = PhotoAssetLoader()

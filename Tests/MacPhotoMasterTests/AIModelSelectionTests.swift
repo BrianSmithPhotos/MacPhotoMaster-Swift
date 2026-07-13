@@ -40,6 +40,6 @@ final class AIModelSelectionTests: XCTestCase {
     }
 
     func testFirstPresetIsDefaultAIModelText() {
-        XCTAssertEqual(AIModelSelection.presets.first, "ollama:qwen3.6:35b")
+        XCTAssertEqual(AIModelSelection.presets.first, "mlx:mlx-community/gemma-4-31b-it-8bit")
     }
 }

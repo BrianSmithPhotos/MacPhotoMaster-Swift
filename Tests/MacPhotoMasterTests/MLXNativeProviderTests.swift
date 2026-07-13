@@ -43,7 +43,7 @@ final class MLXNativeProviderTests: XCTestCase {
     func testEnsureVisionCapableAllowlistedModelPasses() async throws {
         let provider = MLXNativeProvider()
 
-        try await provider.ensureVisionCapable(model: "mlx-community/gemma-3-12b-it-qat-4bit")
+        try await provider.ensureVisionCapable(model: "mlx-community/gemma-4-31b-it-8bit")
     }
 
     func testEnsureVisionCapableBlankModelThrows() async {

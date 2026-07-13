@@ -51,21 +51,17 @@ up with no further wiring.
 .ensureVisionCapable` and `MLXModelManager` resolve against, keyed by the exact Hugging Face repo id
 used after the `mlx:` prefix in `AIModelSelection`. Keep it in sync with
 `AIModelSelection.presets`'s `mlx:` entries by hand — nothing enforces that link at compile time.
-Where `VLMRegistry.shared` has a matching curated static, the entry reuses it; where it doesn't
-(community fine-tunes not shipped by mlx-swift-lm), the entry is a `ModelConfiguration(id:)` literal
-built directly against the real HF repo id — either way the dictionary key and the value's `id` must
+None of the three current entries have a `VLMRegistry.shared` curated static (all are community
+fine-tunes/conversions not shipped by mlx-swift-lm itself), so each is a `ModelConfiguration(id:)`
+literal built directly against the real HF repo id — the dictionary key and the value's `id` must
 name the same repo, since it's the `id` that's actually downloaded, not the key (though at runtime
 `configuration(for:)` may swap that `id` for a local `.directory` if oMLX already has it — see
 above).
 
 | HF repo id | Size | Notes |
 |---|---|---|
-| `mlx-community/gemma-3-12b-it-qat-4bit` | ~7 GB | Manually verified: loads and returns a description, though accuracy was mediocre |
-| `mlx-community/gemma-3-27b-it-qat-4bit` | ~16 GB | Untested as of this writing — `VLMRegistry` static, no registry work needed |
-| `mlx-community/gemma-4-26b-a4b-it-4bit` | ~15 GB | Untested as of this writing |
-| `mlx-community/gemma-4-31b-it-4bit` | ~18 GB | `VLMRegistry` static, dense `gemma4` architecture (registered in this pinned mlx-swift-lm version). Untested as of this writing — pick this over the `-bf16` release of the same model (~62.5 GB, unquantized) unless accuracy testing shows the 4-bit quant is the problem |
-| `mlx-community/gemma-4-31b-it-8bit` | ~34 GB | `ModelConfiguration(id:)` literal, instruction-tuned 8-bit conversion of `google/gemma-4-31b-it`. Originally registered as `mlx-community/gemma-4-31b-8bit` (the *base*, non-instruction-tuned conversion) — swapped after that produced a "tokenizer does not have a chat template" error: `mlx-community/gemma-4-31b-8bit`/`google/gemma-4-31b` are pretrained-only repos and never shipped one, and neither does the already-registered `-it-4bit` entry above, but `Gemma4.swift`'s `prepare(input:)` has no fallback template and throws when it's missing. **When adding any gemma4 (or other) community conversion, confirm the repo is an `-it-`/instruction-tuned release before registering it** — a base-model conversion will hit this every time, not just for gemma4 |
-| `mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` | ~21 GB | `ModelConfiguration(id:)` literal — not a `VLMRegistry` static. Manually verified: loads and returns a usable (imperfect) description, noticeably slower than gemma-3-12b |
+| `mlx-community/gemma-4-31b-it-8bit` | ~34 GB | **Default model** (`AIModelSelection.presets.first`). `ModelConfiguration(id:)` literal, instruction-tuned 8-bit conversion of `google/gemma-4-31b-it`. Originally registered as `mlx-community/gemma-4-31b-8bit` (the *base*, non-instruction-tuned conversion) — swapped after that produced a "tokenizer does not have a chat template" error: `mlx-community/gemma-4-31b-8bit`/`google/gemma-4-31b` are pretrained-only repos and never shipped one, but `Gemma4.swift`'s `prepare(input:)` has no fallback template and throws when it's missing. **When adding any gemma4 (or other) community conversion, confirm the repo is an `-it-`/instruction-tuned release before registering it** — a base-model conversion will hit this every time, not just for gemma4 |
+| `mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` | ~21 GB | `ModelConfiguration(id:)` literal. Manually verified: loads and returns a usable (imperfect) description, noticeably slower than the old (now-removed) gemma-3-12b preset |
 | `mlx-community/Qwen3.6-35B-A3B-8bit` | ~38 GB | `ModelConfiguration(id:)` literal (8-bit conversion of the same `Qwen/Qwen3.6-35B-A3B` base as the 4.4bit-msq entry above). Untested as of this writing |
 
 **Removed from the preset list after manual testing**: `mlx-community/Qwen2.5-VL-3B-Instruct-4bit`
@@ -74,6 +70,15 @@ a real photo — the smaller Qwen2/2.5/3-VL models in this mlx-swift-lm version 
 regardless of prompt content. Root cause not yet investigated (would need to trace `Qwen25VL.swift`/
 `Qwen3VL.swift`'s processor/generation path against a live repro). Both ids are still reachable by
 typing them directly into the free-text model field if this is worth revisiting later.
+
+**Also dropped from the preset list** (2026-07-12, exploratory accuracy testing settled on the
+8-bit gemma4/Qwen3.6 lineup above): `mlx-community/gemma-3-12b-it-qat-4bit`,
+`mlx-community/gemma-3-27b-it-qat-4bit`, `mlx-community/gemma-4-26b-a4b-it-4bit`, and
+`mlx-community/gemma-4-31b-it-4bit` — removed from `MLXModelRegistry.configurations` too (it's the
+actual allowlist `MLXNativeProvider.ensureVisionCapable` checks, not just the dropdown), so unlike
+the two Qwen2.5/3-VL ids above, these aren't reachable via the free-text field anymore either;
+re-add the registry entry (`VLMRegistry.gemma3_12B_qat_4bit`, etc. — see git history) to bring one
+back.
 
 **Researched and deliberately excluded — would fail to load, not just be slow**: any
 `Qwen3-VL-30B-A3B-*`/`Qwen3-VL-235B-A22B-*` variant and `mlx-community/GLM-4.5V-3bit`. Checked each
@@ -116,8 +121,9 @@ inference. Worth revisiting only if a future mlx-swift-lm bump adds `"qwen3_vl_m
 ## Manual smoke test
 
 1. `swift build`, then `swift run`.
-2. In the AI Model field, pick or type an `mlx:` preset (e.g.
-   `mlx:mlx-community/gemma-3-12b-it-qat-4bit` — smallest currently-preset, fastest first download).
+2. In the AI Model field, pick or type an `mlx:` preset — the default,
+   `mlx:mlx-community/gemma-4-31b-it-8bit`, or `mlx:mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` for the
+   smallest/fastest-first-download of the three current presets.
 3. Select a photo, click "Suggest Description + Keywords".
 4. First run against a new model downloads it to `~/.cache/huggingface` — this can take a while with
    no progress indicator (see limitations above); subsequent runs against the same model are fast.

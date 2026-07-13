@@ -48,11 +48,17 @@ struct MetadataPanelView: View {
                         .fixedSize()
                     }
                     Toggle(
-                        "Crop to subject (bird/flower)",
+                        "Crop to Subject",
                         isOn: Binding(
                             get: { viewModel.subjectIsolationEnabled },
                             set: { viewModel.setSubjectIsolationEnabled($0) }
                         ))
+                    if viewModel.manualSubjectCropRect != nil {
+                        Button("Reset to AI Crop") {
+                            viewModel.setManualCropRect(nil)
+                        }
+                        .font(.caption)
+                    }
                     HStack {
                         Button {
                             viewModel.startAISuggestion()

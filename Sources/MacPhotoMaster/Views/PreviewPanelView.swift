@@ -18,9 +18,22 @@ struct PreviewPanelView: View {
             VStack {
                 Spacer()
                 if let previewImage {
-                    Image(decorative: previewImage, scale: 1)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+                    GeometryReader { geo in
+                        ZStack {
+                            Image(decorative: previewImage, scale: 1)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                            if viewModel.subjectIsolationEnabled {
+                                SubjectCropOverlay(
+                                    imageSize: CGSize(
+                                        width: previewImage.width, height: previewImage.height),
+                                    containerSize: geo.size,
+                                    committedRect: viewModel.manualSubjectCropRect,
+                                    onCommit: viewModel.setManualCropRect
+                                )
+                            }
+                        }
+                    }
                 } else {
                     Image(systemName: "photo")
                         .font(.system(size: 64))
@@ -147,6 +160,83 @@ private struct VariantTileView: View {
         .accessibilityIdentifier("variantTile.\(asset.id.lastPathComponent)")
         .accessibilityLabel(asset.url.lastPathComponent)
         .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+}
+
+/// Click-drag-to-crop overlay on the big preview, shown only while `subjectIsolationEnabled` is on
+/// (see `PreviewPanelView`'s body). Draws a live rectangle while dragging, or `committedRect` (the
+/// existing manual override, if any) converted to view space when idle. A drag that never exceeds
+/// `minimumCommitSize` in view space — a plain click — commits `nil` instead, resetting back to the
+/// AI-computed crop; see `SourceBrowserViewModel.setManualCropRect`.
+private struct SubjectCropOverlay: View {
+    let imageSize: CGSize
+    let containerSize: CGSize
+    let committedRect: CGRect?
+    let onCommit: (CGRect?) -> Void
+
+    @State private var dragStart: CGPoint?
+    @State private var dragCurrent: CGPoint?
+
+    private static let minimumCommitSize: CGFloat = 8
+
+    private var fit: CGRect {
+        SubjectCropGeometry.fitRect(imageSize: imageSize, containerSize: containerSize)
+    }
+
+    var body: some View {
+        ZStack {
+            if let dragStart, let dragCurrent {
+                outline(for: normalizedRect(dragStart, dragCurrent))
+            } else if let committedRect {
+                outline(
+                    for: SubjectCropGeometry.viewRect(
+                        forImageRect: committedRect, imageSize: imageSize, containerSize: containerSize))
+            }
+        }
+        .frame(width: containerSize.width, height: containerSize.height)
+        .contentShape(Rectangle())
+        // `minimumDistance: 0` so a plain click (no movement) still produces a gesture value —
+        // needed to distinguish "click to reset" from "drag to draw" ourselves below, rather than
+        // relying on SwiftUI's drag-recognition threshold (which would silently swallow a click).
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                .onChanged { value in
+                    if dragStart == nil { dragStart = clamp(value.startLocation) }
+                    dragCurrent = clamp(value.location)
+                }
+                .onEnded { value in
+                    let start = clamp(value.startLocation)
+                    let end = clamp(value.location)
+                    dragStart = nil
+                    dragCurrent = nil
+                    let viewRect = normalizedRect(start, end)
+                    guard viewRect.width >= Self.minimumCommitSize
+                        || viewRect.height >= Self.minimumCommitSize
+                    else {
+                        onCommit(nil)
+                        return
+                    }
+                    onCommit(
+                        SubjectCropGeometry.imageRect(
+                            forViewRect: viewRect, imageSize: imageSize, containerSize: containerSize))
+                }
+        )
+    }
+
+    private func outline(for rect: CGRect) -> some View {
+        Rectangle()
+            .strokeBorder(Color.accentColor, lineWidth: 2)
+            .background(Color.accentColor.opacity(0.12))
+            .frame(width: rect.width, height: rect.height)
+            .position(x: rect.midX, y: rect.midY)
+    }
+
+    private func normalizedRect(_ a: CGPoint, _ b: CGPoint) -> CGRect {
+        CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
+    }
+
+    private func clamp(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: min(max(point.x, fit.minX), fit.maxX), y: min(max(point.y, fit.minY), fit.maxY))
     }
 }
 

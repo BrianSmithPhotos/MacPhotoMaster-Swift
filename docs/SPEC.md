@@ -120,13 +120,17 @@ deterministically, and copy files into local storage.
   with plausible local wildlife/plant identification) — see §7.
 - Beyond the reference app: an eBird region-species candidate list (verified actually recorded near
   the photo's GPS fix) is added to the prompt for bird identification, and an optional, user-toggled
-  `SubjectIsolationService` crop is sent instead of the full frame when a subject is detected — both
-  added to reduce species-ID fabrication on small/distant subjects. The crop toggle defaults off and
-  is a deliberate per-session choice (Toggle next to the AI model picker in the Metadata panel), not
+  "Crop to Subject" crop is sent instead of the full frame when a subject is detected — both added to
+  reduce species-ID fabrication on small/distant subjects. The crop toggle defaults off and is a
+  deliberate per-session choice (Toggle next to the AI model picker in the Metadata panel), not
   automatic: on a general scene (e.g. a street shot) it can isolate an incidental foreground object —
   a parked car, a lamp-post — instead of the scene the user meant to describe, so it's meant to be
-  switched on only for bird/flower subjects where the framing is small and distant. See
-  `docs/ARCHITECTURE.md` "eBird species-list cache".
+  switched on only for close, small/distant subjects (birds, flowers, or otherwise). Turning the
+  toggle on (or switching photos while it's already on) immediately computes and shows the crop —
+  it no longer waits for a Suggest click. The crop itself is `SubjectIsolationService`'s AI pick by
+  default, but the user can click-drag a rectangle on the big preview (`PreviewPanelView`) to
+  override it; a plain click, or the "Reset to AI Crop" button next to the toggle, reverts to the AI
+  crop. See `docs/ARCHITECTURE.md` "eBird species-list cache".
 
 ## 7. GPS enrichment from Timeline export
 

@@ -129,6 +129,16 @@ final class SourceBrowserViewModel: ObservableObject {
     /// crop, when one was found) — shown in the Metadata panel so a misidentification is diagnosable
     /// (was the model looking at the subject, or a diluted full frame?).
     @Published private(set) var aiEvaluatedImage: CGImage?
+    /// User-drawn override for the subject crop (image-pixel space, matching the 2048px-cap decode
+    /// `extractPreviewAsync` produces), set by dragging a rectangle on `PreviewPanelView`'s big
+    /// preview. When present, it's used in place of `SubjectIsolationService`'s AI-computed crop —
+    /// both for the eager `aiEvaluatedImage` preview and for the next `suggestAI()` call. Cleared on
+    /// every selection change by `loadEditBuffer()`, same lifetime as `aiEvaluatedImage`.
+    @Published private(set) var manualSubjectCropRect: CGRect?
+    /// Handle to the in-flight eager crop computation kicked off by `setSubjectIsolationEnabled`/
+    /// `setManualCropRect`/a selection change — cancelled and replaced on every retrigger so a slow
+    /// Vision request for a since-abandoned photo can't clobber `aiEvaluatedImage` after the fact.
+    private var subjectCropTask: Task<Void, Never>?
     /// Handle to the in-flight `suggestAI()` `Task`, kept only so `cancelAISuggestion()` has
     /// something to cancel — added because the native MLX backend has no request-level timeout
     /// (a hung/OOM-prone local generation can otherwise spin indefinitely with no way to abort it
@@ -145,14 +155,17 @@ final class SourceBrowserViewModel: ObservableObject {
     /// per-model Toggle via `setEBirdCandidateListEnabled(_:forModel:)`.
     @Published private(set) var eBirdDisabledModels: Set<String>
 
-    /// Whether `suggestAI()` crops to `SubjectIsolationService`'s detected subject before sending the
-    /// image to the AI. Good for a small/distant bird or flower filling little of the frame; bad for
-    /// a general scene (e.g. a street shot), where it can crop to an incidental foreground object —
-    /// a parked car, a lamp-post — instead of the scene the user meant to describe. Off by default;
-    /// the user flips it on for a bird/flower session and back off for general shooting. Persisted in
-    /// `UserDefaults`; `MetadataPanelView` exposes it as a Toggle next to the AI model picker (a
-    /// per-session choice, not a rarely-touched preference, so it lives there rather than
-    /// `SettingsView`).
+    /// Whether `suggestAI()` crops to a detected subject before sending the image to the AI — either
+    /// `SubjectIsolationService`'s AI-picked crop, or `manualSubjectCropRect` when the user's drawn an
+    /// override on `PreviewPanelView`'s big preview. Good for a small/distant subject (e.g. a bird or
+    /// flower) filling little of the frame; bad for a general scene (e.g. a street shot), where the AI
+    /// crop can pick an incidental foreground object — a parked car, a lamp-post — instead of the
+    /// scene the user meant to describe. Off by default; the user flips it on for a close-subject
+    /// session and back off for general shooting. Persisted in `UserDefaults`; `MetadataPanelView`
+    /// exposes it as a Toggle next to the AI model picker (a per-session choice, not a rarely-touched
+    /// preference, so it lives there rather than `SettingsView`). Turning it on (or switching photos
+    /// while it's already on) eagerly computes and shows the crop via `recomputeSubjectCropPreview()`
+    /// rather than waiting for a `suggestAI()` call.
     @Published private(set) var subjectIsolationEnabled: Bool
 
     /// Off-by-default set as of 2026-07-05 — the user's call, not derived from anything measurable;
@@ -266,10 +279,63 @@ final class SourceBrowserViewModel: ObservableObject {
     }
 
     /// Called from `MetadataPanelView`'s subject-crop Toggle — see `subjectIsolationEnabled`'s doc
-    /// comment.
+    /// comment. Eagerly computes and shows the crop (AI or manual, whichever applies) the moment the
+    /// toggle is switched on, rather than waiting for a `suggestAI()` call.
     func setSubjectIsolationEnabled(_ enabled: Bool) {
         subjectIsolationEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: Self.subjectIsolationEnabledDefaultsKey)
+        if enabled {
+            recomputeSubjectCropPreview()
+        } else {
+            subjectCropTask?.cancel()
+            aiEvaluatedImage = nil
+        }
+    }
+
+    /// Called from `PreviewPanelView`'s drag-to-crop overlay on the big preview — `rect` (image-pixel
+    /// space) on drag commit, `nil` to reset back to the AI-computed crop. See
+    /// `manualSubjectCropRect`'s doc comment.
+    func setManualCropRect(_ rect: CGRect?) {
+        manualSubjectCropRect = rect
+        recomputeSubjectCropPreview()
+    }
+
+    /// Shared by `setSubjectIsolationEnabled`, `setManualCropRect`, and a selection change: (re)runs
+    /// whichever crop currently applies — the manual override if one's set, otherwise
+    /// `SubjectIsolationService`'s AI crop — against the currently selected asset, and publishes the
+    /// result to `aiEvaluatedImage` for the "Evaluated" preview. No-op (and clears the preview) when
+    /// the toggle is off or nothing's selected.
+    private func recomputeSubjectCropPreview() {
+        subjectCropTask?.cancel()
+        guard subjectIsolationEnabled, let asset = selectedAsset else {
+            aiEvaluatedImage = nil
+            return
+        }
+        let id = asset.id
+        let manualRect = manualSubjectCropRect
+        subjectCropTask = Task {
+            guard let cgImage = try? await NativeMetadataReader().extractPreviewAsync(at: asset.url)
+            else { return }
+            guard !Task.isCancelled, selectedAssetID == id else { return }
+            let cropped: CGImage?
+            if let manualRect {
+                cropped = cgImage.cropping(to: manualRect)
+            } else {
+                cropped = await computeSubjectCrop(in: cgImage)
+            }
+            guard !Task.isCancelled, selectedAssetID == id else { return }
+            aiEvaluatedImage = cropped
+        }
+    }
+
+    /// Runs `SubjectIsolationService.isolateSubject` off the main actor — it's a blocking synchronous
+    /// Vision request, and this is now invoked on every toggle flip and every crop-rectangle drag
+    /// commit (not just on a `suggestAI()` click), so leaving it on `MainActor` would jank the preview
+    /// while dragging.
+    private func computeSubjectCrop(in image: CGImage) async -> CGImage? {
+        await Task.detached(priority: .userInitiated) {
+            SubjectIsolationService.isolateSubject(in: image)
+        }.value
     }
 
     /// Lazily created on first use rather than in `init` because `SkipStateStore.init` is
@@ -985,8 +1051,18 @@ final class SourceBrowserViewModel: ObservableObject {
         defer { isSuggestingAI = false }
         do {
             let cgImage = try await NativeMetadataReader().extractPreviewAsync(at: sourceAsset.url)
-            let subjectCrop =
-                subjectIsolationEnabled ? SubjectIsolationService.isolateSubject(in: cgImage) : nil
+            let subjectCrop: CGImage?
+            if !subjectIsolationEnabled {
+                subjectCrop = nil
+            } else if let manualRect = manualSubjectCropRect {
+                // Applied to whatever file is actually sent below (`sourceAsset`), even if it was
+                // drawn against a different member of the capture set (e.g. the previewed JPEG of a
+                // RAW+JPEG pair) — the user's call; RAW and JPEG share framing for virtually every
+                // camera, and `cropping(to:)` fails safe to `nil` (full frame) on an out-of-bounds rect.
+                subjectCrop = cgImage.cropping(to: manualRect)
+            } else {
+                subjectCrop = await computeSubjectCrop(in: cgImage)
+            }
             let evaluatedImage = subjectCrop ?? cgImage
             guard selectedAssetID == id else { return }
             // Only show the "Evaluated" crop when it's actually a crop (subject-isolation found a
@@ -1130,6 +1206,12 @@ final class SourceBrowserViewModel: ObservableObject {
     /// location) for a newly selected photo that has no GPS at all.
     private func loadEditBuffer() {
         gpsSuggestionStatusMessage = nil
+        // The previous photo's subject-crop state never applies to the new one — clear it before
+        // possibly recomputing below, same as `editableDescription`/etc. reset for a new asset.
+        subjectCropTask?.cancel()
+        manualSubjectCropRect = nil
+        aiEvaluatedImage = nil
+        aiStatusMessage = nil
         guard let asset = selectedAsset else {
             editableDescription = ""
             editableKeywords = ""
@@ -1143,6 +1225,11 @@ final class SourceBrowserViewModel: ObservableObject {
         editableLatitudeText = asset.gpsLatitude.map { String($0) } ?? ""
         editableLongitudeText = asset.gpsLongitude.map { String($0) } ?? ""
         updateRenamePreview()
+        // The toggle being "on" should keep behaving as on across a photo switch, not require
+        // re-flipping it — see `setSubjectIsolationEnabled`.
+        if subjectIsolationEnabled {
+            recomputeSubjectCropPreview()
+        }
     }
 
     /// Recomputes `renamePreviewFilename` for `selectedAsset` against `sessionBatch`'s current

@@ -73,8 +73,10 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
   Ollama, cloud OpenRouter, and a native in-process MLX backend (`mlx-swift-lm`, see
   `docs/MLX_PROVIDER.md`) — vision pre-check, retry-with-crop fallback, and group-aware
   description/keyword application. Wildlife/plant identification is improved beyond the base spec
-  via `SubjectIsolationService` (crops to the Vision-detected subject before sending), and via an
-  eBird region-species candidate list (see `EBirdCandidateFormatting`) that verified-locally-recorded
+  via a "Crop to Subject" toggle (crops to `SubjectIsolationService`'s Vision-detected subject
+  before sending, or a user-drawn rectangle on the preview overriding it — see the toggle's doc
+  comment on `SourceBrowserViewModel.subjectIsolationEnabled`), and via an eBird region-species
+  candidate list (see `EBirdCandidateFormatting`) that verified-locally-recorded
   species are drawn from instead of free model recall — gated off by default for a few
   flagship/pay-per-token OpenRouter models to control input-token cost (per-model toggle in
   Settings, Cmd+,), always on for the local Ollama/MLX backends.

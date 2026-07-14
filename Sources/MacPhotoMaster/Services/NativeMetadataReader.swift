@@ -29,6 +29,13 @@ enum NativeMetadataError: Error {
 /// in the same file read correctly. `SourceBrowserViewModel.loadArtFilterTokenIfNeeded()` papers
 /// over this the same way it already does for maker-note fields: one lazy `exiftool` read per
 /// selected asset corrects `descriptionText` if this reader got it wrong.
+///
+/// macOS 27 (Golden Gate, 2026) note: Core Image RAW 9 overhauled `CIRAWFilter`'s demosaic/denoise
+/// quality, but `extractPreview` below doesn't go through `CIRAWFilter` — it pulls the camera's own
+/// embedded JPEG preview via `CGImageSourceCreateThumbnailAtIndex`, so RAW 9 has no effect on this
+/// reader's output. It would only become relevant if this app added a full-quality RAW render path.
+/// Also confirmed: ImageIO/`CGImageDestination` gained no new EXIF/IPTC/XMP write coverage in
+/// macOS 27, so `exiftool` remains the only reliable write path — no change to the scope gap above.
 struct NativeMetadataReader {
     /// Reads the raw ImageIO property dictionary (EXIF/IPTC/GPS/TIFF sub-dictionaries) for one
     /// file. Works on JPEG and on RAW formats macOS has a built-in decoder for, including ORF.

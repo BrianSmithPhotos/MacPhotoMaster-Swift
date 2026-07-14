@@ -56,6 +56,11 @@ as possible:
 
 See `ExifToolClient.readMetadata(at: [URL])` for the reference implementation of this pattern.
 
+macOS 27 (Golden Gate, 2026) note: nothing in that release changes this. ImageIO/`CGImageDestination`
+gained no new EXIF/IPTC/XMP write coverage, and Core Image RAW 9's demosaic/denoise improvements
+live in `CIRAWFilter`, not in metadata read/write — see `NativeMetadataReader`'s header doc for detail.
+`exiftool` stays the only reliable read/write path for maker-note fields and metadata writes.
+
 ### Resolving the exiftool binary — don't rely on `PATH` alone
 
 macOS launches `.app` bundles (Dock, Finder, `open`) with a minimal `PATH`

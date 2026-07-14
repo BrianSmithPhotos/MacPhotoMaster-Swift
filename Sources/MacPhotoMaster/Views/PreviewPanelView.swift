@@ -33,6 +33,10 @@ struct PreviewPanelView: View {
                                 )
                             }
                         }
+                        // GeometryReader places its child at .topLeading, not centered, and the
+                        // ZStack otherwise only sizes to its content — without this the portrait
+                        // (narrower-than-container) case renders left-justified instead of centered.
+                        .frame(width: geo.size.width, height: geo.size.height)
                     }
                 } else {
                     Image(systemName: "photo")

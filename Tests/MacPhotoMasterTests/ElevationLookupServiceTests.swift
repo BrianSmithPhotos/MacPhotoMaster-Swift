@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class ElevationLookupServiceTests: XCTestCase {
     // Fixtures shaped like the reference app's known USGS EPQS response variants

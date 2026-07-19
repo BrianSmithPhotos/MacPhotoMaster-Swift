@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class ExifToolClientTests: XCTestCase {
     func testReadMetadataReturnsFileNameTag() async throws {

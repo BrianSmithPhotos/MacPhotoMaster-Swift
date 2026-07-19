@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class ExifToolClientWriteTests: XCTestCase {
     /// A tiny 1x1 JPEG with no metadata of its own — exiftool's write path doesn't need real

@@ -2,6 +2,7 @@ import CoreGraphics
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class SubjectCropGeometryTests: XCTestCase {
     private let imageSize = CGSize(width: 2000, height: 1000)

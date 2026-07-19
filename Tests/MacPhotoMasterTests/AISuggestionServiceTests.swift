@@ -2,6 +2,7 @@ import CoreGraphics
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class AISuggestionServiceTests: XCTestCase {
     private func makeImage(width: Int = 40, height: Int = 20) -> CGImage {

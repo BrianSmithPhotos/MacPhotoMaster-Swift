@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class NativeMetadataWriterTests: XCTestCase {
     /// A tiny 1x1 JPEG with no metadata of its own — `NativeMetadataWriter` never touches this

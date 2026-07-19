@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class ProcessMoveServiceTests: XCTestCase {
     /// A tiny 1x1 JPEG with no metadata of its own — matches `ExifToolClientWriteTests`' fixture so
@@ -69,7 +70,7 @@ final class ProcessMoveServiceTests: XCTestCase {
         asset.gpsLongitude = -122.6
         asset.gpsAltitude = 30
 
-        let service = ProcessMoveService()
+        let service = ProcessMoveService(metadataWriter: ExifToolClient())
         let result = try await service.processAndCopy(
             asset: asset, renameContext: renameContext(for: asset), libraryRoot: libraryRoot)
 
@@ -96,7 +97,7 @@ final class ProcessMoveServiceTests: XCTestCase {
         let missingURL = FileManager.default.temporaryDirectory.appendingPathComponent("does-not-exist-\(UUID().uuidString).jpg")
         let asset = PhotoAsset(id: missingURL)
 
-        let service = ProcessMoveService()
+        let service = ProcessMoveService(metadataWriter: ExifToolClient())
         do {
             _ = try await service.processAndCopy(
                 asset: asset, renameContext: renameContext(for: asset), libraryRoot: libraryRoot)
@@ -130,7 +131,7 @@ final class ProcessMoveServiceTests: XCTestCase {
         var secondContext = renameContext(for: secondAsset)
         secondContext.sourceURL = firstSourceURL
 
-        let service = ProcessMoveService()
+        let service = ProcessMoveService(metadataWriter: ExifToolClient())
         let firstResult = try await service.processAndCopy(
             asset: firstAsset, renameContext: firstContext, libraryRoot: libraryRoot)
         let secondResult = try await service.processAndCopy(

@@ -1,4 +1,5 @@
 import SwiftUI
+import MacPhotoMasterCore
 
 /// Three-panel shell: source browser | preview | metadata. See docs/SPEC.md §1-3.
 ///

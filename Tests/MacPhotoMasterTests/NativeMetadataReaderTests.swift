@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class NativeMetadataReaderTests: XCTestCase {
     /// Synthesizes a tiny JPEG with real EXIF/IPTC/GPS/TIFF properties in-memory, so this test

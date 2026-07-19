@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class TimelineLocationCacheTests: XCTestCase {
     private func makeCache(maxMatchSeconds: Int = 30 * 60) throws -> TimelineLocationCache {

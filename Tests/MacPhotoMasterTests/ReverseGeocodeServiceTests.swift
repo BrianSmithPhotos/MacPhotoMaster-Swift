@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 /// Exercises `ReverseGeocodeService` against a mocked `URLSession` (`MockURLProtocol` below) rather
 /// than live Nominatim — no network access in CI. Mirrors `OllamaProviderTests.swift`'s mocking

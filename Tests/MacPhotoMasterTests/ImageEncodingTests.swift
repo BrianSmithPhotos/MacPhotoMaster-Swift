@@ -2,6 +2,7 @@ import CoreGraphics
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class ImageEncodingTests: XCTestCase {
     private func makeImage(width: Int, height: Int) -> CGImage {

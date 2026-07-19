@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class SkipStateStoreTests: XCTestCase {
     private func makeStore() throws -> SkipStateStore {

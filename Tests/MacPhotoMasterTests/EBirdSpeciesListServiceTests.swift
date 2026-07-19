@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 /// Exercises `EBirdSpeciesListService` against a mocked `URLSession` — no network access in CI,
 /// no dependency on a real `EBIRD_API_KEY` being set. Mirrors `ReverseGeocodeServiceTests.swift`'s

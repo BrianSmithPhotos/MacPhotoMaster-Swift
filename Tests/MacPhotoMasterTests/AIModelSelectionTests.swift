@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class AIModelSelectionTests: XCTestCase {
     func testParsesOllamaModelWithColonInModelTag() {

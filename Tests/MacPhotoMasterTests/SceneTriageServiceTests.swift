@@ -2,6 +2,7 @@ import CoreGraphics
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class SceneTriageServiceTests: XCTestCase {
     /// A flat color swatch isn't a bird or a flower under any real classifier — this is a wiring

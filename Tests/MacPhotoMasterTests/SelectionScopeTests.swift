@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class SelectionScopeTests: XCTestCase {
     private func path(_ name: String) -> URL {

@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import MacPhotoMasterCore
 
 /// Editable metadata fields + AI/GPS/save/process actions. See docs/SPEC.md §2-7.
 ///

@@ -100,6 +100,15 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
 Not yet built: a notarized/Developer ID-signed `.app` for distributing beyond this machine, and the
 deferred items noted in `CLAUDE.md` (ImageIO metadata write-back).
 
+**iPadOS target**: `Package.swift` now builds a portable `MacPhotoMasterCore` library (all
+Services/Models except `ExifToolClient`, which needs `Process`/subprocess execution unavailable on
+iOS) plus two app targets — `MacPhotoMaster` (macOS) and `MacPhotoMasterPad` (iPadOS, `.iOS(.v17)`).
+`MacPhotoMasterPad` is currently a placeholder screen; it proves the target and Core split build and
+link for a real iOS SDK (`xcodebuild -destination "generic/platform=iOS"`), not real UI yet. See
+`docs/ARCHITECTURE.md` "Multi-platform target split" for the rationale and the access-control/
+API-availability gotchas hit along the way. `NativeMetadataWriter` (ImageIO `.xmp` sidecar, see
+below) is the metadata-write path this target will use, since `exiftool` can't run there.
+
 ## Next stages
 
 - **MLX preset list pruning**: `AIModelSelection.presets`'s `mlx:` entries grew during exploratory
@@ -108,3 +117,7 @@ deferred items noted in `CLAUDE.md` (ImageIO metadata write-back).
 - **Auto-skip-on-process** (`docs/SPEC.md` §5's "successfully processed files auto-skip from the
   current session view") is intentionally not wired up — the user prefers processed files staying
   visible for now; revisit only if asked.
+- **iPadOS app**: target created and verified building (see "Status" above); next is proving out an
+  install/launch on the physical iPad, then designing the real UI to replace the placeholder screen,
+  wiring `NativeMetadataWriter` as the write path, and designing the USB-C camera import flow (no SD
+  card reader on this iPad).

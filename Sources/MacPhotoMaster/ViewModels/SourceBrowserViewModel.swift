@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import os
+import MacPhotoMasterCore
 
 /// Holds the currently-browsed folder's capture sets and the current selection. Views bind to
 /// this via `@StateObject`/`@ObservedObject`; it owns no I/O itself — it kicks off `Service` calls
@@ -181,8 +182,8 @@ final class SourceBrowserViewModel: ObservableObject {
     private let loader = PhotoAssetLoader()
     private let folderBrowser = FolderBrowser()
     private let grouping = CaptureGroupingService()
-    private let processMoveService = ProcessMoveService()
     private let exifTool = ExifToolClient()
+    private let processMoveService = ProcessMoveService(metadataWriter: ExifToolClient())
     private let renameService = RenameService()
     private let timelineImportParser = TimelineImportParser()
     private let elevationService = ElevationLookupService()

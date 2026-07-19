@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class RenameServiceTests: XCTestCase {
     /// Parses the same way `NativeMetadataReader.parseExifDate` does, so the resulting `Date`

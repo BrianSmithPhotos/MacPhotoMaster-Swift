@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import MacPhotoMasterCore
 
 /// App preferences (Cmd+,). Currently the process/move destination root (docs/SPEC.md §5), the
 /// manual Timeline Drive-sync trigger, and per-OpenRouter-model eBird candidate-list toggles — all

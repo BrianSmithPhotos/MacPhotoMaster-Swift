@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 /// Exercises `OpenRouterProvider`'s request-building/response-parsing against a mocked
 /// `URLSession` (`MockURLProtocol` below) rather than the live OpenRouter API — no network access

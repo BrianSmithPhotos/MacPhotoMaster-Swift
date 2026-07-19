@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class PhotoAssetLoaderTests: XCTestCase {
     /// Same synthesis approach as `NativeMetadataReaderTests` — a real, tiny in-memory JPEG so

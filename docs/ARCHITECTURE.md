@@ -5,20 +5,59 @@ Swift/SwiftUI equivalent of the reference app's `ui/` + `services/` + `workers/`
 
 ## Layers
 
-- **`Sources/MacPhotoMaster/Views/`** — SwiftUI views. Layout and bindings only, no business logic.
-  Equivalent to the reference app's `ui/widgets/`.
+- **`Sources/MacPhotoMaster/Views/`** — SwiftUI views, macOS-only. Layout and bindings only, no
+  business logic. Equivalent to the reference app's `ui/widgets/`.
 - **`Sources/MacPhotoMaster/ViewModels/`** — `@MainActor` `ObservableObject` (or `@Observable`)
   types that hold UI state and call into services, usually via `Task { }`. Equivalent to the
   reference app's `ui/main_window.py` orchestration plus its `workers/` — Swift's structured
   concurrency (`async`/`await`, `Task`) replaces the need for a separate `QRunnable`-style worker
   layer. A view model kicks off an `async` service call in a `Task`, the service does its I/O off
   the main actor, and the result flows back to `@Published` state.
-- **`Sources/MacPhotoMaster/Services/`** — the actual logic: exiftool invocation, capture grouping,
-  renaming, AI provider calls, timeline/elevation/geocode lookups. Same role as the reference app's
-  `services/`: no Qt/SwiftUI imports, easy to unit test in isolation. Prefer plain `struct`s/
-  `actor`s with `async` functions over classes with mutable state where possible.
-- **`Sources/MacPhotoMaster/Models/`** — plain data types (`PhotoAsset`, `CaptureSet`, etc.),
+- **`Sources/MacPhotoMasterCore/Services/`** — the actual logic: capture grouping, renaming, AI
+  provider calls, timeline/elevation/geocode lookups, and the `MetadataWriter` protocol itself.
+  Same role as the reference app's `services/`: no Qt/SwiftUI imports, easy to unit test in
+  isolation. Prefer plain `struct`s/`actor`s with `async` functions over classes with mutable state
+  where possible. One exception stays in the macOS app target rather than Core: `ExifToolClient`
+  (below).
+- **`Sources/MacPhotoMasterCore/Models/`** — plain data types (`PhotoAsset`, `CaptureSet`, etc.),
   `Codable` where they cross a process/network boundary (Timeline JSON, AI provider responses).
+
+## Multi-platform target split
+
+`Package.swift` has three targets: `MacPhotoMasterCore` (a library, portable to any Apple platform),
+`MacPhotoMaster` (the macOS executable app), and `MacPhotoMasterPad` (the iPadOS executable app,
+`.iOS(.v17)`, currently a placeholder screen proving the split builds/links — see the iPad initiative
+in progress). Both app targets depend on Core and hold nothing but platform-specific
+Views/ViewModels/entry points.
+
+`ExifToolClient` is the one Service that stays in the `MacPhotoMaster` (macOS) target instead of
+moving to Core: it shells out to the `exiftool` binary via `Process`, and process/subprocess
+execution isn't available in the iOS/iPadOS sandbox. It conforms to the portable `MetadataWriter`
+protocol (Core) alongside `NativeMetadataWriter` (Core, ImageIO `.xmp`-sidecar write, safe on any
+platform) — code in Core that needs to write metadata takes `any MetadataWriter` rather than depending
+on `ExifToolClient` concretely, so the same call sites work on both platforms.
+
+Moving a type into Core surfaces two access-control traps that don't show up in a single-target
+package:
+
+- Every type/member the app targets touch across the module boundary must be explicitly `public` —
+  Swift's default `internal` access isn't visible outside its declaring module.
+- A `public` type's compiler-synthesized memberwise or no-arg initializer is still only `internal`;
+  it needs an explicit `public init` written by hand, even when every stored property is already
+  `public`.
+
+Compiling for macOS alone (`swift build`/`swift test`) doesn't catch iOS-only API gaps, since it only
+builds for the host platform. Use `xcodebuild -scheme MacPhotoMasterPad -destination
+"generic/platform=iOS" build` to force a real iOS-SDK compile. This is how the one genuine
+cross-platform gap found so far was caught: `FileManager.homeDirectoryForCurrentUser` is
+`API_UNAVAILABLE` on iOS. Both call sites (`MLXModelRegistry`'s oMLX cache-directory lookup,
+`TimelineDriveSync`'s Google Drive Desktop path default) are for macOS-only external tools anyway —
+oMLX and Google Drive *Desktop* are both Mac apps, not present on iPadOS in that form — so both are
+`#if os(macOS)`-gated with a no-op/unreachable fallback rather than genuinely ported. Note the iPad
+does have the Google Drive iOS app, but it doesn't mount `My Drive` as real files the way Drive
+Desktop does; getting `Timeline.json` onto the iPad will need a different mechanism (likely a
+`UIDocumentPickerViewController`, since Google Drive registers as a Files provider) — not yet
+designed, tracked as a follow-up for the iPad initiative rather than solved by this fallback.
 
 ## Concurrency rules
 
@@ -156,9 +195,10 @@ storing app state in `UserDefaults`/GRDB rather than the Keychain.
 (`SPEC.md` §5): it copies a source into `<library>/<M Month>/<DD>/` (JPEGs one level deeper into
 `jpg/`, matching the reference app's destination routing), verifies size + SHA-256 before writing
 metadata to the destination, and trashes the partial destination copy — never the source — on any
-verification or write failure. It composes `RenameService` (destination filename) and
-`ExifToolClient` (destination metadata write); scope resolution (single/capture-set/selection/
-session) and skip-on-success wiring are left to the calling ViewModel.
+verification or write failure. It composes `RenameService` (destination filename) and an injected
+`any MetadataWriter` (destination metadata write — `ExifToolClient` on macOS; see "Multi-platform
+target split" above); scope resolution (single/capture-set/selection/session) and skip-on-success
+wiring are left to the calling ViewModel.
 
 ## Testing
 

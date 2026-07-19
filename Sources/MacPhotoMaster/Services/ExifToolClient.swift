@@ -1,24 +1,10 @@
 import Foundation
+import MacPhotoMasterCore
 
 enum ExifToolError: Error {
     case processFailed(status: Int32, stderr: String)
     case invalidOutput
     case timedOut
-}
-
-/// A GPS fix to write. Latitude/longitude are required together (an EXIF fix without one or the
-/// other is meaningless), so pairing them in one type rules out that inconsistent state at compile
-/// time rather than needing a runtime check like the Python reference app does. See docs/SPEC.md §3
-/// for the Ref-tag-from-sign convention.
-struct GPSCoordinate: Equatable {
-    var latitude: Double
-    var longitude: Double
-    var altitude: Double?
-}
-
-enum MetadataWriteError: Error, Equatable {
-    case invalidLatitude(Double)
-    case invalidLongitude(Double)
 }
 
 /// Thin wrapper around the `exiftool` binary. All EXIF/IPTC/XMP read/write goes through here —

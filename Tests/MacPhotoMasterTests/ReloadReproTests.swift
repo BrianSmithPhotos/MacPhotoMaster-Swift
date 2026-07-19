@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class ReloadReproTests: XCTestCase {
     func testWriteThenReloadViaPhotoAssetLoaderRoundTripsDescription() async throws {

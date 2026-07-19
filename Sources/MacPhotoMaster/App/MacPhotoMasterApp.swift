@@ -1,4 +1,5 @@
 import SwiftUI
+import MacPhotoMasterCore
 
 /// `swift run` execs the built binary directly with no `.app` bundle around it, so LaunchServices
 /// never registers this process as a real foreground app — it can still create/show windows and

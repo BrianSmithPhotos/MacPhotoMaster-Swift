@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 /// Exercises `OllamaProvider`'s request-building/response-parsing against a mocked `URLSession`
 /// (`MockURLProtocol` below) rather than a live `ollama serve` — no network access in CI, but still

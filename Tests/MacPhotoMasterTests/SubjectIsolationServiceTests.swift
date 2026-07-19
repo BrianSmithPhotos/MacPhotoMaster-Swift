@@ -3,6 +3,7 @@ import CoreVideo
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class SubjectIsolationServiceTests: XCTestCase {
     /// A flat color swatch has no salient foreground instance for Vision to find — this is a wiring

@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 final class ArtFilterTokenParsingTests: XCTestCase {
     // Fixtures pinned by the Python reference app's test_exif_service.py art-filter-token tests,

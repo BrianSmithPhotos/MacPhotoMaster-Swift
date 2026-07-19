@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import MacPhotoMasterCore
 
 /// Folder navigator + thumbnail grid for the active source directory. See docs/SPEC.md §1.
 ///

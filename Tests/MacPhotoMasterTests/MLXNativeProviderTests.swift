@@ -2,6 +2,7 @@ import CoreGraphics
 import XCTest
 
 @testable import MacPhotoMaster
+@testable import MacPhotoMasterCore
 
 /// Covers the two pieces of `MLXNativeProvider` that don't require loading a real MLX model:
 /// base64→`CIImage` decoding and the `ensureVisionCapable` allowlist boundary. Everything above

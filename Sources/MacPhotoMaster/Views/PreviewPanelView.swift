@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MacPhotoMasterCore
 
 /// Full-size preview + selected-images filmstrip. See docs/SPEC.md §1.
 ///

@@ -4,7 +4,8 @@ import PackageDescription
 let package = Package(
     name: "MacPhotoMaster",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v14),
+        .iOS(.v17)
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift", .upToNextMajor(from: "7.0.0")),
@@ -13,8 +14,11 @@ let package = Package(
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.0"),
     ],
     targets: [
-        .executableTarget(
-            name: "MacPhotoMaster",
+        // Portable Services/Models shared by the macOS and iPadOS app targets — everything except
+        // ExifToolClient.swift, which shells out via `Process` and is macOS-only. See
+        // docs/ARCHITECTURE.md for the target-split rationale.
+        .target(
+            name: "MacPhotoMasterCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
@@ -24,14 +28,24 @@ let package = Package(
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
             ],
+            path: "Sources/MacPhotoMasterCore"
+        ),
+        .executableTarget(
+            name: "MacPhotoMaster",
+            dependencies: ["MacPhotoMasterCore"],
             path: "Sources/MacPhotoMaster",
             resources: [
                 .copy("Resources/AppIcon.png")
             ]
         ),
+        .executableTarget(
+            name: "MacPhotoMasterPad",
+            dependencies: ["MacPhotoMasterCore"],
+            path: "Sources/MacPhotoMasterPad"
+        ),
         .testTarget(
             name: "MacPhotoMasterTests",
-            dependencies: ["MacPhotoMaster"],
+            dependencies: ["MacPhotoMaster", "MacPhotoMasterCore"],
             path: "Tests/MacPhotoMasterTests"
         )
     ],

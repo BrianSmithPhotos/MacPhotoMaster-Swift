@@ -100,14 +100,17 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
 Not yet built: a notarized/Developer ID-signed `.app` for distributing beyond this machine, and the
 deferred items noted in `CLAUDE.md` (ImageIO metadata write-back).
 
-**iPadOS target**: `Package.swift` now builds a portable `MacPhotoMasterCore` library (all
-Services/Models except `ExifToolClient`, which needs `Process`/subprocess execution unavailable on
-iOS) plus two app targets — `MacPhotoMaster` (macOS) and `MacPhotoMasterPad` (iPadOS, `.iOS(.v17)`).
-`MacPhotoMasterPad` is currently a placeholder screen; it proves the target and Core split build and
-link for a real iOS SDK (`xcodebuild -destination "generic/platform=iOS"`), not real UI yet. See
-`docs/ARCHITECTURE.md` "Multi-platform target split" for the rationale and the access-control/
-API-availability gotchas hit along the way. `NativeMetadataWriter` (ImageIO `.xmp` sidecar, see
-below) is the metadata-write path this target will use, since `exiftool` can't run there.
+**iPadOS target**: `Package.swift` builds a portable `MacPhotoMasterCore` library (all Services/Models
+except `ExifToolClient`, which needs `Process`/subprocess execution unavailable on iOS) plus the
+`MacPhotoMaster` macOS app. The iPadOS app lives outside the manifest, in its own Xcode project at
+`MacPhotoMasterPad/MacPhotoMasterPad.xcodeproj` (generated via `xcodegen` from `project.yml` in that
+directory), which depends on `MacPhotoMasterCore` as a local Swift package — a bare SwiftPM
+`executableTarget` can't produce a real, device-signable `.app` bundle for iOS, so it needed a genuine
+Xcode App target instead. See `docs/ARCHITECTURE.md` "Multi-platform target split" for the rationale
+and the access-control/API-availability gotchas hit along the way. Confirmed installing and launching
+on a physical iPad — currently shows a placeholder "Coming soon" screen, not real UI yet.
+`NativeMetadataWriter` (ImageIO `.xmp` sidecar, see below) is the metadata-write path this target will
+use, since `exiftool` can't run there.
 
 ## Next stages
 
@@ -117,7 +120,6 @@ below) is the metadata-write path this target will use, since `exiftool` can't r
 - **Auto-skip-on-process** (`docs/SPEC.md` §5's "successfully processed files auto-skip from the
   current session view") is intentionally not wired up — the user prefers processed files staying
   visible for now; revisit only if asked.
-- **iPadOS app**: target created and verified building (see "Status" above); next is proving out an
-  install/launch on the physical iPad, then designing the real UI to replace the placeholder screen,
-  wiring `NativeMetadataWriter` as the write path, and designing the USB-C camera import flow (no SD
-  card reader on this iPad).
+- **iPadOS app**: install/launch on the physical iPad confirmed working (see "Status" above); next is
+  designing the real UI to replace the placeholder screen, wiring `NativeMetadataWriter` as the write
+  path, and designing the USB-C camera import flow (no SD card reader on this iPad).

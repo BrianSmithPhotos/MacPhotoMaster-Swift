@@ -24,11 +24,30 @@ Swift/SwiftUI equivalent of the reference app's `ui/` + `services/` + `workers/`
 
 ## Multi-platform target split
 
-`Package.swift` has three targets: `MacPhotoMasterCore` (a library, portable to any Apple platform),
-`MacPhotoMaster` (the macOS executable app), and `MacPhotoMasterPad` (the iPadOS executable app,
-`.iOS(.v17)`, currently a placeholder screen proving the split builds/links — see the iPad initiative
-in progress). Both app targets depend on Core and hold nothing but platform-specific
-Views/ViewModels/entry points.
+`Package.swift` declares `MacPhotoMasterCore` (a library, portable to any Apple platform, exposed as
+a product) and `MacPhotoMaster` (the macOS executable app, depends on Core). The iPadOS app,
+`MacPhotoMasterPad`, is *not* a target in this manifest — it lives in its own real Xcode project at
+`MacPhotoMasterPad/MacPhotoMasterPad.xcodeproj`, generated from `MacPhotoMasterPad/project.yml` via
+[xcodegen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`; regenerate after editing
+`project.yml` with `xcodegen generate` from that directory), which adds the root package as a local
+Swift package dependency (`path: ..`) and consumes the `MacPhotoMasterCore` product.
+
+This split exists because a bare SwiftPM `executableTarget` targeting iOS cannot produce a real,
+device-signable `.app` bundle — it builds and runs in the Simulator (no code signing required there),
+but `codesign -dv` on the built binary shows "code object is not signed at all" even with
+`DEVELOPMENT_TEAM`/`CODE_SIGN_STYLE=Automatic` passed to `xcodebuild`, because there's no
+Info.plist/entitlements/embedded-provisioning-profile infrastructure for a bare executable to hang a
+real signature on. A genuine Xcode App target has that infrastructure; a SwiftPM executable doesn't.
+The macOS app doesn't hit this, since ad-hoc signing (via `scripts/build-app-bundle.sh`) is sufficient
+for running locally on the same machine — no physical-device provisioning involved — so it stays a
+plain SwiftPM `executableTarget` rather than needing the same treatment. Both app targets/projects
+depend on Core and hold nothing but platform-specific Views/ViewModels/entry points.
+
+Installing on a physical iPad (Team ID `U4UCUZRYBD`) is confirmed working end to end: open
+`MacPhotoMasterPad/MacPhotoMasterPad.xcodeproj` (not `Package.swift`) in Xcode, select the
+`MacPhotoMasterPad` scheme and the device destination, and Run — currently shows the placeholder
+"Coming soon" screen. `MacPhotoMasterPad/project.yml` hardcodes the Team ID in
+`DEVELOPMENT_TEAM`/`CODE_SIGN_STYLE: Automatic`; not a secret, but visible in the repo.
 
 `ExifToolClient` is the one Service that stays in the `MacPhotoMaster` (macOS) target instead of
 moving to Core: it shells out to the `exiftool` binary via `Process`, and process/subprocess
@@ -47,9 +66,10 @@ package:
   `public`.
 
 Compiling for macOS alone (`swift build`/`swift test`) doesn't catch iOS-only API gaps, since it only
-builds for the host platform. Use `xcodebuild -scheme MacPhotoMasterPad -destination
-"generic/platform=iOS" build` to force a real iOS-SDK compile. This is how the one genuine
-cross-platform gap found so far was caught: `FileManager.homeDirectoryForCurrentUser` is
+builds for the host platform. Use `xcodebuild -project MacPhotoMasterPad/MacPhotoMasterPad.xcodeproj
+-scheme MacPhotoMasterPad -destination "generic/platform=iOS" build` to force a real iOS-SDK compile.
+This is how the one genuine cross-platform gap found so far was caught:
+`FileManager.homeDirectoryForCurrentUser` is
 `API_UNAVAILABLE` on iOS. Both call sites (`MLXModelRegistry`'s oMLX cache-directory lookup,
 `TimelineDriveSync`'s Google Drive Desktop path default) are for macOS-only external tools anyway —
 oMLX and Google Drive *Desktop* are both Mac apps, not present on iPadOS in that form — so both are

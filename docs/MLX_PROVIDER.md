@@ -51,8 +51,9 @@ up with no further wiring.
 .ensureVisionCapable` and `MLXModelManager` resolve against, keyed by the exact Hugging Face repo id
 used after the `mlx:` prefix in `AIModelSelection`. Keep it in sync with
 `AIModelSelection.presets`'s `mlx:` entries by hand — nothing enforces that link at compile time.
-None of the three current entries have a `VLMRegistry.shared` curated static (all are community
-fine-tunes/conversions not shipped by mlx-swift-lm itself), so each is a `ModelConfiguration(id:)`
+None of the current entries have a `VLMRegistry.shared` curated static (all are community
+fine-tunes/conversions, or — for FastVLM below — an Apple-published export not shipped by
+mlx-swift-lm itself), so each is a `ModelConfiguration(id:)`
 literal built directly against the real HF repo id — the dictionary key and the value's `id` must
 name the same repo, since it's the `id` that's actually downloaded, not the key (though at runtime
 `configuration(for:)` may swap that `id` for a local `.directory` if oMLX already has it — see
@@ -63,6 +64,7 @@ above).
 | `mlx-community/gemma-4-31b-it-8bit` | ~34 GB | **Default model** (`AIModelSelection.presets.first`). `ModelConfiguration(id:)` literal, instruction-tuned 8-bit conversion of `google/gemma-4-31b-it`. Originally registered as `mlx-community/gemma-4-31b-8bit` (the *base*, non-instruction-tuned conversion) — swapped after that produced a "tokenizer does not have a chat template" error: `mlx-community/gemma-4-31b-8bit`/`google/gemma-4-31b` are pretrained-only repos and never shipped one, but `Gemma4.swift`'s `prepare(input:)` has no fallback template and throws when it's missing. **When adding any gemma4 (or other) community conversion, confirm the repo is an `-it-`/instruction-tuned release before registering it** — a base-model conversion will hit this every time, not just for gemma4 |
 | `mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` | ~21 GB | `ModelConfiguration(id:)` literal. Manually verified: loads and returns a usable (imperfect) description, noticeably slower than the old (now-removed) gemma-3-12b preset |
 | `mlx-community/Qwen3.6-35B-A3B-8bit` | ~38 GB | `ModelConfiguration(id:)` literal (8-bit conversion of the same `Qwen/Qwen3.6-35B-A3B` base as the 4.4bit-msq entry above). Untested as of this writing |
+| `mlx-community/FastVLM-0.5B-bf16` | ~0.6 GB (0.5B params, bf16) | `ModelConfiguration(id:)` literal. Added as the first candidate for the iPad target (M4 11", 16GB) — the three entries above are 21-38GB and unusable there, while this is small enough to fit comfortably under even the tightened jetsam ceiling of `increased-memory-limit`. FastVLM (CVPR 2025, `FastViTHD` vision encoder over a Qwen2-0.5B LLM backbone); `config.json`'s `model_type` is `llava_qwen2`, a registered mlx-swift-lm VLM type mapped to the same `FastVLM.init` as `fastvlm`. This is the community re-export mlx-swift-lm's own `VLMRegistry.fastvlm` static points to — deliberately *not* Apple's own `apple/FastVLM-0.5B-fp16` export, which was tried first and failed with `MLX inference failed: Unsupported model type: llava_qwen2` (a misleading message — the real failure is earlier: that repo's `preprocessor_config.json` reports `processor_class: "LlavaProcessor"`, which `VLMProcessorTypeRegistry` in mlx-swift-lm 3.31.4 doesn't recognize for this architecture; the VLM factory throws `unsupportedProcessorType`, `ModelFactoryRegistry`'s factory-fallback loop then tries the plain-LLM factory, which doesn't know `llava_qwen2` as a type at all, and *that* is the error that surfaces since it's the last one tried). The `mlx-community` conversion re-exports with `processor_class: "FastVLMProcessor"` instead, which matches the registry. `extraEOSTokens: ["<|im_end|>"]` follows the existing Qwen-family convention above, and matches this model's `eos_token_id: 151645`/Qwen2 tokenizer convention. Manually verified 2026-07-18: loads and generates a coherent, well-formed description, but at this size accuracy on the specific subject was noticeably weaker than the larger gemma4/Qwen3.6 entries above — expected given the 0.5B parameter count; treat as a speed/footprint tradeoff for the iPad target, not a like-for-like replacement for the Mac's larger models |
 
 **Removed from the preset list after manual testing**: `mlx-community/Qwen2.5-VL-3B-Instruct-4bit`
 and `mlx-community/Qwen3-VL-4B-Instruct-8bit` both returned an empty response (never a crash) against
@@ -122,8 +124,8 @@ inference. Worth revisiting only if a future mlx-swift-lm bump adds `"qwen3_vl_m
 
 1. `swift build`, then `swift run`.
 2. In the AI Model field, pick or type an `mlx:` preset — the default,
-   `mlx:mlx-community/gemma-4-31b-it-8bit`, or `mlx:mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` for the
-   smallest/fastest-first-download of the three current presets.
+   `mlx:mlx-community/gemma-4-31b-it-8bit`, or `mlx:mlx-community/FastVLM-0.5B-bf16` for the
+   smallest/fastest-first-download of the current presets.
 3. Select a photo, click "Suggest Description + Keywords".
 4. First run against a new model downloads it to `~/.cache/huggingface` — this can take a while with
    no progress indicator (see limitations above); subsequent runs against the same model are fast.

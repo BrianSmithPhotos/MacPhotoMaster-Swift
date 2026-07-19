@@ -42,6 +42,20 @@ enum MLXModelRegistry {
             defaultPrompt: "Describe the image in English",
             extraEOSTokens: ["<|im_end|>"]
         ),
+        // On-device-oriented FastVLM — see docs/MLX_PROVIDER.md for why this was added (candidate
+        // for the iPad's much tighter memory budget vs. the ~20-40GB models above). Deliberately
+        // *not* Apple's own `apple/FastVLM-0.5B-fp16` export: that repo's `preprocessor_config
+        // .json` reports `processor_class: "LlavaProcessor"` (upstream LLaVA naming), which isn't
+        // in mlx-swift-lm's `VLMProcessorTypeRegistry` — it only knows `"FastVLMProcessor"` for
+        // this architecture, with no override entry for `llava_qwen2` the way there is for
+        // `mistral3`/`gemma4_unified`. This repo is the community re-export mlx-swift-lm's own
+        // `VLMRegistry.fastvlm` static points to, and correctly reports `processor_class:
+        // "FastVLMProcessor"`.
+        "mlx-community/FastVLM-0.5B-bf16": ModelConfiguration(
+            id: "mlx-community/FastVLM-0.5B-bf16",
+            defaultPrompt: "Describe the image in English",
+            extraEOSTokens: ["<|im_end|>"]
+        ),
     ]
 
     static func configuration(for modelID: String) -> ModelConfiguration? {

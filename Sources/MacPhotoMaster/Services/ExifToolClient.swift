@@ -23,7 +23,7 @@ enum MetadataWriteError: Error, Equatable {
 
 /// Thin wrapper around the `exiftool` binary. All EXIF/IPTC/XMP read/write goes through here —
 /// no hand-rolled metadata parsing. See docs/ARCHITECTURE.md "exiftool integration".
-struct ExifToolClient {
+struct ExifToolClient: MetadataWriter {
     /// `-j -G1 -a -s` matches the reference app's read command: JSON output, grouped tag names,
     /// duplicate tags allowed, short tag names. See docs/SPEC.md §2.
     private static let readArguments = ["-j", "-G1", "-a", "-s"]
@@ -98,7 +98,7 @@ struct ExifToolClient {
     /// on success the backup is deleted; on failure the backup is restored over the (possibly
     /// half-written) file so the write is all-or-nothing from the caller's perspective.
     func write(title: String?, description: String, keywords: [String], gps: GPSCoordinate?, to url: URL) async throws {
-        try Self.validate(gps: gps)
+        try MetadataWriteFieldRules.validate(gps: gps)
         let arguments = Self.writeArguments(title: title, description: description, keywords: keywords, gps: gps) + [url.path]
         do {
             _ = try await run(arguments: arguments, timeoutSeconds: Self.singleFileTimeout)
@@ -120,7 +120,7 @@ struct ExifToolClient {
     /// ones exiftool did manage to write — rather than guessing which succeeded, then retries each
     /// file individually so a single bad file doesn't cost the whole group its write.
     func write(description: String, keywords: [String], gps: GPSCoordinate?, to urls: [URL]) async throws -> [URL: Result<Void, Error>] {
-        try Self.validate(gps: gps)
+        try MetadataWriteFieldRules.validate(gps: gps)
         guard !urls.isEmpty else { return [:] }
 
         let arguments = Self.writeArguments(title: nil, description: description, keywords: keywords, gps: gps) + urls.map(\.path)
@@ -148,12 +148,6 @@ struct ExifToolClient {
     private static let singleFileTimeout: Double = 12
     private static let batchTimeoutPerFile: Double = 12
 
-    private static func validate(gps: GPSCoordinate?) throws {
-        guard let gps else { return }
-        guard (-90...90).contains(gps.latitude) else { throw MetadataWriteError.invalidLatitude(gps.latitude) }
-        guard (-180...180).contains(gps.longitude) else { throw MetadataWriteError.invalidLongitude(gps.longitude) }
-    }
-
     /// Builds the `-TAG=value` argv per docs/SPEC.md §3's field->tag table. Keywords are cleared
     /// (blank `-IPTC:Keywords=`/`-XMP-dc:Subject=`) before being rewritten one `-tag=value` pair at
     /// a time — the idempotent way to "replace the keyword list" with exiftool, since its `+=`
@@ -169,7 +163,7 @@ struct ExifToolClient {
 
         arguments.append("-IPTC:Keywords=")
         arguments.append("-XMP-dc:Subject=")
-        for keyword in normalizedKeywords(keywords) {
+        for keyword in MetadataWriteFieldRules.normalizedKeywords(keywords) {
             arguments.append("-IPTC:Keywords=\(keyword)")
             arguments.append("-XMP-dc:Subject=\(keyword)")
         }
@@ -192,19 +186,46 @@ struct ExifToolClient {
         return arguments
     }
 
-    /// Trims, drops blanks, and dedupes case-insensitively (keeping the first-seen casing) so
-    /// re-saving the same keyword list twice — or a list with only casing differences — doesn't
-    /// grow the file's keyword tag on every save.
-    private static func normalizedKeywords(_ keywords: [String]) -> [String] {
-        var seenLowercased = Set<String>()
-        var result: [String] = []
-        for keyword in keywords {
-            let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            guard seenLowercased.insert(trimmed.lowercased()).inserted else { continue }
-            result.append(trimmed)
+    /// Reads a sidecar `NativeMetadataWriter` wrote and folds its fields into the original file
+    /// via the normal dual IPTC/XMP write path, then deletes the sidecar — turning a provisional
+    /// edit made where a direct write wasn't safe (see `NativeMetadataWriter`'s doc comment) into
+    /// the same authoritative in-file metadata a direct save produces here. No-op (returns
+    /// `false`) if no sidecar exists for `url`.
+    ///
+    /// Reads `GPSLatitude#`/`GPSLongitude#` (the `#` suffix) rather than the default formatted
+    /// strings — this needs the signed decimal value `write(...)` expects, not exiftool's
+    /// human-readable "45 deg 31' 22.80\" N".
+    func foldInSidecarIfPresent(for url: URL) async throws -> Bool {
+        let sidecar = NativeMetadataWriter.sidecarURL(for: url)
+        guard FileManager.default.fileExists(atPath: sidecar.path) else { return false }
+
+        let output = try await run(
+            arguments: [
+                "-j", "-Title", "-Description", "-Subject", "-GPSLatitude#", "-GPSLongitude#",
+                sidecar.path,
+            ])
+        guard let array = try JSONSerialization.jsonObject(with: output) as? [[String: Any]],
+            let fields = array.first
+        else {
+            throw ExifToolError.invalidOutput
         }
-        return result
+
+        var gps: GPSCoordinate?
+        if let latitude = fields["GPSLatitude"] as? Double,
+            let longitude = fields["GPSLongitude"] as? Double
+        {
+            gps = GPSCoordinate(latitude: latitude, longitude: longitude, altitude: nil)
+        }
+
+        try await write(
+            title: fields["Title"] as? String,
+            description: fields["Description"] as? String ?? "",
+            keywords: fields["Subject"] as? [String] ?? [],
+            gps: gps,
+            to: url)
+
+        try FileManager.default.removeItem(at: sidecar)
+        return true
     }
 
     private func backupURL(for url: URL) -> URL {

@@ -74,6 +74,12 @@ deterministically, and copy files into local storage.
   - GPS → `GPSLatitude`/`GPSLatitudeRef`, `GPSLongitude`/`GPSLongitudeRef`, optional
     `GPSAltitude`/`GPSAltitudeRef` — Ref tags derived from the value's sign so southern/western
     coordinates read back with the correct hemisphere.
+- **iPad divergence:** no `exiftool`, so there's no in-place write at all — `NativeMetadataWriter`
+  always writes a `.xmp` sidecar instead (see its doc comment), and on iPad that sidecar is staged in
+  local app storage, never on the camera/card itself, keyed by original filename + size rather than
+  path. The sidecar only reaches the original file's actual tags later, via
+  `ExifToolClient.foldInSidecarIfPresent(for:)` once the file (copied at Process & Move, below) is on
+  a Mac. See docs/ARCHITECTURE.md "iPad file access & sidecar staging" for the reasoning.
 
 ## 4. Rename
 

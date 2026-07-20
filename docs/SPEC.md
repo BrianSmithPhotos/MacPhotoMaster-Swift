@@ -103,6 +103,11 @@ deterministically, and copy files into local storage.
   - JPEG → `<library>/<Month>/<DD>/jpg/`
 - Verify copy (size + SHA-256) before marking source-safe.
 - Successfully processed files auto-skip from the current session view.
+- **iPad divergence:** the destination library is a fixed local folder inside the app's own sandbox
+  (`Documents/ProcessedLibrary`), not user-picked — a Google-Drive-mounted destination was considered
+  and ruled out (Drive's background sync could race with the copy+SHA-256 verify above). Getting
+  processed files off the iPad afterward is a separate, not-yet-designed Mac-initiated pull, not part
+  of Process & Move itself. See docs/ARCHITECTURE.md "iPad file access & sidecar staging".
 
 ## 6. AI-assisted suggestions
 

@@ -108,9 +108,23 @@ directory), which depends on `MacPhotoMasterCore` as a local Swift package — a
 `executableTarget` can't produce a real, device-signable `.app` bundle for iOS, so it needed a genuine
 Xcode App target instead. See `docs/ARCHITECTURE.md` "Multi-platform target split" for the rationale
 and the access-control/API-availability gotchas hit along the way. Confirmed installing and launching
-on a physical iPad — currently shows a placeholder "Coming soon" screen, not real UI yet.
-`NativeMetadataWriter` (ImageIO `.xmp` sidecar, see below) is the metadata-write path this target will
-use, since `exiftool` can't run there.
+on a physical iPad.
+
+The iPad ingest workflow (source browse through process/move) is built and user-verified end to end:
+two-panel `NavigationSplitView` (source browser + preview/filmstrip), editable metadata form (Save
+scopes: this file / capture set / current selection), a live rename preview driven by a per-session
+"Batch" label, and Process & Move (four scope buttons: single image / capture set / current
+selection / session), with a persisted "processed" checkmark badge mirroring the Mac app's. Metadata
+edits are staged via `SidecarStagingStore` (never written straight to the source, which may be a
+read-only or actively-in-use camera card) and folded in at Process & Move time. `NativeMetadataWriter`
+(ImageIO `.xmp` sidecar) is the write path throughout, since `exiftool` can't run on iOS. Process &
+Move's destination is a fixed local folder inside the app's own sandbox (`Documents/ProcessedLibrary`)
+rather than a user-picked one — a Google-Drive-mounted folder was considered and ruled out (Drive's
+background sync could race with `ProcessMoveService`'s own copy+verify), and the eventual off-device
+transfer is planned as a separate, not-yet-designed Mac-initiated pull rather than an iPad-side push.
+See `docs/ARCHITECTURE.md` "iPad file access & sidecar staging" for the full reasoning. Not yet built:
+`Timeline.json` GPS sync via Google Drive, reverse geocoding, and AI-assisted suggestions — all three
+still Mac-only.
 
 ## Next stages
 
@@ -120,6 +134,7 @@ use, since `exiftool` can't run there.
 - **Auto-skip-on-process** (`docs/SPEC.md` §5's "successfully processed files auto-skip from the
   current session view") is intentionally not wired up — the user prefers processed files staying
   visible for now; revisit only if asked.
-- **iPadOS app**: install/launch on the physical iPad confirmed working (see "Status" above); next is
-  designing the real UI to replace the placeholder screen, wiring `NativeMetadataWriter` as the write
-  path, and designing the USB-C camera import flow (no SD card reader on this iPad).
+- **iPadOS app**: source browse through process/move (steps 1-5 of the planned 8-step checklist) is
+  shipped and user-verified on the physical iPad (see "Status" above). Remaining: `Timeline.json` GPS
+  sync via Google Drive (step 6), reverse geocoding (step 7), AI-assisted suggestions (step 8), and a
+  not-yet-designed Mac-initiated pull to move processed files off the iPad's local staging folder.

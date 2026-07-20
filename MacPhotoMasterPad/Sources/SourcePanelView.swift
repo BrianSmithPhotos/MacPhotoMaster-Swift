@@ -80,6 +80,7 @@ struct SourcePanelView: View {
                                     isSelected: viewModel.selectedAssetID == representative.id,
                                     isSelectMode: viewModel.isSelecting,
                                     isMultiSelected: viewModel.multiSelectedIDs.contains(representative.id),
+                                    isProcessed: viewModel.isProcessed(captureSet),
                                     onSelect: {
                                         if viewModel.isSelecting {
                                             viewModel.toggleMultiSelect(representative.id)
@@ -195,6 +196,11 @@ private struct CaptureTileView: View {
     let isSelected: Bool
     let isSelectMode: Bool
     let isMultiSelected: Bool
+    /// Whether this set has already been through Process & Move at least once — purely
+    /// informational (see `PhotoBrowserViewModel.processedAssetPaths`'s doc comment), shown as a
+    /// small bottom-leading checkmark so it never competes with the Select-mode badge (top-leading)
+    /// or the member-count badge (bottom-trailing).
+    let isProcessed: Bool
     let onSelect: () -> Void
     let onModifierClick: (UIKeyModifierFlags) -> Void
 
@@ -237,6 +243,15 @@ private struct CaptureTileView: View {
                         .font(.title3)
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(.white, isMultiSelected ? Color.accentColor : .black.opacity(0.35))
+                        .padding(6)
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if isProcessed {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .green)
                         .padding(6)
                 }
             }

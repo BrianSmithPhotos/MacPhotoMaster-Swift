@@ -28,6 +28,8 @@ public enum NativeMetadataWriteError: Error {
 /// does — writing a positive longitude plus a `GPSLongitudeRef=W` tag still reads back as East
 /// (exiftool ignores the XMP Ref tag). So this writes signed decimal degrees only, no Ref tags.
 public struct NativeMetadataWriter: MetadataWriter {
+    public init() {}
+
     public func write(title: String?, description: String, keywords: [String], gps: GPSCoordinate?, to url: URL)
         async throws
     {

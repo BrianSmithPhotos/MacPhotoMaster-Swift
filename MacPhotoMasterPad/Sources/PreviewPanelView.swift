@@ -3,10 +3,10 @@ import MacPhotoMasterCore
 
 /// iPad counterpart to the macOS app's `PreviewPanelView` — big preview plus a filmstrip of the
 /// selected capture set's members. The Mac version's cmd-click "ring-selection" (narrowing which
-/// members a Save/Process action applies to) has no touch equivalent yet and isn't wired up here —
-/// Save/Process aren't wired on iPad at all yet (see `PhotoBrowserViewModel`'s doc comment), so
-/// there's nothing for a ring-selection to feed into until that's designed. Tapping a filmstrip
-/// thumbnail just switches which member the big preview shows.
+/// members a Save/Process action applies to beyond the grid's own multi-selection) has no touch
+/// equivalent yet and isn't wired up here — there's nothing beyond `saveMetadata`'s/`process`'s
+/// existing `.captureSet`/`.manualSelection` scopes for a ring-selection to further narrow until
+/// that's designed. Tapping a filmstrip thumbnail just switches which member the big preview shows.
 struct PreviewPanelView: View {
     @ObservedObject var viewModel: PhotoBrowserViewModel
 

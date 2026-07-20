@@ -49,22 +49,41 @@ Installing on a physical iPad (Team ID `U4UCUZRYBD`) is confirmed working end to
 hardcodes the Team ID in `DEVELOPMENT_TEAM`/`CODE_SIGN_STYLE: Automatic`; not a secret, but visible
 in the repo.
 
-The first real slice of iPad UI is built: a two-panel `NavigationSplitView` (`ContentView`) — source
-browser (`SourcePanelView`: breadcrumb, subfolder chips, capture-set grid, skip/un-skip, grid
-multi-select) on one side, preview + filmstrip (`PreviewPanelView`) on the other, with read-only
-metadata (`MetadataPanelView`) as a resizable sheet rather than a fixed third column (see "iPad file
-access" below for why). Folder opening already uses the real `.fileImporter` picker described there,
-so it already handles an external volume (SD card reader, camera in mass-storage mode), not just
-local app storage. Grid multi-select mirrors the Mac app's `multiSelectedIDs`/shift-click two ways:
-a touch-only "Select mode" toggle where tapping a tile toggles it, and — when a hardware
-keyboard/trackpad is attached — real cmd-click/shift-click via `TileTapCatcher`, both writing to the
-same `PhotoBrowserViewModel.multiSelectedIDs`. See `TileTapCatcher.swift`'s doc comment for a gesture
-pitfall worth knowing before adding more custom touch handling here: stacking a second gesture
-recognizer over an existing tappable view (even one that's designed to "decline" and pass touches
-through) breaks both, because UIKit hit-testing hands a touch to whichever view is topmost, and a
-sibling recognizer that isn't an ancestor of the hit-tested view never sees it at all — one
-recognizer needs to be the single decision point. Not yet built: editing, Save/Process, and the
-Timeline/Drive/USB-C ingest flow below.
+The iPad UI covers source browse through process/move: a two-panel `NavigationSplitView`
+(`ContentView`) — source browser (`SourcePanelView`: breadcrumb, subfolder chips, capture-set grid,
+skip/un-skip, grid multi-select) on one side, preview + filmstrip (`PreviewPanelView`) on the other,
+with an editable metadata form (`MetadataPanelView`) as a resizable sheet rather than a fixed third
+column (see "iPad file access" below for why). Folder opening already uses the real `.fileImporter`
+picker described there, so it already handles an external volume (SD card reader, camera in
+mass-storage mode), not just local app storage. Grid multi-select mirrors the Mac app's
+`multiSelectedIDs`/shift-click two ways: a touch-only "Select mode" toggle where tapping a tile
+toggles it, and — when a hardware keyboard/trackpad is attached — real cmd-click/shift-click via
+`TileTapCatcher`, both writing to the same `PhotoBrowserViewModel.multiSelectedIDs`. See
+`TileTapCatcher.swift`'s doc comment for a gesture pitfall worth knowing before adding more custom
+touch handling here: stacking a second gesture recognizer over an existing tappable view (even one
+that's designed to "decline" and pass touches through) breaks both, because UIKit hit-testing hands a
+touch to whichever view is topmost, and a sibling recognizer that isn't an ancestor of the hit-tested
+view never sees it at all — one recognizer needs to be the single decision point.
+
+Metadata editing (description/keywords, staged via `SidecarStagingStore` — see "iPad file access"
+below), multi-scope Save, a live rename preview (`PhotoBrowserViewModel.titlePreview`, same
+`RenameService`-backed design as the Mac app's, driven by a per-session `sessionBatch` label), and
+Process & Move (`process(scope:)`, four scope buttons mirroring the Mac app's) are all built and
+user-verified on the physical iPad, reusing `MacPhotoMasterCore`'s `MetadataEditParsing`/
+`SelectionScope`/`RenameService`/`ProcessMoveService`/`ProcessedStateStore` essentially unmodified —
+`ProcessMoveService` is constructed with `NativeMetadataWriter()` in place of the Mac app's
+`ExifToolClient()`, otherwise identical. `process(scope:)` patches in any `SidecarStagingStore`-staged
+draft that hasn't been reloaded into the current session's edit buffer before calling
+`processAndCopy`, so an edit staged in an earlier session is never silently dropped. Process & Move's
+destination, `PhotoBrowserViewModel.libraryRootURL`, is a fixed `Documents/ProcessedLibrary` folder
+inside the app's own sandbox container — not user-picked, and deliberately not a Google-Drive-mounted
+folder (considered and rejected: Drive's background sync writing/evicting bytes in the same folder
+`ProcessMoveService` copies into and SHA-256-verifies would race with that verification). Getting
+processed files off the iPad is planned as a separate, not-yet-designed Mac-initiated pull rather than
+an iPad-side push into shared cloud storage — `Documents` was chosen specifically because Finder file
+sharing (`UIFileSharingEnabled`, not yet added to `project.yml`) can only expose an app's `Documents`
+directory, so this leaves that door open without committing to the mechanism yet. Not yet built:
+`Timeline.json` GPS sync via Google Drive, reverse geocoding, and AI-assisted suggestions.
 
 `ExifToolClient` is the one Service that stays in the `MacPhotoMaster` (macOS) target instead of
 moving to Core: it shells out to the `exiftool` binary via `Process`, and process/subprocess
@@ -96,10 +115,10 @@ Desktop does; see "iPad file access" below for how `Timeline.json` reaches the i
 
 ## iPad file access & sidecar staging
 
-Decided direction for the iPad ingest flow. Folder browsing itself is implemented (see above) and
-already covers the "Photos via USB-C" bullet below; the `Timeline.json`-via-Drive step and sidecar
-staging are not implemented yet. Two access problems and one behavioral divergence from the Mac app,
-worked out before writing any of the actual views:
+Decided direction for the iPad ingest flow. Folder browsing, sidecar staging, and Process & Move are
+all implemented (see above) — this covers the "Photos via USB-C" and "sidecar write-back" bullets
+below in full. `Timeline.json` via Google Drive is not implemented yet. Two access problems and one
+behavioral divergence from the Mac app, worked out before writing any of the actual views:
 
 - **`Timeline.json` via Google Drive.** The iOS/iPadOS Drive app doesn't mount a filesystem path the
   way Drive Desktop does, but it registers as a Files provider, so `UIDocumentPickerViewController`
@@ -123,14 +142,17 @@ worked out before writing any of the actual views:
   way may still be actively written to by the camera between iPad review sessions across a multi-day
   trip (cards commonly aren't reformatted until the camera reports them full) — writing anything to
   that card, even a small sidecar, means carrying interrupted-write/firmware-interaction risk for the
-  entire trip instead of a single import session. Instead: sidecars are staged in iPad-local storage,
+  entire trip instead of a single import session. Instead: `SidecarStagingStore` stages sidecars at
+  `~/Library/Application Support/MacPhotoMaster/SidecarStaging/` inside the app's own sandbox,
   keyed by the original filename + file size (not path or capture timestamp — a card that isn't
   reformatted between sessions can have its DCIM folder numbering roll over, so path isn't stable,
-  and filename is already what distinguishes shots). The RAW/JPEG bytes themselves are only copied
-  off the card at Process & Move time (per SPEC.md §5's existing copy-first/verify model), at which
-  point the staged sidecar moves alongside them, still unfolded — `ExifToolClient
-  .foldInSidecarIfPresent(for:)` only runs once files reach a Mac, same as the existing sidecar
-  design already assumes.
+  and filename is already what distinguishes shots). `PhotoBrowserViewModel.process(scope:)` reads
+  any staged draft back via `stagedDraft(for:)` and patches it into the `PhotoAsset` before Process &
+  Move copies the RAW/JPEG bytes off the card (per SPEC.md §5's existing copy-first/verify model);
+  `NativeMetadataWriter` then writes a real `.xmp` sidecar next to the copy in the destination
+  library, still unfolded — `ExifToolClient.foldInSidecarIfPresent(for:)` only runs once files reach a
+  Mac, same as the existing sidecar design already assumes. The original file on the card never gets
+  a sidecar at all.
 
 ## Concurrency rules
 

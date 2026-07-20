@@ -128,13 +128,14 @@ final class PhotoBrowserViewModel: ObservableObject {
     @Published private(set) var isImportingTimeline = false
 
     /// The AI model selection in the `"<provider>:<model>"` convention (`AIModelSelection`), e.g.
-    /// `"mlx:mlx-community/FastVLM-0.5B-bf16"` or `"openrouter:google/gemini-2.5-flash"`. Persisted
-    /// so a chosen model survives relaunch. Defaults to the on-device FastVLM preset — it works
-    /// offline with no API key, so the AI feature is usable out of the box. iPad supports only `mlx:`
-    /// and `openrouter:`; `ollama:` (the daemon can't run on iPad) reports an error from `suggestAI`.
+    /// `"mlx:mlx-community/gemma-3-4b-it-4bit"` or `"openrouter:google/gemini-2.5-flash"`. Persisted
+    /// so a chosen model survives relaunch. Defaults to the on-device gemma-3-4b preset — the
+    /// recommended local model (good keywords + descriptions, runs in seconds, no API key, ~5GB peak
+    /// under the raised jetsam cap). FastVLM-0.5B remains available as a lighter/lower-quality fallback.
+    /// iPad supports only `mlx:` and `openrouter:`; `ollama:` (no daemon on iPad) errors from `suggestAI`.
     @Published var aiModelText: String =
         UserDefaults.standard.string(forKey: PhotoBrowserViewModel.aiModelDefaultsKey)
-        ?? "mlx:mlx-community/FastVLM-0.5B-bf16"
+        ?? "mlx:mlx-community/gemma-3-4b-it-4bit"
     {
         didSet {
             guard aiModelText != oldValue else { return }
@@ -145,6 +146,16 @@ final class PhotoBrowserViewModel: ObservableObject {
     @Published var aiStatusMessage: String?
     private var suggestAITask: Task<Void, Never>?
     private static let aiModelDefaultsKey = "aiModelText"
+
+    /// Models (by their `AIModelSelection.presets` string) that use the `.compact` prompt profile —
+    /// small on-device models that misbehave on the full prompt (echo its placeholder keywords,
+    /// over-apply species-ID). `UserDefaults`-persisted, toggled per model in `SettingsView`. Defaults
+    /// to just FastVLM-0.5B; larger models (gemma-3-4b, OpenRouter) default to `.full` and can be
+    /// switched by the user if they turn out to need it. Mirrors the Mac app's `eBirdDisabledModels`.
+    @Published private(set) var compactPromptModels: Set<String> =
+        (UserDefaults.standard.array(forKey: PhotoBrowserViewModel.compactPromptModelsKey) as? [String])
+        .map(Set.init) ?? ["mlx:mlx-community/FastVLM-0.5B-bf16"]
+    private static let compactPromptModelsKey = "compactPromptModels"
     /// Drives the Settings button label ("Locate…" vs "Change…") and whether Refresh is enabled.
     /// Seeded from the stored bookmark so a relaunch with a previously-located file starts enabled.
     @Published private(set) var hasTimelineBookmark: Bool =
@@ -962,9 +973,19 @@ final class PhotoBrowserViewModel: ObservableObject {
     var aiModelPresets: [String] {
         AIModelSelection.presets.filter { preset in
             if preset.hasPrefix("ollama:") { return false }
-            if preset.hasPrefix("mlx:") { return preset.contains("FastVLM") }
+            if preset.hasPrefix("mlx:") { return preset.contains("FastVLM") || preset.contains("gemma-3-4b") }
             return true
         }
+    }
+
+    /// Called from `SettingsView`'s per-model Prompt Style toggle. Persists the set.
+    func setCompactPrompt(_ useCompact: Bool, forModel model: String) {
+        if useCompact {
+            compactPromptModels.insert(model)
+        } else {
+            compactPromptModels.remove(model)
+        }
+        UserDefaults.standard.set(Array(compactPromptModels), forKey: Self.compactPromptModelsKey)
     }
 
     /// Starts `suggestAI()` as a cancellable `Task`, stashing the handle for `cancelAISuggestion()`.
@@ -1045,7 +1066,8 @@ final class PhotoBrowserViewModel: ObservableObject {
             let result = try await aiSuggestionService.suggest(
                 provider: provider, model: selection.modelName, image: image,
                 existingDescription: editableDescription, existingKeywords: editableKeywords,
-                locationContext: locationContext)
+                locationContext: locationContext,
+                promptProfile: compactPromptModels.contains(aiModelText) ? .compact : .full)
             guard previewAsset?.id == previewID else { return }
             editableDescription = result.description
             editableKeywords = result.keywords.joined(separator: ", ")

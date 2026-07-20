@@ -64,6 +64,7 @@ above).
 | `mlx-community/gemma-4-31b-it-8bit` | ~34 GB | **Default model** (`AIModelSelection.presets.first`). `ModelConfiguration(id:)` literal, instruction-tuned 8-bit conversion of `google/gemma-4-31b-it`. Originally registered as `mlx-community/gemma-4-31b-8bit` (the *base*, non-instruction-tuned conversion) — swapped after that produced a "tokenizer does not have a chat template" error: `mlx-community/gemma-4-31b-8bit`/`google/gemma-4-31b` are pretrained-only repos and never shipped one, but `Gemma4.swift`'s `prepare(input:)` has no fallback template and throws when it's missing. **When adding any gemma4 (or other) community conversion, confirm the repo is an `-it-`/instruction-tuned release before registering it** — a base-model conversion will hit this every time, not just for gemma4 |
 | `mlx-community/Qwen3.6-35B-A3B-4.4bit-msq` | ~21 GB | `ModelConfiguration(id:)` literal. Manually verified: loads and returns a usable (imperfect) description, noticeably slower than the old (now-removed) gemma-3-12b preset |
 | `mlx-community/Qwen3.6-35B-A3B-8bit` | ~38 GB | `ModelConfiguration(id:)` literal (8-bit conversion of the same `Qwen/Qwen3.6-35B-A3B` base as the 4.4bit-msq entry above). Untested as of this writing |
+| `mlx-community/gemma-3-4b-it-4bit` | ~2.5 GB (4B params, 4-bit) | `ModelConfiguration(id:)` literal, `extraEOSTokens: ["<end_of_turn>"]` (Gemma-3 turn token). Added for the iPad (step 8b) as the **recommended on-device model** and the iPad app's default — the Gemma-3 vision architecture already runs in this mlx-swift-lm build. User-verified on-device (M4, 16GB): good keywords + coherent descriptions, runs in seconds, ~5.3 GB peak (fits under the raised ~6 GB jetsam cap, but headroom is thin — if a future image OOMs it, lower the iOS GPU `cacheLimit`). Species ID on hard/backlit subjects is imperfect (4B ceiling; eBird candidate list, a later pass, is expected to help). `-it-` instruction-tuned, so it ships a chat template |
 | `mlx-community/FastVLM-0.5B-bf16` | ~0.6 GB (0.5B params, bf16) | `ModelConfiguration(id:)` literal. Added as the first candidate for the iPad target (M4 11", 16GB) — the three entries above are 21-38GB and unusable there, while this is small enough to fit comfortably under even the tightened jetsam ceiling of `increased-memory-limit`. FastVLM (CVPR 2025, `FastViTHD` vision encoder over a Qwen2-0.5B LLM backbone); `config.json`'s `model_type` is `llava_qwen2`, a registered mlx-swift-lm VLM type mapped to the same `FastVLM.init` as `fastvlm`. This is the community re-export mlx-swift-lm's own `VLMRegistry.fastvlm` static points to — deliberately *not* Apple's own `apple/FastVLM-0.5B-fp16` export, which was tried first and failed with `MLX inference failed: Unsupported model type: llava_qwen2` (a misleading message — the real failure is earlier: that repo's `preprocessor_config.json` reports `processor_class: "LlavaProcessor"`, which `VLMProcessorTypeRegistry` in mlx-swift-lm 3.31.4 doesn't recognize for this architecture; the VLM factory throws `unsupportedProcessorType`, `ModelFactoryRegistry`'s factory-fallback loop then tries the plain-LLM factory, which doesn't know `llava_qwen2` as a type at all, and *that* is the error that surfaces since it's the last one tried). The `mlx-community` conversion re-exports with `processor_class: "FastVLMProcessor"` instead, which matches the registry. `extraEOSTokens: ["<|im_end|>"]` follows the existing Qwen-family convention above, and matches this model's `eos_token_id: 151645`/Qwen2 tokenizer convention. Manually verified 2026-07-18: loads and generates a coherent, well-formed description, but at this size accuracy on the specific subject was noticeably weaker than the larger gemma4/Qwen3.6 entries above — expected given the 0.5B parameter count; treat as a speed/footprint tradeoff for the iPad target, not a like-for-like replacement for the Mac's larger models |
 
 **Removed from the preset list after manual testing**: `mlx-community/Qwen2.5-VL-3B-Instruct-4bit`
@@ -147,12 +148,18 @@ using the one 16GB-viable preset (`FastVLM-0.5B-bf16`). Four things had to be se
   memory limit gives fast generation (seconds, not minutes) with headroom under the jetsam cap. This
   is why `MLX` is a direct `Package.swift` dependency of `MacPhotoMasterCore` (for `import MLX`).
 
-**Known follow-up: small-model prompt tuning.** `AISuggestionService`'s shared prompt is written for
-capable models. FastVLM-0.5B is small enough that it (a) echoes the JSON example's placeholder
-keywords (`["k1","k2"]`) literally instead of replacing them, and (b) doesn't reliably honor the
-conditional species-ID instructions ("if the primary subject is a bird…"), attempting bird-ID on
-non-wildlife subjects. A small-model prompt variant (selected for small `mlx:` models, leaving the
-Mac's proven prompt untouched) is the planned fix. OpenRouter models on iPad show neither issue.
+**Prompt profiles (step 8b).** `AISuggestionService` now builds one of two prompt variants
+(`PromptProfile.full`/`.compact`). `.full` is the original, unchanged, used by every Mac/OpenRouter
+model and gemma-3-4b. `.compact` is for small on-device models (FastVLM-0.5B): it drops the JSON
+example's copyable placeholder keywords (which FastVLM echoed verbatim as `k1, k2`) and gates the
+species-ID blocks on the on-device `SceneTriageService` category (only asks about birds/flowers when
+triage sees one — fixing FastVLM bird-ID'ing non-wildlife like bridges). Selected per-model on iPad
+via `PhotoBrowserViewModel.compactPromptModels` (a `Set<String>`, toggled in Settings, defaulting to
+FastVLM). The compact prompt fixed the bird-fixation but FastVLM-0.5B remains weak overall (it also
+under-produces keywords without a JSON example) — it's kept as a lighter/lower-quality fallback, with
+**gemma-3-4b as the recommended on-device model**. A richer small-model format (non-JSON) was
+considered and deliberately deferred (not worth the effort for the weak fallback). OpenRouter models
+show none of these issues.
 
 ## Manual smoke test
 

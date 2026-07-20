@@ -18,6 +18,17 @@ import os
 /// accuracy isn't worth gating on it. Not part of SPEC.md/the Python reference app; added to improve
 /// wildlife/plant identification accuracy (e.g. small VLMs conflating similar-looking species) beyond
 /// what a single generic prompt gets.
+/// Which prompt variant `AISuggestionService` builds. `.full` is the original prompt, written for
+/// capable models (all Mac/OpenRouter models, and the Mac app always uses it). `.compact` is a
+/// pared-down variant for small on-device models (e.g. FastVLM-0.5B) that otherwise misbehave on the
+/// full prompt — they echo its JSON example's placeholder keywords verbatim and don't honor its
+/// "if the subject is a bird…" conditional (bird-ID'ing non-wildlife). The iPad selects `.compact`
+/// per-model; see `PhotoBrowserViewModel.compactPromptModels`.
+public enum PromptProfile {
+    case full
+    case compact
+}
+
 public struct AISuggestionService {
     public init() {}
 
@@ -37,7 +48,8 @@ public struct AISuggestionService {
     /// relying on free recall for the Latin binomial.
     public func suggest(
         provider: AIProvider, model: String, image: CGImage, existingDescription: String,
-        existingKeywords: String, locationContext: String = "", birdCandidateSpecies: String = ""
+        existingKeywords: String, locationContext: String = "", birdCandidateSpecies: String = "",
+        promptProfile: PromptProfile = .full
     ) async throws -> AISuggestionResult {
         try await provider.ensureVisionCapable(model: model)
 
@@ -45,7 +57,7 @@ public struct AISuggestionService {
         let userPrompt = Self.buildUserPrompt(
             existingDescription: existingDescription, existingKeywords: existingKeywords,
             locationContext: locationContext, category: category,
-            birdCandidateSpecies: birdCandidateSpecies)
+            birdCandidateSpecies: birdCandidateSpecies, promptProfile: promptProfile)
 
         do {
             var result = try await requestAndParse(
@@ -96,7 +108,28 @@ public struct AISuggestionService {
 
     public static func buildUserPrompt(
         existingDescription: String, existingKeywords: String, locationContext: String,
-        category: SceneCategory, birdCandidateSpecies: String = ""
+        category: SceneCategory, birdCandidateSpecies: String = "", promptProfile: PromptProfile = .full
+    ) -> String {
+        switch promptProfile {
+        case .full:
+            return fullUserPrompt(
+                existingDescription: existingDescription, existingKeywords: existingKeywords,
+                locationContext: locationContext, category: category,
+                birdCandidateSpecies: birdCandidateSpecies)
+        case .compact:
+            return compactUserPrompt(
+                existingDescription: existingDescription, existingKeywords: existingKeywords,
+                locationContext: locationContext, category: category,
+                birdCandidateSpecies: birdCandidateSpecies)
+        }
+    }
+
+    /// The original prompt, unchanged — the only variant capable models (Mac/OpenRouter) use. Species-ID
+    /// instructions are sent on every request regardless of triage category (see this type's doc comment
+    /// for why gating on Vision's bird confidence was rejected for capable models).
+    private static func fullUserPrompt(
+        existingDescription: String, existingKeywords: String, locationContext: String,
+        category: SceneCategory, birdCandidateSpecies: String
     ) -> String {
         let descriptionWordLimit =
             category == .other ? genericDescriptionWordLimit : categorizedDescriptionWordLimit
@@ -154,6 +187,78 @@ public struct AISuggestionService {
                     + "location's eBird region. Strongly prefer a species from this list, using its "
                     + "exact common and scientific name as given, over any other species: "
                     + trimmedBirdCandidates)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Pared-down prompt for small on-device models (e.g. FastVLM-0.5B). Two deliberate differences
+    /// from `fullUserPrompt`: (1) the JSON format is described in words with **no example values**, so
+    /// a small model can't echo a `["k1","k2"]` placeholder verbatim; (2) the species-ID blocks are
+    /// **gated on the triage `category`** rather than sent always — a small model over-applies the
+    /// "if it's a bird…" conditional and bird-IDs non-wildlife subjects. Vision triage can miss a
+    /// genuine bird, but for small models a missed species ask is a better failure than fabricated
+    /// bird descriptions of bridges. Location/existing-context lines are kept (small models still use
+    /// them), just terser.
+    private static func compactUserPrompt(
+        existingDescription: String, existingKeywords: String, locationContext: String,
+        category: SceneCategory, birdCandidateSpecies: String
+    ) -> String {
+        let descriptionWordLimit =
+            category == .other ? genericDescriptionWordLimit : categorizedDescriptionWordLimit
+        let isBird = category == .bird
+        let isFlower = category == .flower
+        var lines = [
+            "Describe this photograph for photo metadata.",
+            "Return only a JSON object with two fields: \"description\" (a string) and \"keywords\" "
+                + "(an array of lowercase strings). Output nothing else.",
+            "Description: at most \(descriptionWordLimit) words, plain English, no markdown.",
+            "Keywords: 10 to 15 specific lowercase keywords for what is actually shown, most "
+                + "identifying first.",
+        ]
+        // Phrased as imperatives, not declaratives ("This is a bird…"): a small model will echo a
+        // declarative sentence back as its description verbatim.
+        if isBird {
+            lines.append(
+                "Name the bird's species and its Latin binomial (genus species) in the description. If "
+                    + "unsure between look-alikes, give the most likely and mention the distinguishing "
+                    + "field mark.")
+        }
+        if isFlower {
+            lines.append(
+                "Name the plant's species and its Latin binomial (genus species) in the description. If "
+                    + "unsure, give the most likely and mention the distinguishing feature.")
+        }
+        if isBird || isFlower {
+            lines.append(
+                "Only give a Latin binomial you are confident is real and correctly spelled. If you "
+                    + "cannot identify the exact species, say so (name the genus or family) instead of "
+                    + "guessing.")
+        }
+        let trimmedDescription = existingDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedDescription.isEmpty {
+            lines.append("Existing description for context (may be outdated): \(trimmedDescription)")
+        }
+        let trimmedKeywords = existingKeywords.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedKeywords.isEmpty {
+            lines.append("Existing keywords to prefer unless clearly wrong: \(trimmedKeywords)")
+        }
+        let trimmedLocation = locationContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedLocation.isEmpty {
+            lines.append(
+                "Location context (you may mention city/county/state in the description if it helps): "
+                    + trimmedLocation)
+            if isBird || isFlower {
+                lines.append(
+                    "Given that location, prefer a species native to or commonly recorded there over a "
+                        + "similar species not found there, unless field marks clearly rule it out.")
+            }
+        }
+        let trimmedBirdCandidates = birdCandidateSpecies.trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        if isBird, !trimmedBirdCandidates.isEmpty {
+            lines.append(
+                "Prefer a species from this verified local list, using its exact common and scientific "
+                    + "name as given: " + trimmedBirdCandidates)
         }
         return lines.joined(separator: "\n")
     }

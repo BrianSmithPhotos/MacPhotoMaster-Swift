@@ -103,10 +103,17 @@ with two providers — native on-device **MLX** (`mlx:`, e.g. FastVLM-0.5B) and 
 Cancel button interrupts a running MLX generation. Getting on-device MLX to actually run took Metal/
 memory work specific to iOS — see `docs/MLX_PROVIDER.md` "On-device (iPad)" (Metal API Validation off,
 `increased-memory-limit` entitlement, a `#if os(iOS)` GPU buffer-cache cap in `MLXNativeProvider`, and
-`MLX` as a direct package dependency of Core for that). Deferred to step 8b: the eBird candidate list,
-subject isolation, and a small-model prompt variant (FastVLM-0.5B echoes the prompt's placeholder
-keywords and over-applies the species-ID instructions — issues the larger Mac/OpenRouter models don't
-have). OpenRouter's API key is entered in the iPad Settings sheet (Keychain via `APIKeyStore`).
+`MLX` as a direct package dependency of Core for that). OpenRouter's API key is entered in the iPad
+Settings sheet (Keychain via `APIKeyStore`).
+
+Step 8b (pass 1) added prompt profiles and expanded the model roster. `AISuggestionService` builds a
+`.full` (unchanged, all Mac/OpenRouter models + gemma-3-4b) or `.compact` prompt; the compact variant
+drops the copyable JSON keyword example and gates species-ID on the scene-triage category, for small
+on-device models that otherwise echo the placeholder and over-apply bird/flower ID. Profile is chosen
+per-model on iPad (`PhotoBrowserViewModel.compactPromptModels`, a Settings toggle, defaulting to
+FastVLM). `gemma-3-4b-it-4bit` (~2.5GB, ~5.3GB peak on-device) is registered and is the recommended/
+default on-device model; FastVLM-0.5B stays a lighter fallback. Still deferred to a later 8b pass: the
+eBird candidate list and subject isolation.
 
 `ExifToolClient` is the one Service that stays in the `MacPhotoMaster` (macOS) target instead of
 moving to Core: it shells out to the `exiftool` binary via `Process`, and process/subprocess

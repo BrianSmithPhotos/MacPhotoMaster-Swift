@@ -97,6 +97,63 @@ final class AISuggestionServiceTests: XCTestCase {
         XCTAssertTrue(prompt.contains("never invent one"))
     }
 
+    // MARK: - buildUserPrompt / compact profile (small on-device models)
+
+    func testCompactPromptOmitsCopyableKeywordPlaceholder() {
+        // The whole reason the compact profile exists: small models echo the full prompt's
+        // ["k1","k2"] JSON example verbatim, so the compact variant must never contain it.
+        let full = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .other,
+            promptProfile: .full)
+        let compact = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .other,
+            promptProfile: .compact)
+
+        XCTAssertTrue(full.contains("\"k1\""), "guards against the full prompt quietly changing")
+        XCTAssertFalse(compact.contains("k1"))
+        XCTAssertFalse(compact.contains("k2"))
+        XCTAssertTrue(compact.contains("array of lowercase strings"))
+    }
+
+    func testCompactPromptGatesSpeciesInstructionsOnCategory() {
+        // Unlike the full prompt (always-on species-ID), the compact prompt only asks for species ID
+        // when triage classified the subject — this is the fix for bird-ID'ing non-wildlife subjects.
+        let other = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .other,
+            promptProfile: .compact)
+        XCTAssertFalse(other.contains("bird"))
+        XCTAssertFalse(other.contains("Latin binomial"))
+
+        let bird = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .bird,
+            promptProfile: .compact)
+        XCTAssertTrue(bird.contains("Name the bird's species"))
+        XCTAssertTrue(bird.contains("Latin binomial"))
+        // Imperative, not a declarative the model can echo as the description.
+        XCTAssertFalse(bird.contains("This is a bird"))
+
+        let flower = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .flower,
+            promptProfile: .compact)
+        XCTAssertTrue(flower.contains("Name the plant's species"))
+        XCTAssertFalse(flower.contains("Name the bird's species"))
+    }
+
+    func testCompactPromptGatesLocationSpeciesPreferenceOnCategory() {
+        // The "prefer a locally-recorded species" line is bird/flower-specific, so on a non-wildlife
+        // subject it must not appear even when location context is present.
+        let other = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "city=Point Reyes",
+            category: .other, promptProfile: .compact)
+        XCTAssertTrue(other.contains("Location context"))
+        XCTAssertFalse(other.contains("prefer a species"))
+
+        let bird = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "city=Point Reyes",
+            category: .bird, promptProfile: .compact)
+        XCTAssertTrue(bird.contains("prefer a species"))
+    }
+
     // MARK: - suggest / fallback
 
     func testSuggestReturnsPrimaryResultWithoutRetryFlags() async throws {

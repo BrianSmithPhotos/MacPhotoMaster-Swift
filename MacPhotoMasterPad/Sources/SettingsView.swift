@@ -65,6 +65,22 @@ struct SettingsView: View {
                         "Needed only for openrouter: models. On-device mlx: models (e.g. FastVLM) need "
                         + "no key. Stored securely in the device Keychain.")
                 }
+
+                Section {
+                    ForEach(viewModel.aiModelPresets, id: \.self) { model in
+                        Toggle(
+                            model,
+                            isOn: Binding(
+                                get: { viewModel.compactPromptModels.contains(model) },
+                                set: { viewModel.setCompactPrompt($0, forModel: model) }))
+                    }
+                } header: {
+                    Text("Compact Prompt")
+                } footer: {
+                    Text(
+                        "Turn on for small models that echo placeholder keywords or over-apply bird/flower "
+                        + "identification (e.g. FastVLM-0.5B). Larger models work better with it off.")
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

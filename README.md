@@ -134,9 +134,11 @@ also built and user-verified: a Suggest button in the metadata sheet with two pr
 on-device MLX (`mlx:`, e.g. FastVLM-0.5B, which runs in seconds on the M4 iPad) and OpenRouter
 (`openrouter:`, key entered in Settings); Ollama is excluded (no daemon on iPad). Getting on-device
 MLX to run took iOS-specific Metal/memory setup — see `docs/MLX_PROVIDER.md` "On-device (iPad)".
-Deferred to step 8b: the eBird candidate list, subject isolation, and a small-model prompt variant
-(FastVLM-0.5B echoes the prompt's placeholder keywords and over-applies species-ID instructions —
-issues the larger Mac/OpenRouter models don't have).
+Step 8b (pass 1) added a `.compact` prompt profile for small on-device models (drops the copyable JSON
+keyword example, gates species-ID on scene-triage — selected per-model in Settings), registered
+`gemma-3-4b-it-4bit` as the recommended/default on-device model (good keywords + descriptions in
+seconds, ~5.3GB peak), and added a cheap user-verified OpenRouter preset. Still deferred to a later 8b
+pass: the eBird candidate list (which should lift species-ID accuracy) and subject isolation.
 
 ## Next stages
 
@@ -149,6 +151,6 @@ issues the larger Mac/OpenRouter models don't have).
 - **iPadOS app**: source browse through process/move, `Timeline.json` GPS suggestion, reverse
   geocoding, and AI-assisted suggestions (MLX + OpenRouter, first cut) — steps 1-8 of the planned
   8-step checklist — are shipped and user-verified on the physical iPad (see "Status" above).
-  Remaining: **step 8b** (eBird candidate list, subject isolation, and a small-model prompt variant
-  for FastVLM-0.5B), and a not-yet-designed Mac-initiated pull to move processed files off the iPad's
-  local staging folder.
+  Remaining: **step 8b** — the eBird candidate list (species-ID accuracy) and subject isolation are
+  still to come (the prompt profiles + model roster part of 8b is done) — and a not-yet-designed
+  Mac-initiated pull to move processed files off the iPad's local staging folder.

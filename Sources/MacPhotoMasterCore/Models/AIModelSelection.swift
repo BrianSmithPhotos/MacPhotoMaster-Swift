@@ -30,6 +30,7 @@ public struct AIModelSelection {
         "mlx:mlx-community/gemma-4-31b-it-8bit",
         "ollama:qwen3.6:35b",
         "openrouter:google/gemini-2.5-flash",
+        "openrouter:google/gemini-3.1-flash-lite-image",
         "openrouter:openai/gpt-5.1",
         "openrouter:google/gemini-3.5-flash",
         "openrouter:anthropic/claude-opus-4.8",
@@ -44,6 +45,7 @@ public struct AIModelSelection {
         "ollama:moondream:latest",
         "mlx:mlx-community/Qwen3.6-35B-A3B-4.4bit-msq",
         "mlx:mlx-community/Qwen3.6-35B-A3B-8bit",
+        "mlx:mlx-community/gemma-3-4b-it-4bit",
         "mlx:mlx-community/FastVLM-0.5B-bf16",
     ]
 }

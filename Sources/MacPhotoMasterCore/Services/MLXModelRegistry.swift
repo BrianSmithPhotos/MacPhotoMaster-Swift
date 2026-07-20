@@ -58,6 +58,17 @@ public enum MLXModelRegistry {
             defaultPrompt: "Describe the image in English",
             extraEOSTokens: ["<|im_end|>"]
         ),
+        // A "better local" tier between FastVLM-0.5B and the ~20-40GB Mac-only entries: Gemma-3 4B
+        // vision, ~2.5GB in 4-bit, small enough for the iPad's ~6GB jetsam budget (verify on-device;
+        // vision-encoder activation memory is the wildcard). The Gemma-3 architecture already runs in
+        // this mlx-swift-lm build. `-it-` (instruction-tuned) variant, so it ships a chat template —
+        // see [[project_mlx_base_vs_it_chat_template]] for why base conversions crash. Gemma-3's turn
+        // token is `<end_of_turn>`.
+        "mlx-community/gemma-3-4b-it-4bit": ModelConfiguration(
+            id: "mlx-community/gemma-3-4b-it-4bit",
+            defaultPrompt: "Describe the image in English",
+            extraEOSTokens: ["<end_of_turn>"]
+        ),
     ]
 
     public static func configuration(for modelID: String) -> ModelConfiguration? {

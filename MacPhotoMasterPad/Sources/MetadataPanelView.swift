@@ -19,6 +19,11 @@ import MacPhotoMasterCore
 /// `.task` below) and applied straight to the asset, with a manual altitude re-lookup button — but
 /// there are no editable lat/long fields, unlike the Mac app.
 ///
+/// The AI Suggestions section has a model picker (free-text field + presets menu, `mlx:`/`openrouter:`
+/// only on iPad) and a Suggest/Cancel button driving `PhotoBrowserViewModel.startAISuggestion()`; the
+/// result auto-saves like the Mac app. Subject isolation and the eBird candidate list are deferred to
+/// step 8b, so there's no "Evaluated" image or eBird toggle here yet.
+///
 /// Process & Move mirrors the Mac app's four-button row (Single Image/Capture Set/Current
 /// Selection/Session), calling `PhotoBrowserViewModel.process(scope:)` directly — unlike the Mac
 /// app, there's no library-folder picker here at all: `viewModel.libraryRootURL` is a fixed local
@@ -61,6 +66,37 @@ struct MetadataPanelView: View {
 
                             if let saveStatusMessage = viewModel.saveStatusMessage {
                                 Text(saveStatusMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Section("AI Suggestions") {
+                            HStack {
+                                TextField("Model", text: $viewModel.aiModelText)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                Menu {
+                                    ForEach(viewModel.aiModelPresets, id: \.self) { preset in
+                                        Button(preset) { viewModel.aiModelText = preset }
+                                    }
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                }
+                            }
+
+                            if viewModel.isSuggestingAI {
+                                Button("Cancel", role: .cancel) {
+                                    viewModel.cancelAISuggestion()
+                                }
+                            } else {
+                                Button("Suggest") {
+                                    viewModel.startAISuggestion()
+                                }
+                                .disabled(viewModel.previewAsset == nil)
+                            }
+
+                            if let aiStatusMessage = viewModel.aiStatusMessage {
+                                Text(aiStatusMessage)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

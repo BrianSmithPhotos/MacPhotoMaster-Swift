@@ -126,6 +126,25 @@ final class PhotoBrowserViewModel: ObservableObject {
     /// document picker — see `SettingsView` and docs/ARCHITECTURE.md's iPad file-access section.
     @Published var timelineStatusMessage: String?
     @Published private(set) var isImportingTimeline = false
+
+    /// The AI model selection in the `"<provider>:<model>"` convention (`AIModelSelection`), e.g.
+    /// `"mlx:mlx-community/FastVLM-0.5B-bf16"` or `"openrouter:google/gemini-2.5-flash"`. Persisted
+    /// so a chosen model survives relaunch. Defaults to the on-device FastVLM preset — it works
+    /// offline with no API key, so the AI feature is usable out of the box. iPad supports only `mlx:`
+    /// and `openrouter:`; `ollama:` (the daemon can't run on iPad) reports an error from `suggestAI`.
+    @Published var aiModelText: String =
+        UserDefaults.standard.string(forKey: PhotoBrowserViewModel.aiModelDefaultsKey)
+        ?? "mlx:mlx-community/FastVLM-0.5B-bf16"
+    {
+        didSet {
+            guard aiModelText != oldValue else { return }
+            UserDefaults.standard.set(aiModelText, forKey: Self.aiModelDefaultsKey)
+        }
+    }
+    @Published private(set) var isSuggestingAI = false
+    @Published var aiStatusMessage: String?
+    private var suggestAITask: Task<Void, Never>?
+    private static let aiModelDefaultsKey = "aiModelText"
     /// Drives the Settings button label ("Locate…" vs "Change…") and whether Refresh is enabled.
     /// Seeded from the stored bookmark so a relaunch with a previously-located file starts enabled.
     @Published private(set) var hasTimelineBookmark: Bool =
@@ -163,6 +182,9 @@ final class PhotoBrowserViewModel: ObservableObject {
     private let timelineImportParser = TimelineImportParser()
     private let elevationService = ElevationLookupService()
     private let reverseGeocodeService = ReverseGeocodeService()
+    private let openRouterProvider: AIProvider = OpenRouterProvider()
+    private let mlxProvider: AIProvider = MLXNativeProvider()
+    private let aiSuggestionService = AISuggestionService()
     private var folderPathByCaptureSetID: [CaptureSet.ID: String] = [:]
     private var skipStore: SkipStateStore?
     private var sidecarStagingStore: SidecarStagingStore?
@@ -927,6 +949,117 @@ final class PhotoBrowserViewModel: ObservableObject {
             return cache
         } catch {
             return nil
+        }
+    }
+
+    // MARK: - AI-assisted suggestions (docs/SPEC.md §6)
+
+    /// The AI Model menu's presets, filtered from the shared `AIModelSelection.presets` to what runs
+    /// on iPad: every `openrouter:` model (pure networking) plus the one `mlx:` model small enough
+    /// for the 16GB device (FastVLM-0.5B). Drops `ollama:` (no daemon on iPad) and the 21-38GB `mlx:`
+    /// entries. Filtering the shared list rather than hard-coding a new one keeps it in sync as the
+    /// Mac list evolves. The field itself stays free-text, so anything can still be typed in.
+    var aiModelPresets: [String] {
+        AIModelSelection.presets.filter { preset in
+            if preset.hasPrefix("ollama:") { return false }
+            if preset.hasPrefix("mlx:") { return preset.contains("FastVLM") }
+            return true
+        }
+    }
+
+    /// Starts `suggestAI()` as a cancellable `Task`, stashing the handle for `cancelAISuggestion()`.
+    /// The UI ("Suggest" button) calls this rather than `suggestAI()` directly.
+    func startAISuggestion() {
+        suggestAITask = Task { await suggestAI() }
+    }
+
+    /// The "break key" for a stuck local MLX generation (docs/MLX_PROVIDER.md "No request-level
+    /// timeout") — cancels the in-flight task, which `MLXNativeProvider.chat` observes cooperatively
+    /// and unwinds from cleanly. `suggestAI()`'s `defer` still resets `isSuggestingAI` once the
+    /// cancelled task finishes unwinding, so the Suggest button re-enables promptly.
+    func cancelAISuggestion() {
+        suggestAITask?.cancel()
+    }
+
+    /// AI description/keyword suggestion for the current selection — ported from the Mac app's
+    /// `suggestAI()`, trimmed to this cut's scope: MLX + OpenRouter providers (no Ollama on iPad),
+    /// the full preview frame (no subject-isolation crop yet), and no eBird candidate list (both
+    /// deferred to step 8b). Sends the RAW-preferring representative of the selected set (or, with a
+    /// grid multi-selection, the first selected set), passes the reverse-geocoded location context
+    /// from step 7, writes the result into the edit buffer, and auto-saves — matching the Mac app and
+    /// the Python reference app (no separate accept step). Identity-guards on `previewAsset` across
+    /// every await so a selection change mid-generation discards a stale result.
+    func suggestAI() async {
+        guard !isSuggestingAI, let previewID = previewAsset?.id else { return }
+        guard let selection = AIModelSelection.parse(aiModelText) else {
+            aiStatusMessage = "Invalid AI model — expected \"mlx:<model>\" or \"openrouter:<model>\""
+            return
+        }
+        let provider: AIProvider
+        switch selection.providerID {
+        case .mlx: provider = mlxProvider
+        case .openRouter: provider = openRouterProvider
+        case .ollama:
+            aiStatusMessage = "Ollama isn't available on iPad — use an mlx: or openrouter: model"
+            return
+        }
+
+        let targetAssets: [PhotoAsset]
+        let sourceSetMembers: [PhotoAsset]
+        let sourceRepresentativeID: PhotoAsset.ID?
+        if hasMultiSelection {
+            targetAssets = manualSelectionAssets
+            guard
+                let firstSelectedSet = captureSets.first(where: {
+                    guard let representativeID = $0.representative?.id else { return false }
+                    return multiSelectedIDs.contains(representativeID)
+                })
+            else { return }
+            sourceSetMembers = firstSelectedSet.members
+            sourceRepresentativeID = firstSelectedSet.representative?.id
+        } else {
+            guard let captureSet = selectedCaptureSet else { return }
+            targetAssets = captureSet.members
+            sourceSetMembers = captureSet.members
+            sourceRepresentativeID = captureSet.representative?.id
+        }
+        guard !targetAssets.isEmpty,
+            let sourceAsset = AISuggestionSourcePicker.pickSourceAsset(from: sourceSetMembers)
+        else { return }
+        let locationContext = sourceRepresentativeID.flatMap { locationContextByRepresentativeID[$0] } ?? ""
+
+        isSuggestingAI = true
+        aiStatusMessage = "Generating AI suggestions…"
+        defer { isSuggestingAI = false }
+        do {
+            // On-device MLX runs against the iPad's raised-but-still-bounded jetsam ceiling (~6GB with
+            // the increased-memory-limit entitlement), and FastVLM's vision encoder holds large
+            // feature maps for a high-res image under MLX's lazy evaluation — a full 2048px frame
+            // peaks past that ceiling. Halving the longest edge to 1024 cuts the vision-encoder peak
+            // ~4x (memory scales with pixel count), keeping it well under the limit. OpenRouter is a
+            // network call, not memory-bound, so it keeps the full-resolution frame (verified working).
+            let maxPixelSize = selection.providerID == .mlx ? 1024 : 2048
+            let image = try await NativeMetadataReader().extractPreviewAsync(
+                at: sourceAsset.url, maxPixelSize: maxPixelSize)
+            guard previewAsset?.id == previewID else { return }
+            let result = try await aiSuggestionService.suggest(
+                provider: provider, model: selection.modelName, image: image,
+                existingDescription: editableDescription, existingKeywords: editableKeywords,
+                locationContext: locationContext)
+            guard previewAsset?.id == previewID else { return }
+            editableDescription = result.description
+            editableKeywords = result.keywords.joined(separator: ", ")
+            let categorySuffix = result.sceneCategory == .other ? "" : " [\(result.sceneCategory.rawValue)]"
+            aiStatusMessage =
+                (result.timeoutRetrySucceeded ? "Suggested (after retry)" : "Suggested")
+                + categorySuffix + "; saving…"
+            await performSave(scope: .manualSelection(targetAssets))
+            guard previewAsset?.id == previewID else { return }
+            aiStatusMessage = "Suggested\(categorySuffix)"
+        } catch is CancellationError {
+            aiStatusMessage = "AI suggestion cancelled"
+        } catch {
+            aiStatusMessage = "AI suggestion failed: \(error.localizedDescription)"
         }
     }
 }

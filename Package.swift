@@ -17,6 +17,10 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift", .upToNextMajor(from: "7.0.0")),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", .upToNextMajor(from: "3.31.4")),
+        // Direct dependency (transitively already pulled in by mlx-swift-lm) so `MLXNativeProvider`
+        // can `import MLX` to cap the GPU buffer cache on iOS — see its memory-limit note. Pinned to
+        // the minor already resolved via mlx-swift-lm so this adds no version-resolution pressure.
+        .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMinor(from: "0.31.6")),
         .package(url: "https://github.com/huggingface/swift-huggingface", from: "0.9.0"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.0"),
     ],
@@ -28,6 +32,7 @@ let package = Package(
             name: "MacPhotoMasterCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXVLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),

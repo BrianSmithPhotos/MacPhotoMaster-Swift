@@ -142,6 +142,14 @@ deterministically, and copy files into local storage.
   default, but the user can click-drag a rectangle on the big preview (`PreviewPanelView`) to
   override it; a plain click, or the "Reset to AI Crop" button next to the toggle, reverts to the AI
   crop. See `docs/ARCHITECTURE.md` "eBird species-list cache".
+- **iPad divergence:** the first cut ships two providers only — native on-device MLX (`mlx:`) and
+  OpenRouter (`openrouter:`); Ollama's daemon can't run on iPad. The AI image is sent full-frame (no
+  subject-isolation crop), and the eBird candidate list is not wired in yet — both deferred to a
+  follow-up (step 8b). On-device MLX needs the Metal/memory setup in `docs/MLX_PROVIDER.md` ("On-device
+  (iPad)"), and small models (e.g. FastVLM-0.5B) need prompt tuning the larger Mac/OpenRouter models
+  don't (they echo the JSON example's placeholder keywords and over-apply the species-ID instructions)
+  — also a planned follow-up. OpenRouter needs its API key entered in the iPad Settings sheet
+  (Keychain via `APIKeyStore`), since shell env vars don't reach an installed app.
 
 ## 7. GPS enrichment from Timeline export
 

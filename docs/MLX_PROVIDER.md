@@ -120,6 +120,40 @@ inference. Worth revisiting only if a future mlx-swift-lm bump adds `"qwen3_vl_m
   system prompt automatically as a leading `.system(...)` message — no manual concatenation into the
   user turn was needed, unlike the fallback the original implementation plan considered.
 
+## On-device (iPad)
+
+Local MLX inference runs on the physical iPad (M4, 11", 16GB) via the `MacPhotoMasterPad` target,
+using the one 16GB-viable preset (`FastVLM-0.5B-bf16`). Four things had to be settled to get from
+"links" to "generates," all verified on-device (2026-07-20):
+
+- **Metal shaders compile fine at runtime.** The `swift build -c release` metallib gotcha (packaged
+  macOS app aborts on first MLX use) does **not** affect the iOS Xcode build — mlx-swift's Metal
+  kernels compile on first inference on-device ("Compilation succeeded", ~unused-variable warnings
+  only), taking ~100s the very first time (bundled with the model download) and then cached.
+- **Metal API Validation must be off.** mlx-swift legitimately calls `MTLComputeCommandEncoder`
+  `setBytes` with a nil pointer for zero-element arrays — harmless at runtime, but Metal API
+  Validation (Xcode's default for a Debug run) turns it into a hard `bytes argument cannot be nil`
+  assertion. Disabled via the scheme (`enableGPUValidationMode: disabled` in
+  `MacPhotoMasterPad/project.yml`). Release builds never run that validation layer.
+- **`increased-memory-limit` entitlement.** iOS enforces a per-process jetsam memory cap; without the
+  entitlement it was ~5GB here, with it ~6GB. Set in `project.yml` (`com.apple.developer.kernel.
+  increased-memory-limit`), added to the dev profile via automatic signing (`-allowProvisioningUpdates`).
+- **GPU buffer-cache cap (the real memory fix).** Even under 6GB, FastVLM was killed mid-inference:
+  MLX's default unbounded free-buffer cache held freed buffers as resident memory and pushed the
+  high-watermark past the cap. `MLXNativeProvider` now calls `MLX.GPU.set(cacheLimit:)` /
+  `set(memoryLimit:)` once, `#if os(iOS)` only (the Mac's 128GB wants the unbounded cache for
+  throughput). With the cache capped the measured working set is ~2.7GB. A too-small cap (32MB) fit
+  but made generation very slow (constant buffer round-trips to the OS); 1GB cache + a 5GB relaxed
+  memory limit gives fast generation (seconds, not minutes) with headroom under the jetsam cap. This
+  is why `MLX` is a direct `Package.swift` dependency of `MacPhotoMasterCore` (for `import MLX`).
+
+**Known follow-up: small-model prompt tuning.** `AISuggestionService`'s shared prompt is written for
+capable models. FastVLM-0.5B is small enough that it (a) echoes the JSON example's placeholder
+keywords (`["k1","k2"]`) literally instead of replacing them, and (b) doesn't reliably honor the
+conditional species-ID instructions ("if the primary subject is a bird…"), attempting bird-ID on
+non-wildlife subjects. A small-model prompt variant (selected for small `mlx:` models, leaving the
+Mac's proven prompt untouched) is the planned fix. OpenRouter models on iPad show neither issue.
+
 ## Manual smoke test
 
 1. `swift build`, then `swift run`.

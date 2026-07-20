@@ -129,8 +129,14 @@ user-verified: a Settings sheet locates `Timeline.json` in the Google Drive File
 (persisted as a security-scoped bookmark and re-imported silently on later launches), GPS-less photos
 get a location and altitude suggested from the nearest Timeline point — read-only on iPad, but
 persisted through Save and Process & Move — and once a photo has GPS, city/county/state are merged
-into the keyword field via OpenStreetMap Nominatim. Not yet built: AI-assisted suggestions — still
-Mac-only.
+into the keyword field via OpenStreetMap Nominatim. AI-assisted suggestions (step 8, first cut) are
+also built and user-verified: a Suggest button in the metadata sheet with two providers — native
+on-device MLX (`mlx:`, e.g. FastVLM-0.5B, which runs in seconds on the M4 iPad) and OpenRouter
+(`openrouter:`, key entered in Settings); Ollama is excluded (no daemon on iPad). Getting on-device
+MLX to run took iOS-specific Metal/memory setup — see `docs/MLX_PROVIDER.md` "On-device (iPad)".
+Deferred to step 8b: the eBird candidate list, subject isolation, and a small-model prompt variant
+(FastVLM-0.5B echoes the prompt's placeholder keywords and over-applies species-ID instructions —
+issues the larger Mac/OpenRouter models don't have).
 
 ## Next stages
 
@@ -140,7 +146,9 @@ Mac-only.
 - **Auto-skip-on-process** (`docs/SPEC.md` §5's "successfully processed files auto-skip from the
   current session view") is intentionally not wired up — the user prefers processed files staying
   visible for now; revisit only if asked.
-- **iPadOS app**: source browse through process/move plus `Timeline.json` GPS suggestion and reverse
-  geocoding (steps 1-7 of the planned 8-step checklist) is shipped and user-verified on the physical
-  iPad (see "Status" above). Remaining: AI-assisted suggestions (step 8), and a not-yet-designed
-  Mac-initiated pull to move processed files off the iPad's local staging folder.
+- **iPadOS app**: source browse through process/move, `Timeline.json` GPS suggestion, reverse
+  geocoding, and AI-assisted suggestions (MLX + OpenRouter, first cut) — steps 1-8 of the planned
+  8-step checklist — are shipped and user-verified on the physical iPad (see "Status" above).
+  Remaining: **step 8b** (eBird candidate list, subject isolation, and a small-model prompt variant
+  for FastVLM-0.5B), and a not-yet-designed Mac-initiated pull to move processed files off the iPad's
+  local staging folder.

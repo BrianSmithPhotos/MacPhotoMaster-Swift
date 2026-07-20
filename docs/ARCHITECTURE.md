@@ -94,7 +94,19 @@ persisted document-picker bookmark instead of `TimelineDriveSync`'s Drive-Deskto
 file access" below). Geocoding reads GPS from the asset rather than an editable lat/long field (the
 iPad has none) and, like the Mac, merges keywords into the edit buffer only (they persist on Save,
 not automatically). The reverse-geocode `contextText` is stashed per capture-set representative for
-the not-yet-built AI step. Not yet built: AI-assisted suggestions.
+the AI step.
+
+AI-assisted suggestions (step 8, first cut) are also built and user-verified: a Suggest button in the
+metadata sheet drives `PhotoBrowserViewModel.suggestAI()`, reusing `AISuggestionService` unchanged,
+with two providers — native on-device **MLX** (`mlx:`, e.g. FastVLM-0.5B) and **OpenRouter**
+(`openrouter:`); Ollama is excluded (no daemon on iPad). The result auto-saves like the Mac, and a
+Cancel button interrupts a running MLX generation. Getting on-device MLX to actually run took Metal/
+memory work specific to iOS — see `docs/MLX_PROVIDER.md` "On-device (iPad)" (Metal API Validation off,
+`increased-memory-limit` entitlement, a `#if os(iOS)` GPU buffer-cache cap in `MLXNativeProvider`, and
+`MLX` as a direct package dependency of Core for that). Deferred to step 8b: the eBird candidate list,
+subject isolation, and a small-model prompt variant (FastVLM-0.5B echoes the prompt's placeholder
+keywords and over-applies the species-ID instructions — issues the larger Mac/OpenRouter models don't
+have). OpenRouter's API key is entered in the iPad Settings sheet (Keychain via `APIKeyStore`).
 
 `ExifToolClient` is the one Service that stays in the `MacPhotoMaster` (macOS) target instead of
 moving to Core: it shells out to the `exiftool` binary via `Process`, and process/subprocess

@@ -17,6 +17,14 @@ targets:
     dependencies:
       - package: MacPhotoMasterCore
         product: MacPhotoMasterCore
+    # Local MLX (mlx:) inference peaks past the default ~5GB iOS per-process jetsam limit even for the
+    # small FastVLM-0.5B model; this entitlement raises the ceiling so an M4 iPad (16GB) can use more
+    # of its RAM. See docs/MLX_PROVIDER.md. Needs -allowProvisioningUpdates so automatic signing adds
+    # the capability to the development profile.
+    entitlements:
+      path: MacPhotoMasterPad.entitlements
+      properties:
+        com.apple.developer.kernel.increased-memory-limit: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.briansmithphotos.macphotomasterpad
@@ -38,5 +46,9 @@ schemes:
         MacPhotoMasterPad: all
     run:
       config: Debug
+      # MLX-swift legitimately calls Metal setBytes with a nil pointer for zero-element arrays, which
+      # is harmless at runtime but trips Metal API Validation's hard assertion. Disable it so local
+      # MLX (mlx:) inference runs under the debugger. See docs/MLX_PROVIDER.md.
+      enableGPUValidationMode: disabled
     test:
       config: Debug

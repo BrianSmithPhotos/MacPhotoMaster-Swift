@@ -1,5 +1,6 @@
 import CoreImage
 import Foundation
+import MLX
 import MLXLMCommon
 import os
 
@@ -11,6 +12,28 @@ public struct MLXNativeProvider: AIProvider {
     public init() {}
 
     private static let logger = Logger(subsystem: "MacPhotoMaster", category: "AISuggestion")
+
+    /// Bounds MLX's GPU memory use once, on iOS only. iOS enforces a per-process jetsam memory limit
+    /// (~6GB even with the `increased-memory-limit` entitlement); MLX's default (unbounded) free-buffer
+    /// cache holds freed buffers as resident memory and pushes the high-watermark past that limit,
+    /// getting the app killed mid-inference even for a small model like FastVLM-0.5B. Measured live
+    /// working set for FastVLM at a 1024px image is ~2.7GB, so:
+    ///   - `cacheLimit` 1GB: keep a generous free-buffer cache so buffers are reused across the
+    ///     generation loop instead of being round-tripped to the OS every step (a tiny cache made
+    ///     generation very slow); ~2.7GB live + up to 1GB cache still leaves headroom under ~6GB.
+    ///   - `memoryLimit` 5GB (relaxed): a guardrail below the jetsam cap — MLX evicts cache to try to
+    ///     stay under it, but `relaxed` lets a genuinely larger single allocation through rather than
+    ///     failing. Doesn't constrain the ~2.7GB working set; only bounds cache growth.
+    /// Not applied on macOS (128GB, no such cap, and an unbounded cache aids throughput there). Runs
+    /// once via the `static let`'s lazy init.
+    private static let gpuMemoryConfigured: Void = {
+        #if os(iOS)
+        MLX.GPU.set(cacheLimit: 1024 * 1024 * 1024)
+        MLX.GPU.set(memoryLimit: 5 * 1024 * 1024 * 1024)
+        #endif
+    }()
+
+    private static func configureGPUMemoryIfNeeded() { _ = gpuMemoryConfigured }
 
     /// Static/local allowlist check only — there's no cheap way to probe a not-yet-downloaded
     /// model's vision capability the way the HTTP-backed providers query a live `/api/tags` or
@@ -48,6 +71,7 @@ public struct MLXNativeProvider: AIProvider {
             return .ciImage(image)
         }
 
+        Self.configureGPUMemoryIfNeeded()
         let start = Date()
         do {
             let container = try await MLXModelManager.shared.container(

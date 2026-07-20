@@ -11,6 +11,7 @@
 		2C7FAAC82AA7401085DD86D1 /* TileTapCatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25076C2842DE051EBD743B1B /* TileTapCatcher.swift */; };
 		841A35F2DFBA8909552F7E30 /* MacPhotoMasterCore in Frameworks */ = {isa = PBXBuildFile; productRef = 21E00B7C5976EB631C9AD77E /* MacPhotoMasterCore */; };
 		875F4B59CB8C64F331B83710 /* PreviewPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CB19FDEBDD2FA25EB09962A /* PreviewPanelView.swift */; };
+		8AE211E1A640E82BD0EC12C5 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B7FCED9F7F2258B0446A677 /* SettingsView.swift */; };
 		95E1B7C96C641C694916552B /* SourcePanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8EFACB84A6F078CCFD97D04 /* SourcePanelView.swift */; };
 		D23C30AB6035C90E93248B8E /* MetadataPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 134CE94E535084A60DF19BD5 /* MetadataPanelView.swift */; };
 		D602D8465FED435504DCE036 /* MacPhotoMasterPadApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA9FB40F140610C3DAFCE5FA /* MacPhotoMasterPadApp.swift */; };
@@ -22,6 +23,7 @@
 		134CE94E535084A60DF19BD5 /* MetadataPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataPanelView.swift; sourceTree = "<group>"; };
 		1AC0EBF7F4D2CF3EC156C32D /* PhotoBrowserViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoBrowserViewModel.swift; sourceTree = "<group>"; };
 		25076C2842DE051EBD743B1B /* TileTapCatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TileTapCatcher.swift; sourceTree = "<group>"; };
+		2B7FCED9F7F2258B0446A677 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		9C52916AB855ADDBA1A91041 /* MacPhotoMaster-Swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "MacPhotoMaster-Swift"; path = ..; sourceTree = SOURCE_ROOT; };
 		A96272D4BA18B963F5611944 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		BA9FB40F140610C3DAFCE5FA /* MacPhotoMasterPadApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPhotoMasterPadApp.swift; sourceTree = "<group>"; };
@@ -74,6 +76,7 @@
 				134CE94E535084A60DF19BD5 /* MetadataPanelView.swift */,
 				1AC0EBF7F4D2CF3EC156C32D /* PhotoBrowserViewModel.swift */,
 				0CB19FDEBDD2FA25EB09962A /* PreviewPanelView.swift */,
+				2B7FCED9F7F2258B0446A677 /* SettingsView.swift */,
 				E8EFACB84A6F078CCFD97D04 /* SourcePanelView.swift */,
 				25076C2842DE051EBD743B1B /* TileTapCatcher.swift */,
 			);
@@ -149,6 +152,7 @@
 				D23C30AB6035C90E93248B8E /* MetadataPanelView.swift in Sources */,
 				08CC12C5FFC6296C55E7556A /* PhotoBrowserViewModel.swift in Sources */,
 				875F4B59CB8C64F331B83710 /* PreviewPanelView.swift in Sources */,
+				8AE211E1A640E82BD0EC12C5 /* SettingsView.swift in Sources */,
 				95E1B7C96C641C694916552B /* SourcePanelView.swift in Sources */,
 				2C7FAAC82AA7401085DD86D1 /* TileTapCatcher.swift in Sources */,
 			);

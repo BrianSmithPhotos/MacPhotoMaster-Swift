@@ -150,6 +150,12 @@ deterministically, and copy files into local storage.
   record identity, so re-imports don't duplicate rows. The sync/import check runs on app launch,
   on every folder open/navigate, and on demand via the "Refresh Timeline" button, so a
   `Timeline.json` replaced mid-session is picked up without relaunching.
+- **iPad divergence:** Google Drive Desktop's mounted filesystem path isn't available on iOS, so
+  there's no automatic glob/copy-down (`TimelineDriveSync` is macOS-only). Instead the user locates
+  `Timeline.json` once through the Files document picker (Drive registers as a Files provider) and
+  the app persists a security-scoped bookmark, re-importing from it on launch/folder-load exactly
+  like the Mac's sync check. GPS suggestions are also applied read-only (no editable lat/long
+  fields), straight onto the asset, since the iPad metadata panel has no GPS text fields.
 - Matching: nearest-timestamp lookup, but **only within a bounded window** (30 minutes in the
   reference app — tune based on real coverage density). No match within the window → leave GPS
   blank; never guess.

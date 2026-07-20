@@ -14,8 +14,10 @@ import MacPhotoMasterCore
 /// Title stays read-only here, same as the Mac app: it's a live rename preview computed by
 /// `PhotoBrowserViewModel.titlePreview`, never independently typed — the "Batch" field is what
 /// actually drives it (docs/SPEC.md §4's manual per-session label). Renaming itself only takes
-/// effect on the destination copy made at Process & Move time. GPS stays read-only: no lat/long
-/// editing on iPad yet.
+/// effect on the destination copy made at Process & Move time. GPS is read-only here: a location is
+/// auto-suggested from `Timeline.json` for GPS-less photos (`suggestGPSIfNeeded`, triggered by the
+/// `.task` below) and applied straight to the asset, with a manual altitude re-lookup button — but
+/// there are no editable lat/long fields, unlike the Mac app.
 ///
 /// Process & Move mirrors the Mac app's four-button row (Single Image/Capture Set/Current
 /// Selection/Session), calling `PhotoBrowserViewModel.process(scope:)` directly — unlike the Mac
@@ -74,11 +76,28 @@ struct MetadataPanelView: View {
                                 LabeledContent("Captured", value: capturedAt.formatted())
                             }
                         }
-                        if asset.gpsLatitude != nil || asset.gpsLongitude != nil {
+                        if asset.gpsLatitude != nil || asset.gpsLongitude != nil
+                            || viewModel.gpsSuggestionStatusMessage != nil {
                             Section("Location") {
                                 LabeledContent("Latitude", value: asset.gpsLatitude.map { String(format: "%.5f", $0) } ?? "—")
                                 LabeledContent("Longitude", value: asset.gpsLongitude.map { String(format: "%.5f", $0) } ?? "—")
-                                LabeledContent("Altitude", value: asset.gpsAltitude.map { String(format: "%.0f m", $0) } ?? "—")
+                                LabeledContent("Altitude") {
+                                    HStack(spacing: 8) {
+                                        Text(asset.gpsAltitude.map { String(format: "%.0f m", $0) } ?? "—")
+                                        Button {
+                                            Task { await viewModel.refreshAltitude() }
+                                        } label: {
+                                            Image(systemName: "arrow.clockwise")
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .disabled(viewModel.isLookingUpAltitude || asset.gpsLatitude == nil)
+                                    }
+                                }
+                                if let gpsMessage = viewModel.gpsSuggestionStatusMessage {
+                                    Text(gpsMessage)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                         Section("Process & Move") {
@@ -121,6 +140,12 @@ struct MetadataPanelView: View {
             }
             .navigationTitle(asset?.url.lastPathComponent ?? "Metadata")
             .navigationBarTitleDisplayMode(.inline)
+            // Lazy per-selection Timeline GPS suggestion for a GPS-less photo — re-runs whenever the
+            // previewed asset changes while this sheet is open. Since Process & Move is driven from
+            // this same sheet, a fix is applied before the user can act on it. No-op once GPS is set.
+            .task(id: asset?.id) {
+                await viewModel.suggestGPSIfNeeded()
+            }
         }
     }
 }

@@ -110,6 +110,27 @@ final class PhotoBrowserViewModel: ObservableObject {
     @Published private(set) var isProcessing = false
     @Published var processStatusMessage: String?
 
+    /// Status text for the Timeline-derived GPS suggestion (docs/SPEC.md §7), shown under the
+    /// read-only lat/long fields — e.g. "Nearest GPS 3m 20s away (GPS, accuracy 12m)". Set by
+    /// `suggestGPSIfNeeded()`, cleared on every selection change by `loadEditBuffer()`. Mirrors the
+    /// Mac app's `gpsSuggestionStatusMessage`.
+    @Published var gpsSuggestionStatusMessage: String?
+    /// True while `refreshAltitude()` has an elevation lookup in flight — disables the manual
+    /// altitude refresh button so it can't be fired twice at once.
+    @Published private(set) var isLookingUpAltitude = false
+
+    /// Result/progress text for the Timeline import, shown in the iPad `SettingsView` — e.g.
+    /// "Imported 214 Timeline point(s)." or "Timeline is already up to date." Unlike the Mac app's
+    /// silent per-folder-load `TimelineDriveSync` (which globs a mounted Drive path), the iPad reads
+    /// `Timeline.json` through a persisted security-scoped bookmark the user grants once via the
+    /// document picker — see `SettingsView` and docs/ARCHITECTURE.md's iPad file-access section.
+    @Published var timelineStatusMessage: String?
+    @Published private(set) var isImportingTimeline = false
+    /// Drives the Settings button label ("Locate…" vs "Change…") and whether Refresh is enabled.
+    /// Seeded from the stored bookmark so a relaunch with a previously-located file starts enabled.
+    @Published private(set) var hasTimelineBookmark: Bool =
+        UserDefaults.standard.data(forKey: PhotoBrowserViewModel.timelineBookmarkKey) != nil
+
     /// Paths (within the currently loaded folder) that have already been through Process & Move at
     /// least once — drives a non-blocking "processed" indicator, the same purely-informational role
     /// as the Mac app's `processedAssetPaths`. Never hides or disables anything: reprocessing must
@@ -139,9 +160,22 @@ final class PhotoBrowserViewModel: ObservableObject {
     private let grouping = CaptureGroupingService()
     private let renameService = RenameService()
     private let processMoveService = ProcessMoveService(metadataWriter: NativeMetadataWriter())
+    private let timelineImportParser = TimelineImportParser()
+    private let elevationService = ElevationLookupService()
     private var folderPathByCaptureSetID: [CaptureSet.ID: String] = [:]
     private var skipStore: SkipStateStore?
     private var sidecarStagingStore: SidecarStagingStore?
+    private var timelineCache: TimelineLocationCache?
+    private var elevationCache: ElevationCache?
+
+    /// `UserDefaults` key for the security-scoped bookmark to the user's `Timeline.json`.
+    private static let timelineBookmarkKey = "TimelineBookmarkData"
+
+    init() {
+        // Best-effort silent import at launch so GPS suggestions are ready before the first folder
+        // is opened, if a `Timeline.json` was located in an earlier session.
+        importTimelineIfNeeded()
+    }
 
     /// The root `.fileImporter` hands back is only guaranteed accessible for the synchronous
     /// duration of its completion closure — reading it afterward (which `load(_:)`'s `Task`s always
@@ -319,6 +353,9 @@ final class PhotoBrowserViewModel: ObservableObject {
     /// yet.
     private func loadEditBuffer() {
         saveStatusMessage = nil
+        // Shared status line for the Timeline-GPS suggestion — cleared up front so a previous
+        // photo's message (e.g. a matched location) doesn't linger on a newly selected photo.
+        gpsSuggestionStatusMessage = nil
         guard let asset = previewAsset else {
             editableDescription = ""
             editableKeywords = ""
@@ -408,7 +445,12 @@ final class PhotoBrowserViewModel: ObservableObject {
         var failureCount = 0
         for target in targets {
             do {
-                try await store.stage(title: nil, description: description, keywords: keywords, gps: nil, for: target.url)
+                // GPS is staged per-target from the asset's own fields (a Timeline suggestion applied
+                // by `suggestGPSIfNeeded()`, or embedded GPS), not the shared buffer — each photo may
+                // carry its own fix. `title` stays nil (rename-derived, only written at Process time).
+                try await store.stage(
+                    title: nil, description: description, keywords: keywords,
+                    gps: Self.gpsCoordinate(for: target), for: target.url)
                 updateAsset(target.id) { updated in
                     updated.descriptionText = description
                     updated.keywords = keywords
@@ -472,6 +514,13 @@ final class PhotoBrowserViewModel: ObservableObject {
                 if let draft = try? stagingStore.stagedDraft(for: asset.url) {
                     asset.descriptionText = draft.description
                     asset.keywords = draft.keywords
+                    // Recover a GPS fix staged in an earlier session that this run's in-memory asset
+                    // lost on reload (originals carry no GPS, so `NativeMetadataReader` re-reads none).
+                    if asset.gpsLatitude == nil, let gps = draft.gps {
+                        asset.gpsLatitude = gps.latitude
+                        asset.gpsLongitude = gps.longitude
+                        asset.gpsAltitude = gps.altitude
+                    }
                 }
                 let context = RenameContext(
                     sourceURL: asset.url,
@@ -553,6 +602,10 @@ final class PhotoBrowserViewModel: ObservableObject {
     private func load(_ folderURL: URL) {
         isLoading = true
         loadErrorMessage = nil
+        // Re-check the located Timeline.json on every folder open/navigate so a Drive update mid-
+        // session is picked up without relaunching — mirrors the Mac app calling its Timeline sync
+        // from `load(_:)`. Cheap: a no-op stat when the file's (size, mtime) signature is unchanged.
+        importTimelineIfNeeded()
         Task {
             defer { isLoading = false }
             do {
@@ -620,6 +673,213 @@ final class PhotoBrowserViewModel: ObservableObject {
             return store
         } catch {
             loadErrorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    // MARK: - Timeline GPS suggestion (docs/SPEC.md §7)
+
+    /// Called from `SettingsView`'s document picker once the user locates `Timeline.json` inside the
+    /// Google Drive Files provider. Persists a security-scoped bookmark so later launches re-open the
+    /// same file without re-prompting, then imports it. On iOS a picker URL is only readable inside a
+    /// held-open `startAccessingSecurityScopedResource()` scope — including while creating the bookmark.
+    func locateTimelineFile(at url: URL) {
+        guard url.startAccessingSecurityScopedResource() else {
+            timelineStatusMessage = "Couldn't access the selected file."
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+        do {
+            let bookmark = try url.bookmarkData()
+            UserDefaults.standard.set(bookmark, forKey: Self.timelineBookmarkKey)
+            hasTimelineBookmark = true
+        } catch {
+            timelineStatusMessage = "Couldn't remember that file: \(error.localizedDescription)"
+            return
+        }
+        Task { await importTimeline(reportStatus: true) }
+    }
+
+    /// Best-effort silent import from the stored bookmark (launch / folder-load). No status text on a
+    /// no-op or failure — a missing/unreadable Timeline just leaves GPS suggestions unavailable, same
+    /// non-fatal posture as the Mac app's `syncAndImportTimelineIfNeeded()`.
+    func importTimelineIfNeeded() {
+        Task { await importTimeline(reportStatus: false) }
+    }
+
+    /// Explicit Settings "Refresh" action — same import, but reports the outcome since a user who
+    /// tapped a button expects to see what happened. Mirrors the Mac app's `refreshTimeline()`.
+    func refreshTimeline() {
+        Task { await importTimeline(reportStatus: true) }
+    }
+
+    /// Resolves the stored bookmark and imports `Timeline.json` into `timelineCache` when its
+    /// (path, size, mtime) signature has changed since the last import (`isImportNeeded`). The iPad
+    /// counterpart to the Mac app's `performTimelineSync()`, minus the Drive copy-down step — the
+    /// file already lives in the Drive Files provider, reached directly through the bookmark.
+    private func importTimeline(reportStatus: Bool) async {
+        guard let bookmark = UserDefaults.standard.data(forKey: Self.timelineBookmarkKey) else {
+            if reportStatus { timelineStatusMessage = "No Timeline.json located yet." }
+            return
+        }
+        guard !isImportingTimeline else { return }
+        isImportingTimeline = true
+        defer { isImportingTimeline = false }
+
+        var isStale = false
+        guard let url = try? URL(resolvingBookmarkData: bookmark, bookmarkDataIsStale: &isStale) else {
+            if reportStatus { timelineStatusMessage = "Saved Timeline.json can't be opened — locate it again." }
+            return
+        }
+        guard url.startAccessingSecurityScopedResource() else {
+            if reportStatus { timelineStatusMessage = "No access to the saved Timeline.json — locate it again." }
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+        if isStale, let refreshed = try? url.bookmarkData() {
+            UserDefaults.standard.set(refreshed, forKey: Self.timelineBookmarkKey)
+        }
+
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            if reportStatus { timelineStatusMessage = "Timeline.json not found — is it available offline in Drive?" }
+            return
+        }
+        guard let cache = await ensureTimelineCache() else {
+            if reportStatus { timelineStatusMessage = "Timeline database unavailable." }
+            return
+        }
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            let size = (attributes[.size] as? Int) ?? 0
+            let modificationDate = (attributes[.modificationDate] as? Date) ?? Date()
+            let modificationNanoseconds = Int64(modificationDate.timeIntervalSince1970 * 1_000_000_000)
+
+            guard
+                try await cache.isImportNeeded(
+                    sourcePath: url.path, sourceSize: size,
+                    sourceModificationNanoseconds: modificationNanoseconds)
+            else {
+                if reportStatus { timelineStatusMessage = "Timeline is already up to date." }
+                return
+            }
+
+            let samples = try timelineImportParser.parseSamples(fromFileAt: url)
+            let sha256 = try FileHashing.sha256(of: url)
+            try await cache.importSamples(
+                samples, sourcePath: url.path, sourceSize: size,
+                sourceModificationNanoseconds: modificationNanoseconds, sourceSHA256: sha256)
+            // Success is worth surfacing even on the silent path — Settings shows it next time it's
+            // opened — but no-ops and failures stay quiet unless the user explicitly asked (Refresh).
+            timelineStatusMessage = "Imported \(samples.count) Timeline point(s)."
+        } catch {
+            if reportStatus { timelineStatusMessage = "Timeline import failed: \(error.localizedDescription)" }
+        }
+    }
+
+    /// Timeline-derived GPS suggestion for the previewed photo, auto-applied on first view of a
+    /// GPS-less photo — mirrors the Mac app's `suggestGPSIfNeeded()` and the reference app's UX
+    /// (docs/SPEC.md §7). Unlike the Mac app, which fills editable lat/long text fields, the iPad
+    /// GPS panel is read-only, so the fix is applied straight to the in-memory asset: it then shows
+    /// in the panel and flows into Process & Move (which reads GPS from the asset) with no save step.
+    ///
+    /// Applied to every member of the previewed capture set that still lacks embedded GPS, since a
+    /// capture set shares one location — this is the Mac app's "GPS is shared across a capture set"
+    /// rule, applied here at suggestion time so a stacked RAW sibling isn't processed GPS-less. Only
+    /// the previewed set is matched (not the whole folder), keeping the per-selection laziness the
+    /// reference app and Mac app both use; a full-session Process still writes whatever GPS each asset
+    /// happens to have, same as the Mac app. The `gpsLatitude == nil` guard makes re-viewing a no-op.
+    /// Chains an elevation lookup after a match, since altitude is never trusted from Timeline itself.
+    func suggestGPSIfNeeded() async {
+        guard sourceViewFilter == .active,
+            let captureSet = selectedCaptureSet,
+            let asset = previewAsset,
+            asset.gpsLatitude == nil, asset.gpsLongitude == nil,
+            let capturedAt = asset.capturedAt
+        else { return }
+        guard let cache = await ensureTimelineCache() else { return }
+
+        let captureTimestampUTC = Int(capturedAt.timeIntervalSince1970)
+        guard let suggestion = try? await cache.suggestion(forCaptureTimestampUTC: captureTimestampUTC),
+            previewAsset?.id == asset.id
+        else { return }
+
+        let targetIDs = captureSet.members
+            .filter { $0.gpsLatitude == nil && $0.gpsLongitude == nil }
+            .map(\.id)
+        for id in targetIDs {
+            updateAsset(id) {
+                $0.gpsLatitude = suggestion.latitude
+                $0.gpsLongitude = suggestion.longitude
+            }
+        }
+        let accuracyText = suggestion.accuracyMeters.map { String(format: ", accuracy %.0fm", $0) } ?? ""
+        gpsSuggestionStatusMessage =
+            "Nearest GPS \(suggestion.ageSeconds / 60)m \(suggestion.ageSeconds % 60)s away "
+            + "(\(suggestion.sourceType)\(accuracyText))"
+
+        await lookupElevation(
+            latitude: suggestion.latitude, longitude: suggestion.longitude, memberIDs: targetIDs)
+    }
+
+    /// Manual altitude re-lookup for the previewed photo's current lat/long — surfaced as a small
+    /// refresh button next to the Altitude field for the rare case the automatic USGS EPQS call
+    /// times out (mirrors the Mac app's `refreshAltitude()`). Applies to the whole capture set, the
+    /// same scope `suggestGPSIfNeeded()` used. No-op while a lookup's in flight or GPS is blank.
+    func refreshAltitude() async {
+        guard !isLookingUpAltitude, let asset = previewAsset,
+            let latitude = asset.gpsLatitude, let longitude = asset.gpsLongitude
+        else { return }
+        isLookingUpAltitude = true
+        defer { isLookingUpAltitude = false }
+        let memberIDs = selectedCaptureSet?.members.map(\.id) ?? [asset.id]
+        await lookupElevation(latitude: latitude, longitude: longitude, memberIDs: memberIDs)
+    }
+
+    /// Looks up (or reads cached) elevation for a coordinate and writes it onto every listed member's
+    /// `gpsAltitude`. Cache-first, then USGS EPQS via `ElevationLookupService`, caching the result —
+    /// same order as the Mac app's `lookupElevation`. Silent on failure (altitude just stays blank).
+    private func lookupElevation(latitude: Double, longitude: Double, memberIDs: [PhotoAsset.ID]) async {
+        guard let elevationCache = await ensureElevationCache() else { return }
+
+        let elevation: Double
+        if let cached = try? await elevationCache.cachedElevation(latitude: latitude, longitude: longitude) {
+            elevation = cached
+        } else if let looked = try? await elevationService.lookupElevation(latitude: latitude, longitude: longitude) {
+            try? await elevationCache.store(latitude: latitude, longitude: longitude, elevationMeters: looked)
+            elevation = looked
+        } else {
+            return
+        }
+        for id in memberIDs {
+            updateAsset(id) { $0.gpsAltitude = elevation }
+        }
+    }
+
+    private static func gpsCoordinate(for asset: PhotoAsset) -> GPSCoordinate? {
+        guard let latitude = asset.gpsLatitude, let longitude = asset.gpsLongitude else { return nil }
+        return GPSCoordinate(latitude: latitude, longitude: longitude, altitude: asset.gpsAltitude)
+    }
+
+    private func ensureTimelineCache() async -> TimelineLocationCache? {
+        if let timelineCache { return timelineCache }
+        do {
+            let databasePath = try AppSupportDirectory.url(forFileNamed: "timeline_location.sqlite3")
+            let cache = try TimelineLocationCache(databasePath: databasePath)
+            timelineCache = cache
+            return cache
+        } catch {
+            return nil
+        }
+    }
+
+    private func ensureElevationCache() async -> ElevationCache? {
+        if let elevationCache { return elevationCache }
+        do {
+            let databasePath = try AppSupportDirectory.url(forFileNamed: "elevation_cache.sqlite3")
+            let cache = try ElevationCache(databasePath: databasePath)
+            elevationCache = cache
+            return cache
+        } catch {
             return nil
         }
     }

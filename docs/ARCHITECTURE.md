@@ -82,8 +82,14 @@ folder (considered and rejected: Drive's background sync writing/evicting bytes 
 processed files off the iPad is planned as a separate, not-yet-designed Mac-initiated pull rather than
 an iPad-side push into shared cloud storage — `Documents` was chosen specifically because Finder file
 sharing (`UIFileSharingEnabled`, not yet added to `project.yml`) can only expose an app's `Documents`
-directory, so this leaves that door open without committing to the mechanism yet. Not yet built:
-`Timeline.json` GPS sync via Google Drive, reverse geocoding, and AI-assisted suggestions.
+directory, so this leaves that door open without committing to the mechanism yet.
+
+`Timeline.json`-derived GPS suggestion (step 6) is also built and user-verified on the physical iPad
+— a location and altitude are suggested for GPS-less photos from the nearest Timeline point, reusing
+`TimelineImportParser`/`TimelineLocationCache`/`ElevationLookupService`/`ElevationCache` unchanged;
+only the file-access path differs from the Mac (a persisted document-picker bookmark instead of
+`TimelineDriveSync`'s Drive-Desktop glob — see "iPad file access" below). Not yet built: reverse
+geocoding and AI-assisted suggestions.
 
 `ExifToolClient` is the one Service that stays in the `MacPhotoMaster` (macOS) target instead of
 moving to Core: it shells out to the `exiftool` binary via `Process`, and process/subprocess
@@ -115,19 +121,27 @@ Desktop does; see "iPad file access" below for how `Timeline.json` reaches the i
 
 ## iPad file access & sidecar staging
 
-Decided direction for the iPad ingest flow. Folder browsing, sidecar staging, and Process & Move are
-all implemented (see above) — this covers the "Photos via USB-C" and "sidecar write-back" bullets
-below in full. `Timeline.json` via Google Drive is not implemented yet. Two access problems and one
-behavioral divergence from the Mac app, worked out before writing any of the actual views:
+Decided direction for the iPad ingest flow. Folder browsing, sidecar staging, Process & Move, and
+`Timeline.json`-derived GPS suggestion are all implemented (see above) — this covers the "Photos via
+USB-C", "sidecar write-back", and "`Timeline.json` via Google Drive" bullets below in full. Two
+access problems and one behavioral divergence from the Mac app, worked out before writing any of the
+actual views:
 
-- **`Timeline.json` via Google Drive.** The iOS/iPadOS Drive app doesn't mount a filesystem path the
-  way Drive Desktop does, but it registers as a Files provider, so `UIDocumentPickerViewController`
-  can browse into it and pick the file (or its parent folder) directly — same `.fileImporter`
-  SwiftUI modifier the Mac app already uses for folder picking, not a new API. Unlike
-  `TimelineDriveSync`'s automatic glob search under `~/Library/CloudStorage`, this needs a one-time
-  "locate Timeline.json" step in Settings, with the resulting security-scoped bookmark persisted
-  (and re-resolved if `bookmarkDataIsStale`) so later launches don't re-prompt. Requires the Drive
-  app's own Files-integration setting to be on.
+- **`Timeline.json` via Google Drive.** Implemented (step 6). The iOS/iPadOS Drive app doesn't mount
+  a filesystem path the way Drive Desktop does, but it registers as a Files provider, so
+  `UIDocumentPickerViewController` can browse into it and pick the file directly — same
+  `.fileImporter` SwiftUI modifier the Mac app already uses for folder picking, not a new API. Unlike
+  `TimelineDriveSync`'s automatic glob search under `~/Library/CloudStorage` (macOS-only,
+  `#if os(macOS)`), the iPad needs a one-time "Locate Timeline.json" step in the new `SettingsView`,
+  with the resulting security-scoped bookmark persisted in `UserDefaults` (and re-resolved, re-saving
+  if `bookmarkDataIsStale`) so later launches re-import silently without re-prompting. The Drive
+  file must have "Available offline" turned on. `PhotoBrowserViewModel.importTimeline(reportStatus:)`
+  parses the picked file straight into `TimelineLocationCache` (skipping the Drive copy-down step the
+  Mac's `performTimelineSync` does), keyed on the file's (size, mtime) via `isImportNeeded` so an
+  unchanged file is a cheap no-op; `suggestGPSIfNeeded()` then applies the nearest match to the whole
+  previewed capture set on first view of a GPS-less photo, read-only (no editable lat/long fields,
+  unlike the Mac app) but persisted through Save (sidecar) and Process & Move, with an elevation
+  lookup chained after via `ElevationLookupService`/`ElevationCache`.
 - **Photos via USB-C.** Confirmed working: an OM System body connected in **mass-storage/"USB
   storage" mode** mounts as a plain external volume (`DCIM` + `ALBM` folders, exactly like an SD card
   reader) that Files can browse — the same `.fileImporter(allowedContentTypes: [.folder])` call site

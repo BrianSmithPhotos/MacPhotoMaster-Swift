@@ -8,6 +8,7 @@ import MacPhotoMasterCore
 struct ContentView: View {
     @StateObject private var browser = PhotoBrowserViewModel()
     @State private var isMetadataPresented = false
+    @State private var isSettingsPresented = false
 
     var body: some View {
         NavigationSplitView {
@@ -23,6 +24,13 @@ struct ContentView: View {
                         }
                         .disabled(browser.previewAsset == nil)
                     }
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            isSettingsPresented = true
+                        } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                    }
                 }
         }
         .navigationSplitViewStyle(.balanced)
@@ -30,6 +38,9 @@ struct ContentView: View {
             MetadataPanelView(viewModel: browser)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isSettingsPresented) {
+            SettingsView(viewModel: browser)
         }
     }
 }

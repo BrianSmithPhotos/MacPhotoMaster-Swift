@@ -124,11 +124,13 @@ background sync could race with `ProcessMoveService`'s own copy+verify), and the
 transfer is planned as a separate, not-yet-designed Mac-initiated pull rather than an iPad-side push.
 See `docs/ARCHITECTURE.md` "iPad file access & sidecar staging" for the full reasoning.
 
-`Timeline.json` GPS suggestion (step 6) is also built and user-verified: a Settings sheet locates
-`Timeline.json` in the Google Drive Files provider once (persisted as a security-scoped bookmark and
-re-imported silently on later launches), and GPS-less photos get a location and altitude suggested
-from the nearest Timeline point — read-only on iPad, but persisted through Save and Process & Move.
-Not yet built: reverse geocoding and AI-assisted suggestions — both still Mac-only.
+`Timeline.json` GPS suggestion (step 6) and reverse geocoding (step 7) are also built and
+user-verified: a Settings sheet locates `Timeline.json` in the Google Drive Files provider once
+(persisted as a security-scoped bookmark and re-imported silently on later launches), GPS-less photos
+get a location and altitude suggested from the nearest Timeline point — read-only on iPad, but
+persisted through Save and Process & Move — and once a photo has GPS, city/county/state are merged
+into the keyword field via OpenStreetMap Nominatim. Not yet built: AI-assisted suggestions — still
+Mac-only.
 
 ## Next stages
 
@@ -138,7 +140,7 @@ Not yet built: reverse geocoding and AI-assisted suggestions — both still Mac-
 - **Auto-skip-on-process** (`docs/SPEC.md` §5's "successfully processed files auto-skip from the
   current session view") is intentionally not wired up — the user prefers processed files staying
   visible for now; revisit only if asked.
-- **iPadOS app**: source browse through process/move plus `Timeline.json` GPS suggestion (steps 1-6
-  of the planned 8-step checklist) is shipped and user-verified on the physical iPad (see "Status"
-  above). Remaining: reverse geocoding (step 7), AI-assisted suggestions (step 8), and a
-  not-yet-designed Mac-initiated pull to move processed files off the iPad's local staging folder.
+- **iPadOS app**: source browse through process/move plus `Timeline.json` GPS suggestion and reverse
+  geocoding (steps 1-7 of the planned 8-step checklist) is shipped and user-verified on the physical
+  iPad (see "Status" above). Remaining: AI-assisted suggestions (step 8), and a not-yet-designed
+  Mac-initiated pull to move processed files off the iPad's local staging folder.

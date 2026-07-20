@@ -84,12 +84,17 @@ an iPad-side push into shared cloud storage — `Documents` was chosen specifica
 sharing (`UIFileSharingEnabled`, not yet added to `project.yml`) can only expose an app's `Documents`
 directory, so this leaves that door open without committing to the mechanism yet.
 
-`Timeline.json`-derived GPS suggestion (step 6) is also built and user-verified on the physical iPad
-— a location and altitude are suggested for GPS-less photos from the nearest Timeline point, reusing
-`TimelineImportParser`/`TimelineLocationCache`/`ElevationLookupService`/`ElevationCache` unchanged;
-only the file-access path differs from the Mac (a persisted document-picker bookmark instead of
-`TimelineDriveSync`'s Drive-Desktop glob — see "iPad file access" below). Not yet built: reverse
-geocoding and AI-assisted suggestions.
+`Timeline.json`-derived GPS suggestion (step 6) and reverse geocoding (step 7) are also built and
+user-verified on the physical iPad — a location and altitude are suggested for GPS-less photos from
+the nearest Timeline point, and once a photo has GPS (embedded or suggested) `ReverseGeocodeService`
+merges city/county/state into the keyword edit buffer once per capture set per session. Both reuse
+`MacPhotoMasterCore` unchanged (`TimelineImportParser`/`TimelineLocationCache`/`ElevationLookupService`/
+`ElevationCache`/`ReverseGeocodeService`); only the Timeline file-access path differs from the Mac (a
+persisted document-picker bookmark instead of `TimelineDriveSync`'s Drive-Desktop glob — see "iPad
+file access" below). Geocoding reads GPS from the asset rather than an editable lat/long field (the
+iPad has none) and, like the Mac, merges keywords into the edit buffer only (they persist on Save,
+not automatically). The reverse-geocode `contextText` is stashed per capture-set representative for
+the not-yet-built AI step. Not yet built: AI-assisted suggestions.
 
 `ExifToolClient` is the one Service that stays in the `MacPhotoMaster` (macOS) target instead of
 moving to Core: it shells out to the `exiftool` binary via `Process`, and process/subprocess

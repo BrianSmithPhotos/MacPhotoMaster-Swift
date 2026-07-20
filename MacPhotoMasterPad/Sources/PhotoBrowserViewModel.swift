@@ -162,11 +162,21 @@ final class PhotoBrowserViewModel: ObservableObject {
     private let processMoveService = ProcessMoveService(metadataWriter: NativeMetadataWriter())
     private let timelineImportParser = TimelineImportParser()
     private let elevationService = ElevationLookupService()
+    private let reverseGeocodeService = ReverseGeocodeService()
     private var folderPathByCaptureSetID: [CaptureSet.ID: String] = [:]
     private var skipStore: SkipStateStore?
     private var sidecarStagingStore: SidecarStagingStore?
     private var timelineCache: TimelineLocationCache?
     private var elevationCache: ElevationCache?
+
+    /// Reverse-geocode context text (docs/SPEC.md §6/§7), keyed by capture-set representative id so a
+    /// later AI step (step 8) can pass along location context for whichever set it sources its image
+    /// from. Populated by `lookupLocationKeywordsIfNeeded()`. Mirrors the Mac app's
+    /// `locationContextByRepresentativeID`.
+    private var locationContextByRepresentativeID: [PhotoAsset.ID: String] = [:]
+    /// Capture-set representatives already reverse-geocoded this session — the once-per-set-per-session
+    /// guard so re-viewing a set doesn't re-hit Nominatim. Mirrors `geocodeAppliedRepresentativeIDs`.
+    private var geocodeAppliedRepresentativeIDs: Set<PhotoAsset.ID> = []
 
     /// `UserDefaults` key for the security-scoped bookmark to the user's `Timeline.json`.
     private static let timelineBookmarkKey = "TimelineBookmarkData"
@@ -819,6 +829,42 @@ final class PhotoBrowserViewModel: ObservableObject {
 
         await lookupElevation(
             latitude: suggestion.latitude, longitude: suggestion.longitude, memberIDs: targetIDs)
+    }
+
+    /// Reverse-geocodes the previewed photo's GPS (embedded or freshly Timeline-suggested) into
+    /// city/county/state, merges those into the keyword edit buffer, and stashes the compact context
+    /// text keyed by capture-set representative for a later AI step (step 8) — docs/SPEC.md §6/§7,
+    /// mirrors the Mac app's `lookupLocationKeywordsIfNeeded()`. Reads GPS from the asset (the iPad
+    /// has no editable lat/long buffer) rather than a text field. No-ops without GPS, and only looks
+    /// up once per capture set per session. Meant to run right after `suggestGPSIfNeeded()` in the
+    /// same `.task(id:)` chain, so embedded GPS and just-suggested Timeline GPS are both covered.
+    ///
+    /// Like the Mac app, the merged keywords land in the edit buffer only — they persist when the
+    /// user Saves (which stages them and updates the asset), not automatically. A Process & Move run
+    /// without a prior Save writes the on-asset keywords, not these buffered additions.
+    func lookupLocationKeywordsIfNeeded() async {
+        guard let asset = previewAsset,
+            let latitude = asset.gpsLatitude, let longitude = asset.gpsLongitude,
+            let representativeID = selectedCaptureSet?.representative?.id,
+            !geocodeAppliedRepresentativeIDs.contains(representativeID)
+        else { return }
+        geocodeAppliedRepresentativeIDs.insert(representativeID)
+
+        guard
+            let result = try? await reverseGeocodeService.lookupLocation(
+                latitude: latitude, longitude: longitude)
+        else { return }
+        locationContextByRepresentativeID[representativeID] = result.contextText
+
+        let tokens = result.keywordTokens
+        guard !tokens.isEmpty, previewAsset?.id == asset.id else { return }
+        var keywords = MetadataEditParsing.parseKeywords(editableKeywords)
+        var seenLowercased = Set(keywords.map { $0.lowercased() })
+        for token in tokens where seenLowercased.insert(token.lowercased()).inserted {
+            keywords.append(token)
+        }
+        editableKeywords = keywords.joined(separator: ", ")
+        gpsSuggestionStatusMessage = "Added location keywords: \(tokens.joined(separator: ", "))"
     }
 
     /// Manual altitude re-lookup for the previewed photo's current lat/long — surfaced as a small

@@ -140,11 +140,15 @@ struct MetadataPanelView: View {
             }
             .navigationTitle(asset?.url.lastPathComponent ?? "Metadata")
             .navigationBarTitleDisplayMode(.inline)
-            // Lazy per-selection Timeline GPS suggestion for a GPS-less photo — re-runs whenever the
-            // previewed asset changes while this sheet is open. Since Process & Move is driven from
-            // this same sheet, a fix is applied before the user can act on it. No-op once GPS is set.
+            // Lazy per-selection GPS + location enrichment for the previewed photo — re-runs whenever
+            // the previewed asset changes while this sheet is open. Since Process & Move is driven
+            // from this same sheet, both run before the user can act. GPS suggestion first (fills a
+            // GPS-less photo from Timeline), then reverse geocoding merges city/county/state keywords
+            // for whatever GPS the photo now has (embedded or just-suggested). Both self-guard to no-op
+            // once already applied.
             .task(id: asset?.id) {
                 await viewModel.suggestGPSIfNeeded()
+                await viewModel.lookupLocationKeywordsIfNeeded()
             }
         }
     }

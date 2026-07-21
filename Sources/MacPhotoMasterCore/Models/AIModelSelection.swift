@@ -29,8 +29,8 @@ public struct AIModelSelection {
     public static let presets: [String] = [
         "mlx:mlx-community/gemma-4-31b-it-8bit",
         "ollama:qwen3.6:35b",
-        "openrouter:google/gemini-2.5-flash",
         "openrouter:google/gemini-3.1-flash-lite-image",
+        "openrouter:google/gemini-2.5-flash",
         "openrouter:openai/gpt-5.1",
         "openrouter:google/gemini-3.5-flash",
         "openrouter:anthropic/claude-opus-4.8",

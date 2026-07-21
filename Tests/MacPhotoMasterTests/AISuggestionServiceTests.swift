@@ -154,6 +154,22 @@ final class AISuggestionServiceTests: XCTestCase {
         XCTAssertTrue(bird.contains("prefer a species"))
     }
 
+    func testCommonNamesOnlyFlagChangesBirdCandidateInstruction() {
+        let full = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .bird,
+            birdCandidateSpecies: "Great Blue Heron", promptProfile: .full,
+            birdCandidatesAreCommonNamesOnly: false)
+        XCTAssertTrue(full.contains("exact common and scientific name"))
+
+        let commonOnly = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .bird,
+            birdCandidateSpecies: "Great Blue Heron", promptProfile: .full,
+            birdCandidatesAreCommonNamesOnly: true)
+        XCTAssertFalse(commonOnly.contains("exact common and scientific name"))
+        XCTAssertTrue(commonOnly.contains("do not write a scientific name"))
+        XCTAssertTrue(commonOnly.contains("Great Blue Heron"))
+    }
+
     // MARK: - suggest / fallback
 
     func testSuggestReturnsPrimaryResultWithoutRetryFlags() async throws {

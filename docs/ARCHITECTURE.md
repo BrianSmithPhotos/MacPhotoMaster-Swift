@@ -112,8 +112,19 @@ drops the copyable JSON keyword example and gates species-ID on the scene-triage
 on-device models that otherwise echo the placeholder and over-apply bird/flower ID. Profile is chosen
 per-model on iPad (`PhotoBrowserViewModel.compactPromptModels`, a Settings toggle, defaulting to
 FastVLM). `gemma-3-4b-it-4bit` (~2.5GB, ~5.3GB peak on-device) is registered and is the recommended/
-default on-device model; FastVLM-0.5B stays a lighter fallback. Still deferred to a later 8b pass: the
-eBird candidate list and subject isolation.
+default on-device model; FastVLM-0.5B stays a lighter fallback.
+
+The eBird candidate-species list (8b pass 2) is also wired into the iPad, reusing
+`EBirdSpeciesListService`/`EBirdCache`/`EBirdCandidateFormatting` — `lookupBirdCandidates` folds into
+the step-7 geocode (decoupled from the geocode memo so setting the `EBIRD_API_KEY` mid-session retries
+without a relaunch). Two iPad-specific refinements vs. the Mac: the prompt carries **common names only**
+(halving it for the small model), and the Latin binomial is attached afterward by a deterministic
+`EBirdCandidateFormatting.attachScientificNames` lookup rather than trusted from the model — whole-word
+matched (a wrong-binomial guard), only against the description + the user's trusted keywords (not the
+model's own keywords, which can hallucinate a candidate), plural-aware, and inherently additive. See
+docs/SPEC.md §6/§7. Still deferred (last 8b item): subject isolation. A possible future path for
+rock-solid structured output — Apple Foundation Models / `@Generable` guided generation as an on-device
+provider — is recorded in memory, not scheduled.
 
 `ExifToolClient` is the one Service that stays in the `MacPhotoMaster` (macOS) target instead of
 moving to Core: it shells out to the `exiftool` binary via `Process`, and process/subprocess

@@ -7,17 +7,18 @@ import MacPhotoMasterCore
 /// the Mac's `TimelineDriveSync` does, so the user locates `Timeline.json` once through the Files
 /// document picker and the app persists a security-scoped bookmark to re-import it silently on later
 /// launches (see `PhotoBrowserViewModel.locateTimelineFile` and docs/ARCHITECTURE.md's iPad
-/// file-access section), plus the OpenRouter API key for AI suggestions (step 8). The AI model
-/// itself is picked per-photo in `MetadataPanelView`, not here. eBird key + subject-isolation
-/// settings will join this sheet in step 8b.
+/// file-access section), the OpenRouter + eBird API keys, a per-model Compact Prompt toggle (small
+/// on-device models), and a per-model eBird candidate-list toggle (chargeable OpenRouter models). The
+/// AI model itself is picked per-photo in `MetadataPanelView`, not here.
 struct SettingsView: View {
     @ObservedObject var viewModel: PhotoBrowserViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var isLocatingTimeline = false
-    /// Mirror of the Keychain-stored OpenRouter key, edited via the `SecureField` below. Loaded in
+    /// Mirrors of the Keychain-stored API keys, edited via the `SecureField`s below. Loaded in
     /// `.onAppear` and written straight back to the Keychain on change — never persisted anywhere
     /// else (a `UserDefaults` secret would be a cleartext plist). See `APIKeyStore`.
     @State private var openRouterAPIKey = ""
+    @State private var eBirdAPIKey = ""
 
     var body: some View {
         NavigationStack {
@@ -58,12 +59,36 @@ struct SettingsView: View {
                         .onChange(of: openRouterAPIKey) { _, newValue in
                             APIKeyStore.save(newValue, account: "OPENROUTER_API_KEY")
                         }
+                    SecureField("eBird API key", text: $eBirdAPIKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onChange(of: eBirdAPIKey) { _, newValue in
+                            APIKeyStore.save(newValue, account: "EBIRD_API_KEY")
+                        }
                 } header: {
                     Text("API Keys")
                 } footer: {
                     Text(
-                        "Needed only for openrouter: models. On-device mlx: models (e.g. FastVLM) need "
-                        + "no key. Stored securely in the device Keychain.")
+                        "OpenRouter: needed for openrouter: models (on-device mlx: models need none). "
+                        + "eBird: enables the local-species candidate list that improves bird ID. Both "
+                        + "stored securely in the device Keychain.")
+                }
+
+                Section {
+                    ForEach(viewModel.aiModelPresets.filter { $0.hasPrefix("openrouter:") }, id: \.self) { model in
+                        Toggle(
+                            model,
+                            isOn: Binding(
+                                get: { !viewModel.eBirdDisabledModels.contains(model) },
+                                set: { viewModel.setEBirdCandidateListEnabled($0, forModel: model) }))
+                    }
+                } header: {
+                    Text("eBird Candidate List (OpenRouter)")
+                } footer: {
+                    Text(
+                        "The eBird species list adds input tokens (cost) on chargeable OpenRouter models, "
+                        + "so it's off by default for them. On-device mlx: models always use it (free "
+                        + "compute, and where it helps most). Needs an eBird API key above.")
                 }
 
                 Section {
@@ -86,6 +111,7 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 openRouterAPIKey = APIKeyStore.read(account: "OPENROUTER_API_KEY") ?? ""
+                eBirdAPIKey = APIKeyStore.read(account: "EBIRD_API_KEY") ?? ""
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

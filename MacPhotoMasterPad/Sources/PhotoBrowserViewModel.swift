@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import os
 import MacPhotoMasterCore
 
 /// iPad-scoped counterpart to the macOS app's `SourceBrowserViewModel` — deliberately a much
@@ -196,6 +197,9 @@ final class PhotoBrowserViewModel: ObservableObject {
     private let openRouterProvider: AIProvider = OpenRouterProvider()
     private let mlxProvider: AIProvider = MLXNativeProvider()
     private let aiSuggestionService = AISuggestionService()
+    private let ebirdService = EBirdSpeciesListService()
+    private var ebirdCache: EBirdCache?
+    private static let ebirdLogger = Logger(subsystem: "MacPhotoMaster", category: "EBirdSpecies")
     private var folderPathByCaptureSetID: [CaptureSet.ID: String] = [:]
     private var skipStore: SkipStateStore?
     private var sidecarStagingStore: SidecarStagingStore?
@@ -207,9 +211,41 @@ final class PhotoBrowserViewModel: ObservableObject {
     /// from. Populated by `lookupLocationKeywordsIfNeeded()`. Mirrors the Mac app's
     /// `locationContextByRepresentativeID`.
     private var locationContextByRepresentativeID: [PhotoAsset.ID: String] = [:]
+    /// eBird candidate-species list text (see `EBirdCandidateFormatting`), keyed the same way and
+    /// populated alongside `locationContextByRepresentativeID` since both come from the same GPS fix.
+    /// Passed to `suggestAI()` so the model prefers a species verified as recorded near the photo's
+    /// location. Mirrors the Mac app's `birdCandidateSpeciesByRepresentativeID`.
+    private var birdCandidateSpeciesByRepresentativeID: [PhotoAsset.ID: String] = [:]
+    /// Lowercased common name -> scientific name for the photo's eBird region, keyed like the
+    /// candidate list. Used after an AI suggestion to attach the correct Latin binomial to whatever
+    /// common name the model produced (a deterministic lookup, not something the small on-device
+    /// models reliably recall) — see `EBirdCandidateFormatting.insertScientificName`.
+    private var birdScientificNamesByRepresentativeID: [PhotoAsset.ID: [String: String]] = [:]
     /// Capture-set representatives already reverse-geocoded this session — the once-per-set-per-session
     /// guard so re-viewing a set doesn't re-hit Nominatim. Mirrors `geocodeAppliedRepresentativeIDs`.
     private var geocodeAppliedRepresentativeIDs: Set<PhotoAsset.ID> = []
+    /// The reverse-geocoded region (county + eBird state code) per representative, stashed so the eBird
+    /// step can retry independently of the geocode memo (e.g. after the key is set mid-session).
+    private var geocodeRegionByRepresentativeID: [PhotoAsset.ID: (county: String, stateRegionCode: String?)] = [:]
+
+    /// Models (`AIModelSelection.presets` strings) that do NOT get the eBird candidate list appended
+    /// to their prompt — the list is extra input-token cost on chargeable OpenRouter models but free
+    /// on local MLX compute, so by default the paid presets are excluded and the free local models get
+    /// it (which is also where the accuracy help is most needed). `UserDefaults`-persisted, toggled
+    /// per model in `SettingsView`. Mirrors the Mac app's `eBirdDisabledModels`.
+    @Published private(set) var eBirdDisabledModels: Set<String> =
+        (UserDefaults.standard.array(forKey: PhotoBrowserViewModel.eBirdDisabledModelsKey) as? [String])
+        .map(Set.init) ?? PhotoBrowserViewModel.defaultEBirdDisabledModels
+    private static let eBirdDisabledModelsKey = "eBirdDisabledModels"
+    private static let defaultEBirdDisabledModels: Set<String> = [
+        "openrouter:google/gemini-2.5-flash",
+        "openrouter:google/gemini-3.1-flash-lite-image",
+    ]
+
+    private static let birdRegionSpeciesMaxAge: TimeInterval = 30 * 24 * 60 * 60
+    private static let birdTaxonomyMaxAge: TimeInterval = 90 * 24 * 60 * 60
+    /// Caps the candidate list so a noisy state-level fallback (1000+ codes) doesn't bloat the prompt.
+    private static let birdCandidateListLimit = 500
 
     /// `UserDefaults` key for the security-scoped bookmark to the user's `Timeline.json`.
     private static let timelineBookmarkKey = "TimelineBookmarkData"
@@ -878,26 +914,146 @@ final class PhotoBrowserViewModel: ObservableObject {
     func lookupLocationKeywordsIfNeeded() async {
         guard let asset = previewAsset,
             let latitude = asset.gpsLatitude, let longitude = asset.gpsLongitude,
-            let representativeID = selectedCaptureSet?.representative?.id,
-            !geocodeAppliedRepresentativeIDs.contains(representativeID)
+            let representativeID = selectedCaptureSet?.representative?.id
         else { return }
-        geocodeAppliedRepresentativeIDs.insert(representativeID)
 
-        guard
+        // Reverse-geocode + merge location keywords once per set per session — memoized on success
+        // only (moved below the network call), so an offline failure retries on the next view. The
+        // resolved region is stashed so the eBird step can retry independently without re-geocoding.
+        if !geocodeAppliedRepresentativeIDs.contains(representativeID),
             let result = try? await reverseGeocodeService.lookupLocation(
                 latitude: latitude, longitude: longitude)
-        else { return }
-        locationContextByRepresentativeID[representativeID] = result.contextText
+        {
+            geocodeAppliedRepresentativeIDs.insert(representativeID)
+            locationContextByRepresentativeID[representativeID] = result.contextText
+            geocodeRegionByRepresentativeID[representativeID] = (result.county, result.stateRegionCode)
 
-        let tokens = result.keywordTokens
-        guard !tokens.isEmpty, previewAsset?.id == asset.id else { return }
-        var keywords = MetadataEditParsing.parseKeywords(editableKeywords)
-        var seenLowercased = Set(keywords.map { $0.lowercased() })
-        for token in tokens where seenLowercased.insert(token.lowercased()).inserted {
-            keywords.append(token)
+            let tokens = result.keywordTokens
+            if !tokens.isEmpty, previewAsset?.id == asset.id {
+                var keywords = MetadataEditParsing.parseKeywords(editableKeywords)
+                var seenLowercased = Set(keywords.map { $0.lowercased() })
+                for token in tokens where seenLowercased.insert(token.lowercased()).inserted {
+                    keywords.append(token)
+                }
+                editableKeywords = keywords.joined(separator: ", ")
+                gpsSuggestionStatusMessage = "Added location keywords: \(tokens.joined(separator: ", "))"
+            }
         }
-        editableKeywords = keywords.joined(separator: ", ")
-        gpsSuggestionStatusMessage = "Added location keywords: \(tokens.joined(separator: ", "))"
+
+        // eBird candidates are decoupled from the geocode memo: retried on each view until they
+        // actually produce a list, so setting the `EBIRD_API_KEY` mid-session takes effect on the next
+        // photo without an app relaunch. Cheap when it can't yet succeed (no key is a Keychain check,
+        // no network); once it succeeds the stored list short-circuits further attempts.
+        if birdCandidateSpeciesByRepresentativeID[representativeID] == nil,
+            let region = geocodeRegionByRepresentativeID[representativeID]
+        {
+            await lookupBirdCandidates(
+                representativeID: representativeID, county: region.county,
+                stateRegionCode: region.stateRegionCode)
+        }
+    }
+
+    /// Called from `SettingsView`'s per-model eBird toggle. Persists the set.
+    func setEBirdCandidateListEnabled(_ enabled: Bool, forModel model: String) {
+        if enabled {
+            eBirdDisabledModels.remove(model)
+        } else {
+            eBirdDisabledModels.insert(model)
+        }
+        UserDefaults.standard.set(Array(eBirdDisabledModels), forKey: Self.eBirdDisabledModelsKey)
+    }
+
+    /// Resolves `county` (falling back to the bare `stateRegionCode`) to an eBird region code,
+    /// fetches/caches that region's species list + the global taxonomy, and stores the formatted
+    /// candidate list for `suggestAI()` to pass along. Best-effort — a no-op just means the AI prompt
+    /// goes out without a candidate list (same posture as `lookupLocationKeywordsIfNeeded`). Every
+    /// no-op logs why: a silent failure here previously cost a debug session tracing a fabricated
+    /// species back to a missing `EBIRD_API_KEY` (see [[project_xcode_env_vars]]/`APIKeyStore`).
+    /// Ported from the Mac app's `lookupBirdCandidates`.
+    private func lookupBirdCandidates(
+        representativeID: PhotoAsset.ID, county: String, stateRegionCode: String?
+    ) async {
+        guard let stateRegionCode else {
+            Self.ebirdLogger.log("Bird candidates skipped: no eBird state region code for this location")
+            return
+        }
+        guard APIKeyStore.resolve(envVar: "EBIRD_API_KEY", account: "EBIRD_API_KEY") != nil else {
+            Self.ebirdLogger.log("Bird candidates skipped: EBIRD_API_KEY not set (Keychain)")
+            return
+        }
+        guard let cache = await ensureEBirdCache() else {
+            Self.ebirdLogger.log("Bird candidates skipped: could not open EBirdCache")
+            return
+        }
+
+        var regionCode = stateRegionCode
+        if !county.isEmpty,
+            let regions = try? await ebirdService.fetchSubnational2Regions(parentCode: stateRegionCode),
+            let matched = EBirdCandidateFormatting.matchRegion(countyName: county, in: regions)
+        {
+            regionCode = matched.code
+        }
+
+        guard let codes = await birdSpeciesCodes(forRegionCode: regionCode, cache: cache) else {
+            Self.ebirdLogger.log("Bird candidates skipped: species-code fetch failed")
+            return
+        }
+        guard let taxonomy = await birdTaxonomyEntries(forSpeciesCodes: codes, cache: cache) else {
+            Self.ebirdLogger.log("Bird candidates skipped: taxonomy fetch failed")
+            return
+        }
+
+        // Common names only: roughly halves the prompt (which was slowing the small on-device model),
+        // safe because the binomial is attached afterward by `attachScientificNames`, not produced by
+        // the model.
+        let candidateList = EBirdCandidateFormatting.buildCommonNameList(
+            speciesCodes: codes, taxonomy: taxonomy, limit: Self.birdCandidateListLimit)
+        guard !candidateList.isEmpty else {
+            Self.ebirdLogger.log("Bird candidates skipped: 0 taxonomy matches")
+            return
+        }
+        birdCandidateSpeciesByRepresentativeID[representativeID] = candidateList
+        birdScientificNamesByRepresentativeID[representativeID] =
+            EBirdCandidateFormatting.scientificNameByCommonName(speciesCodes: codes, taxonomy: taxonomy)
+        Self.ebirdLogger.log(
+            "Bird candidates: stored \(codes.count, privacy: .public) species for region=\(regionCode, privacy: .public)"
+        )
+    }
+
+    private func birdSpeciesCodes(forRegionCode regionCode: String, cache: EBirdCache) async -> [String]? {
+        if let cached = try? await cache.cachedSpeciesCodes(regionCode: regionCode),
+            Date().timeIntervalSince(cached.fetchedAt) < Self.birdRegionSpeciesMaxAge
+        {
+            return cached.codes
+        }
+        guard let codes = try? await ebirdService.fetchSpeciesCodes(regionCode: regionCode) else {
+            return nil
+        }
+        try? await cache.storeSpeciesCodes(codes, regionCode: regionCode)
+        return codes
+    }
+
+    private func birdTaxonomyEntries(
+        forSpeciesCodes codes: [String], cache: EBirdCache
+    ) async -> [EBirdTaxonEntry]? {
+        let taxonomyFetchedAt = try? await cache.taxonomyFetchedAt()
+        let isFresh = taxonomyFetchedAt.map { Date().timeIntervalSince($0) < Self.birdTaxonomyMaxAge } ?? false
+        if !isFresh, let taxonomy = try? await ebirdService.fetchTaxonomy() {
+            try? await cache.replaceTaxonomy(taxonomy)
+        }
+        return try? await cache.taxonomyEntries(forSpeciesCodes: codes)
+    }
+
+    private func ensureEBirdCache() async -> EBirdCache? {
+        if let ebirdCache { return ebirdCache }
+        do {
+            let databasePath = try AppSupportDirectory.url(forFileNamed: "ebird_cache.sqlite3")
+            let cache = try EBirdCache(databasePath: databasePath)
+            ebirdCache = cache
+            return cache
+        } catch {
+            return nil
+        }
     }
 
     /// Manual altitude re-lookup for the previewed photo's current lat/long — surfaced as a small
@@ -1048,6 +1204,10 @@ final class PhotoBrowserViewModel: ObservableObject {
             let sourceAsset = AISuggestionSourcePicker.pickSourceAsset(from: sourceSetMembers)
         else { return }
         let locationContext = sourceRepresentativeID.flatMap { locationContextByRepresentativeID[$0] } ?? ""
+        let birdCandidateSpecies =
+            eBirdDisabledModels.contains(aiModelText)
+            ? ""
+            : sourceRepresentativeID.flatMap { birdCandidateSpeciesByRepresentativeID[$0] } ?? ""
 
         isSuggestingAI = true
         aiStatusMessage = "Generating AI suggestions…"
@@ -1066,11 +1226,29 @@ final class PhotoBrowserViewModel: ObservableObject {
             let result = try await aiSuggestionService.suggest(
                 provider: provider, model: selection.modelName, image: image,
                 existingDescription: editableDescription, existingKeywords: editableKeywords,
-                locationContext: locationContext,
-                promptProfile: compactPromptModels.contains(aiModelText) ? .compact : .full)
+                locationContext: locationContext, birdCandidateSpecies: birdCandidateSpecies,
+                promptProfile: compactPromptModels.contains(aiModelText) ? .compact : .full,
+                birdCandidatesAreCommonNamesOnly: true)
             guard previewAsset?.id == previewID else { return }
-            editableDescription = result.description
-            editableKeywords = result.keywords.joined(separator: ", ")
+            // Deterministically attach the Latin binomial the model likely omitted: if it named a bird
+            // by a common name that's in the photo's eBird region taxonomy, look up the scientific name
+            // and add it to the description (and as a keyword) — no fabrication, always correct.
+            var description = result.description
+            var keywords = result.keywords
+            if let scientificNames = sourceRepresentativeID.flatMap({ birdScientificNamesByRepresentativeID[$0] }) {
+                // Trust the description (the model's stated ID) and the user's pre-existing keywords,
+                // but not the model's freshly-generated keywords — a small model can hallucinate a
+                // candidate species into those. `editableKeywords` here still holds the pre-suggestion
+                // (user) keywords; `suggestAI` only writes the model's output back below.
+                let trustedKeywords = MetadataEditParsing.parseKeywords(editableKeywords)
+                let enriched = EBirdCandidateFormatting.attachScientificNames(
+                    description: description, keywords: keywords, trustedKeywords: trustedKeywords,
+                    scientificNameByCommonName: scientificNames)
+                description = enriched.description
+                keywords = enriched.keywords
+            }
+            editableDescription = description
+            editableKeywords = keywords.joined(separator: ", ")
             let categorySuffix = result.sceneCategory == .other ? "" : " [\(result.sceneCategory.rawValue)]"
             aiStatusMessage =
                 (result.timeoutRetrySucceeded ? "Suggested (after retry)" : "Suggested")

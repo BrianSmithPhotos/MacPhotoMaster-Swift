@@ -137,8 +137,11 @@ MLX to run took iOS-specific Metal/memory setup — see `docs/MLX_PROVIDER.md` "
 Step 8b (pass 1) added a `.compact` prompt profile for small on-device models (drops the copyable JSON
 keyword example, gates species-ID on scene-triage — selected per-model in Settings), registered
 `gemma-3-4b-it-4bit` as the recommended/default on-device model (good keywords + descriptions in
-seconds, ~5.3GB peak), and added a cheap user-verified OpenRouter preset. Still deferred to a later 8b
-pass: the eBird candidate list (which should lift species-ID accuracy) and subject isolation.
+seconds, ~5.3GB peak), and added a cheap user-verified OpenRouter preset. Pass 2 wired in the eBird
+candidate list (common-names-only prompt) with a deterministic local binomial lookup — the model names
+the bird by common name, the app attaches the correct Latin name from the eBird taxonomy (whole-word
+matched against the description + the user's trusted keywords only, never the model's own keywords, to
+avoid certifying a hallucinated species). Still deferred (last 8b item): subject isolation.
 
 ## Next stages
 
@@ -149,8 +152,8 @@ pass: the eBird candidate list (which should lift species-ID accuracy) and subje
   current session view") is intentionally not wired up — the user prefers processed files staying
   visible for now; revisit only if asked.
 - **iPadOS app**: source browse through process/move, `Timeline.json` GPS suggestion, reverse
-  geocoding, and AI-assisted suggestions (MLX + OpenRouter, first cut) — steps 1-8 of the planned
-  8-step checklist — are shipped and user-verified on the physical iPad (see "Status" above).
-  Remaining: **step 8b** — the eBird candidate list (species-ID accuracy) and subject isolation are
-  still to come (the prompt profiles + model roster part of 8b is done) — and a not-yet-designed
-  Mac-initiated pull to move processed files off the iPad's local staging folder.
+  geocoding, and AI-assisted suggestions (MLX + OpenRouter, small-model prompt profile, eBird
+  candidate list + local binomial lookup) — steps 1-8 plus 8b passes 1-2 — are shipped and
+  user-verified on the physical iPad (see "Status" above). Remaining: **subject isolation** (the last
+  8b item), a not-yet-designed Mac-initiated pull to move processed files off the iPad, and a possible
+  future Apple Foundation Models / `@Generable` on-device provider for guaranteed structured output.

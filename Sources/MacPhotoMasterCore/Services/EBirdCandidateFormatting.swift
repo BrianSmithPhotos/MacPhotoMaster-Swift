@@ -44,4 +44,87 @@ public enum EBirdCandidateFormatting {
             .map { "\($0.commonName) (\($0.scientificName))" }
             .joined(separator: ", ")
     }
+
+    /// Like `buildCandidateList` but common names only (no "(Scientific name)"), roughly halving the
+    /// prompt size — for small on-device models where the full list bloats the prompt and slows
+    /// generation. Safe to drop the scientific names from the prompt because the binomial is attached
+    /// afterward by `attachScientificNames`, a deterministic lookup rather than something the model
+    /// has to reproduce.
+    public static func buildCommonNameList(
+        speciesCodes: [String], taxonomy: [EBirdTaxonEntry], limit: Int
+    ) -> String {
+        let codeSet = Set(speciesCodes)
+        let matched = taxonomy.filter { codeSet.contains($0.speciesCode) && $0.category == "species" }
+        return matched.sorted { $0.commonName < $1.commonName }
+            .prefix(limit)
+            .map(\.commonName)
+            .joined(separator: ", ")
+    }
+
+    /// Lowercased common name -> scientific name, for the region's real species — the lookup table
+    /// used to attach a Latin binomial to whatever common name the model produced, deterministically,
+    /// rather than relying on a small model to recall/format it (which it does unreliably).
+    public static func scientificNameByCommonName(
+        speciesCodes: [String], taxonomy: [EBirdTaxonEntry]
+    ) -> [String: String] {
+        let codeSet = Set(speciesCodes)
+        var map: [String: String] = [:]
+        for entry in taxonomy where codeSet.contains(entry.speciesCode) && entry.category == "species" {
+            map[entry.commonName.lowercased()] = entry.scientificName
+        }
+        return map
+    }
+
+    /// Attaches Latin binomials to whatever species the model actually identified, deterministically.
+    /// Searches the model's `description` and the user's `trustedKeywords` (their pre-existing,
+    /// hand-confirmed keywords) for region-species common names — as a **whole word**,
+    /// case-insensitively. For every match, the scientific name is appended to `keywords`; and the
+    /// first (longest, most specific) common name found in the *description* also gets its binomial
+    /// inserted inline (" (Scientific name)"). De-duplicated against existing keywords.
+    ///
+    /// The model's own freshly-generated `keywords` are deliberately **not** searched: a small model
+    /// given a long candidate list will sometimes drop a list species into its keywords that isn't the
+    /// actual subject (an unidentified heron once picked up "Acorn Woodpecker"), and certifying that
+    /// with a binomial would launder a hallucination into authoritative-looking metadata. Only the
+    /// description (the model's stated ID) and the user's trusted keywords drive matching.
+    ///
+    /// Whole-word matching is likewise load-bearing: substring matching once inserted a wrong binomial
+    /// (a short common name hiding inside other prose). If the model used a descriptive phrase ("white
+    /// egret") rather than an exact common name ("Great Egret"), nothing matches — a safe miss, never a
+    /// wrong hit.
+    public static func attachScientificNames(
+        description: String, keywords: [String], trustedKeywords: [String],
+        scientificNameByCommonName: [String: String]
+    ) -> (description: String, keywords: [String]) {
+        guard !scientificNameByCommonName.isEmpty else { return (description, keywords) }
+        let commonNamesLongestFirst = scientificNameByCommonName.keys.sorted { $0.count > $1.count }
+        let searchText = ([description] + trustedKeywords).joined(separator: "\n")
+
+        var newDescription = description
+        var newKeywords = keywords
+        var descriptionInsertionDone = false
+
+        for commonName in commonNamesLongestFirst {
+            guard let scientificName = scientificNameByCommonName[commonName] else { continue }
+            // Trailing `s?` lets a plural/flock mention ("Ruddy Turnstones", "Mallards") match the
+            // singular eBird common name; still whole-word anchored, so no substring false matches.
+            let wholeWord = "\\b" + NSRegularExpression.escapedPattern(for: commonName) + "s?\\b"
+            guard searchText.range(of: wholeWord, options: [.regularExpression, .caseInsensitive]) != nil
+            else { continue }
+
+            if !newKeywords.contains(where: { $0.caseInsensitiveCompare(scientificName) == .orderedSame }) {
+                newKeywords.append(scientificName)
+            }
+
+            if !descriptionInsertionDone,
+                newDescription.range(of: scientificName, options: .caseInsensitive) == nil,
+                let range = newDescription.range(
+                    of: wholeWord, options: [.regularExpression, .caseInsensitive])
+            {
+                newDescription.insert(contentsOf: " (\(scientificName))", at: range.upperBound)
+                descriptionInsertionDone = true
+            }
+        }
+        return (newDescription, newKeywords)
+    }
 }

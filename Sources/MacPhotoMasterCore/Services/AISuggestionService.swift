@@ -49,7 +49,7 @@ public struct AISuggestionService {
     public func suggest(
         provider: AIProvider, model: String, image: CGImage, existingDescription: String,
         existingKeywords: String, locationContext: String = "", birdCandidateSpecies: String = "",
-        promptProfile: PromptProfile = .full
+        promptProfile: PromptProfile = .full, birdCandidatesAreCommonNamesOnly: Bool = false
     ) async throws -> AISuggestionResult {
         try await provider.ensureVisionCapable(model: model)
 
@@ -57,7 +57,8 @@ public struct AISuggestionService {
         let userPrompt = Self.buildUserPrompt(
             existingDescription: existingDescription, existingKeywords: existingKeywords,
             locationContext: locationContext, category: category,
-            birdCandidateSpecies: birdCandidateSpecies, promptProfile: promptProfile)
+            birdCandidateSpecies: birdCandidateSpecies, promptProfile: promptProfile,
+            birdCandidatesAreCommonNamesOnly: birdCandidatesAreCommonNamesOnly)
 
         do {
             var result = try await requestAndParse(
@@ -108,19 +109,22 @@ public struct AISuggestionService {
 
     public static func buildUserPrompt(
         existingDescription: String, existingKeywords: String, locationContext: String,
-        category: SceneCategory, birdCandidateSpecies: String = "", promptProfile: PromptProfile = .full
+        category: SceneCategory, birdCandidateSpecies: String = "", promptProfile: PromptProfile = .full,
+        birdCandidatesAreCommonNamesOnly: Bool = false
     ) -> String {
         switch promptProfile {
         case .full:
             return fullUserPrompt(
                 existingDescription: existingDescription, existingKeywords: existingKeywords,
                 locationContext: locationContext, category: category,
-                birdCandidateSpecies: birdCandidateSpecies)
+                birdCandidateSpecies: birdCandidateSpecies,
+                birdCandidatesAreCommonNamesOnly: birdCandidatesAreCommonNamesOnly)
         case .compact:
             return compactUserPrompt(
                 existingDescription: existingDescription, existingKeywords: existingKeywords,
                 locationContext: locationContext, category: category,
-                birdCandidateSpecies: birdCandidateSpecies)
+                birdCandidateSpecies: birdCandidateSpecies,
+                birdCandidatesAreCommonNamesOnly: birdCandidatesAreCommonNamesOnly)
         }
     }
 
@@ -129,7 +133,7 @@ public struct AISuggestionService {
     /// for why gating on Vision's bird confidence was rejected for capable models).
     private static func fullUserPrompt(
         existingDescription: String, existingKeywords: String, locationContext: String,
-        category: SceneCategory, birdCandidateSpecies: String
+        category: SceneCategory, birdCandidateSpecies: String, birdCandidatesAreCommonNamesOnly: Bool = false
     ) -> String {
         let descriptionWordLimit =
             category == .other ? genericDescriptionWordLimit : categorizedDescriptionWordLimit
@@ -182,11 +186,21 @@ public struct AISuggestionService {
         let trimmedBirdCandidates = birdCandidateSpecies.trimmingCharacters(
             in: .whitespacesAndNewlines)
         if !trimmedBirdCandidates.isEmpty {
-            lines.append(
-                "If the primary subject is a bird, it has been verified as ever recorded in this "
-                    + "location's eBird region. Strongly prefer a species from this list, using its "
-                    + "exact common and scientific name as given, over any other species: "
-                    + trimmedBirdCandidates)
+            if birdCandidatesAreCommonNamesOnly {
+                lines.append(
+                    "If the primary subject is a bird, prefer a species from this list of birds "
+                        + "recorded at this location, named by its exact common name as given (do not "
+                        + "write a scientific name — it is added automatically). Only name a species if "
+                        + "the bird's visible features support it; if you are unsure, describe the bird "
+                        + "generally (size, colour, type) without naming any species: "
+                        + trimmedBirdCandidates)
+            } else {
+                lines.append(
+                    "If the primary subject is a bird, it has been verified as ever recorded in this "
+                        + "location's eBird region. Strongly prefer a species from this list, using its "
+                        + "exact common and scientific name as given, over any other species: "
+                        + trimmedBirdCandidates)
+            }
         }
         return lines.joined(separator: "\n")
     }
@@ -201,7 +215,7 @@ public struct AISuggestionService {
     /// them), just terser.
     private static func compactUserPrompt(
         existingDescription: String, existingKeywords: String, locationContext: String,
-        category: SceneCategory, birdCandidateSpecies: String
+        category: SceneCategory, birdCandidateSpecies: String, birdCandidatesAreCommonNamesOnly: Bool = false
     ) -> String {
         let descriptionWordLimit =
             category == .other ? genericDescriptionWordLimit : categorizedDescriptionWordLimit
@@ -256,9 +270,16 @@ public struct AISuggestionService {
         let trimmedBirdCandidates = birdCandidateSpecies.trimmingCharacters(
             in: .whitespacesAndNewlines)
         if isBird, !trimmedBirdCandidates.isEmpty {
-            lines.append(
-                "Prefer a species from this verified local list, using its exact common and scientific "
-                    + "name as given: " + trimmedBirdCandidates)
+            if birdCandidatesAreCommonNamesOnly {
+                lines.append(
+                    "Prefer a species from this local-birds list, by its exact common name only (no "
+                        + "scientific name). Only name a species if sure; if unsure, describe the bird "
+                        + "generally without naming a species: " + trimmedBirdCandidates)
+            } else {
+                lines.append(
+                    "Prefer a species from this verified local list, using its exact common and "
+                        + "scientific name as given: " + trimmedBirdCandidates)
+            }
         }
         return lines.joined(separator: "\n")
     }

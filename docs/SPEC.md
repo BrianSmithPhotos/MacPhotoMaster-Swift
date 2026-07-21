@@ -143,15 +143,24 @@ deterministically, and copy files into local storage.
   override it; a plain click, or the "Reset to AI Crop" button next to the toggle, reverts to the AI
   crop. See `docs/ARCHITECTURE.md` "eBird species-list cache".
 - **iPad divergence:** two providers only — native on-device MLX (`mlx:`) and OpenRouter
-  (`openrouter:`); Ollama's daemon can't run on iPad. The AI image is sent full-frame (no
-  subject-isolation crop), and the eBird candidate list is not wired in yet — both deferred to a later
-  8b pass. On-device MLX needs the Metal/memory setup in `docs/MLX_PROVIDER.md` ("On-device (iPad)");
-  the recommended/default on-device model is **gemma-3-4b** (good keywords + descriptions in seconds).
-  Small models (FastVLM-0.5B) use a `.compact` prompt profile — no copyable JSON keyword example, and
-  species-ID instructions gated on the on-device scene-triage category — selected per-model
-  (`PhotoBrowserViewModel.compactPromptModels`, toggled in Settings); larger models keep the full
-  prompt. OpenRouter needs its API key entered in the iPad Settings sheet (Keychain via `APIKeyStore`),
-  since shell env vars don't reach an installed app.
+  (`openrouter:`); Ollama's daemon can't run on iPad. The AI image is sent full-frame (subject
+  isolation is the one remaining deferred 8b item). On-device MLX needs the Metal/memory setup in
+  `docs/MLX_PROVIDER.md` ("On-device (iPad)"); the recommended/default on-device model is
+  **gemma-3-4b** (good keywords + descriptions in seconds). Small models (FastVLM-0.5B) use a
+  `.compact` prompt profile — no copyable JSON keyword example, and species-ID instructions gated on
+  the on-device scene-triage category — selected per-model (`PhotoBrowserViewModel.compactPromptModels`,
+  toggled in Settings); larger models keep the full prompt. OpenRouter + eBird API keys are entered in
+  the iPad Settings sheet (Keychain via `APIKeyStore`), since shell env vars don't reach an installed app.
+- **iPad eBird divergence (binomial via local lookup):** the eBird candidate list is wired in, but the
+  iPad sends **common names only** (halves the prompt for the small model) and, since small models don't
+  reliably reproduce a Latin binomial (they omitted it, or on a stuck ID grabbed the alphabetically-first
+  candidate), attaches the scientific name itself via a deterministic lookup after the response
+  (`EBirdCandidateFormatting.attachScientificNames`). That lookup is deliberately conservative: whole-word
+  matching (a wrong-binomial guard — substring matching once turned an egret into *Branta bernicla*),
+  matches only the description + the user's own trusted keywords (never the model's fresh keywords, which
+  can contain a hallucinated candidate), and only for an exact common name (a hedged "possibly a screech
+  owl" gets no binomial — a safe miss). The prompt also tells small models to describe a bird generally
+  rather than force a species when unsure.
 
 ## 7. GPS enrichment from Timeline export
 

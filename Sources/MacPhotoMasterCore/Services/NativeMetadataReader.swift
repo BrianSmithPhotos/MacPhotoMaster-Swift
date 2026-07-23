@@ -31,9 +31,11 @@ public enum NativeMetadataError: Error {
 /// selected asset corrects `descriptionText` if this reader got it wrong.
 ///
 /// macOS 27 (Golden Gate, 2026) note: Core Image RAW 9 overhauled `CIRAWFilter`'s demosaic/denoise
-/// quality, but `extractPreview` below doesn't go through `CIRAWFilter` — it pulls the camera's own
-/// embedded JPEG preview via `CGImageSourceCreateThumbnailAtIndex`, so RAW 9 has no effect on this
-/// reader's output. It would only become relevant if this app added a full-quality RAW render path.
+/// quality, but `extractPreview` below doesn't go through `CIRAWFilter`, so RAW 9 has no effect on
+/// this reader's output. It would only become relevant if this app added a full-quality RAW render
+/// path. (Note `extractPreview` passes `kCGImageSourceCreateThumbnailFromImageAlways`, so it does
+/// *not* return the camera's embedded preview JPEG — ImageIO renders from the full image. On a RAW
+/// file that means the framing is ImageIO's, not the camera's, and need not match the sibling JPEG.)
 /// Also confirmed: ImageIO/`CGImageDestination` gained no new EXIF/IPTC/XMP write coverage in
 /// macOS 27, so `exiftool` remains the only reliable write path — no change to the scope gap above.
 public struct NativeMetadataReader {

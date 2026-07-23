@@ -43,6 +43,24 @@ deterministically, and copy files into local storage.
   large; cmd-clicking toggles a finer-grained "ring-selection" within that row (e.g. exclude the RAW
   file from a set before processing). This ring-selection is a second, narrower level of multi-select
   than the grid's — see §5 for how it feeds process/move.
+- **Preview zoom** (the reference app had this as a slider; here it's pointer-driven):
+  - Scroll wheel over the large preview zooms, anchored at the pointer — the image point under the
+    cursor stays under the cursor. Trackpad pinch does the same thing.
+  - Range is **Fit to 8x Fit**. Fit is the hard minimum: the preview can never be zoomed *out* past
+    the whole frame, so anything not visible at Fit is genuinely not in the file.
+  - Scrollers appear on each axis once the scaled image exceeds the pane. Dragging pans.
+  - The current scale is **always** displayed ("Fit", "240%"), not just while zoomed. This is the
+    point of the feature as much as inspection is: a zoomed-in preview and a differently-framed
+    source file look identical, and §6's AI suggestions read from a *different file* than the
+    preview shows, so an un-signposted zoom state makes a correct AI description look like a
+    hallucination. Double-click or ⌘0 returns to Fit; changing the selection resets to Fit.
+  - **Disabled while subject-isolation crop mode is on** (§6). That mode owns the drag gesture for
+    drawing the crop rectangle and maps view coordinates to image pixels assuming an unzoomed
+    `.fit` layout; supporting both would mean composing the zoom transform into that mapping for no
+    real gain. Turning crop mode on resets the preview to Fit; the zoom control is inert until it's
+    turned off again.
+  - Zoom reads the same 2048px-cap decode the preview already loads, so past roughly 100% of that
+    it is soft rather than more detailed. Re-decoding at a higher cap when zoomed in is deferred.
 
 ## 2. EXIF read and field mapping
 

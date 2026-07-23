@@ -11,20 +11,33 @@ struct PreviewPanelView: View {
     @ObservedObject var viewModel: SourceBrowserViewModel
 
     @State private var previewImage: CGImage?
+    /// Preview scale as a multiple of Fit — see `ZoomableImageView.fitMultiple`. Held here rather
+    /// than in the view model because it's pure view state (no service or persistence touches it),
+    /// and reset to Fit on every selection change by the `.task` below.
+    @State private var previewFitMultiple: CGFloat = 1
 
     private var asset: PhotoAsset? { viewModel.selectedAsset }
+
+    /// Zoom and crop mode are mutually exclusive (docs/SPEC.md §1): the crop overlay maps drags to
+    /// image pixels assuming an unzoomed `.fit` layout, and it owns the drag gesture.
+    private var isZoomEnabled: Bool { !viewModel.subjectIsolationEnabled }
 
     var body: some View {
         VStack(spacing: 8) {
             VStack {
                 Spacer()
                 if let previewImage {
-                    GeometryReader { geo in
-                        ZStack {
-                            Image(decorative: previewImage, scale: 1)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                            if viewModel.subjectIsolationEnabled {
+                    if isZoomEnabled {
+                        ZoomableImageView(image: previewImage, fitMultiple: $previewFitMultiple)
+                            // Rebuilds the scroll view (back at Fit, with the new image) when the
+                            // selection changes, rather than mutating the existing one.
+                            .id(asset?.id)
+                    } else {
+                        GeometryReader { geo in
+                            ZStack {
+                                Image(decorative: previewImage, scale: 1)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
                                 SubjectCropOverlay(
                                     imageSize: CGSize(
                                         width: previewImage.width, height: previewImage.height),
@@ -33,11 +46,11 @@ struct PreviewPanelView: View {
                                     onCommit: viewModel.setManualCropRect
                                 )
                             }
+                            // GeometryReader places its child at .topLeading, not centered, and the
+                            // ZStack otherwise only sizes to its content — without this the portrait
+                            // (narrower-than-container) case renders left-justified instead of centered.
+                            .frame(width: geo.size.width, height: geo.size.height)
                         }
-                        // GeometryReader places its child at .topLeading, not centered, and the
-                        // ZStack otherwise only sizes to its content — without this the portrait
-                        // (narrower-than-container) case renders left-justified instead of centered.
-                        .frame(width: geo.size.width, height: geo.size.height)
                     }
                 } else {
                     Image(systemName: "photo")
@@ -49,10 +62,23 @@ struct PreviewPanelView: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottomTrailing) {
+                if previewImage != nil {
+                    ZoomReadout(fitMultiple: previewFitMultiple, isEnabled: isZoomEnabled) {
+                        previewFitMultiple = 1
+                    }
+                    .padding(8)
+                }
+            }
             .task(id: asset?.id) {
                 previewImage = nil
+                previewFitMultiple = 1
                 guard let asset else { return }
                 previewImage = try? await NativeMetadataReader().extractPreviewAsync(at: asset.url, maxPixelSize: 2048)
+            }
+            // Crop mode can't be entered at a zoom level its coordinate mapping doesn't account for.
+            .onChange(of: viewModel.subjectIsolationEnabled) { _, _ in
+                previewFitMultiple = 1
             }
 
             if viewModel.variantMemberIDs.count > 1 {
@@ -165,6 +191,36 @@ private struct VariantTileView: View {
         .accessibilityIdentifier("variantTile.\(asset.id.lastPathComponent)")
         .accessibilityLabel(asset.url.lastPathComponent)
         .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+}
+
+/// Always-visible preview scale readout (docs/SPEC.md §1): shown at Fit as well as when zoomed,
+/// because a zoomed preview and a differently-framed source file are otherwise indistinguishable —
+/// the confusion that motivated the feature. Doubles as the reset control (click, or ⌘0).
+private struct ZoomReadout: View {
+    let fitMultiple: CGFloat
+    let isEnabled: Bool
+    let onReset: () -> Void
+
+    private var isAtFit: Bool { fitMultiple <= 1 + ZoomScrollView.scaleComparisonEpsilon }
+
+    private var label: String {
+        isAtFit ? "Fit" : "\(Int((fitMultiple * 100).rounded()))%"
+    }
+
+    var body: some View {
+        Button(action: onReset) {
+            Text(isEnabled ? label : "Fit (crop mode)")
+                .font(.caption.monospacedDigit())
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled || isAtFit)
+        .keyboardShortcut("0", modifiers: .command)
+        .help(isEnabled ? "Scroll to zoom. Click to fit (Cmd-0)." : "Zoom is off while crop mode is on")
+        .accessibilityIdentifier("previewZoomReadout")
     }
 }
 

@@ -84,10 +84,20 @@ struct MetadataPanelView: View {
                     }
                     if let aiEvaluatedImage = viewModel.aiEvaluatedImage {
                         LabeledContent("Evaluated") {
-                            Image(decorative: aiEvaluatedImage, scale: 1, orientation: .up)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxHeight: 160)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Image(decorative: aiEvaluatedImage, scale: 1, orientation: .up)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 160)
+                                // Filename and pixel dimensions of what the model actually received
+                                // — the cross-reference for the "Scene triage on WxH image" log line
+                                // when a description mentions something absent from the big preview.
+                                Text(
+                                    "\(viewModel.aiEvaluatedImageSourceName ?? "—") · \(aiEvaluatedImage.width)x\(aiEvaluatedImage.height)"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     LabeledContent("Camera", value: asset.cameraModel)

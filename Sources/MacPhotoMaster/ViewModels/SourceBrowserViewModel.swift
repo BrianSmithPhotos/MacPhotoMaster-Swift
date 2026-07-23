@@ -129,7 +129,16 @@ final class SourceBrowserViewModel: ObservableObject {
     /// The exact image the last `suggestAI()` call sent to the model (post `SubjectIsolationService`
     /// crop, when one was found) — shown in the Metadata panel so a misidentification is diagnosable
     /// (was the model looking at the subject, or a diluted full frame?).
+    ///
+    /// Populated on every suggestion, including the uncropped full-frame case. That looks redundant
+    /// next to the big preview, but isn't: the preview shows `selectedAsset` (the capture set's
+    /// JPEG-first representative) while the AI is sent `AISuggestionSourcePicker`'s pick (the RAW),
+    /// so the two can be different files — and a description of something not visible in the preview
+    /// is otherwise indistinguishable from a hallucination. See `aiEvaluatedImageSourceName`.
     @Published private(set) var aiEvaluatedImage: CGImage?
+    /// Filename of the asset `aiEvaluatedImage` was decoded from, shown alongside it so the
+    /// preview-vs-sent file distinction above is visible rather than inferred.
+    @Published private(set) var aiEvaluatedImageSourceName: String?
     /// User-drawn override for the subject crop (image-pixel space, matching the 2048px-cap decode
     /// `extractPreviewAsync` produces), set by dragging a rectangle on `PreviewPanelView`'s big
     /// preview. When present, it's used in place of `SubjectIsolationService`'s AI-computed crop —
@@ -292,6 +301,7 @@ final class SourceBrowserViewModel: ObservableObject {
         } else {
             subjectCropTask?.cancel()
             aiEvaluatedImage = nil
+            aiEvaluatedImageSourceName = nil
         }
     }
 
@@ -312,6 +322,7 @@ final class SourceBrowserViewModel: ObservableObject {
         subjectCropTask?.cancel()
         guard subjectIsolationEnabled, let asset = selectedAsset else {
             aiEvaluatedImage = nil
+            aiEvaluatedImageSourceName = nil
             return
         }
         let id = asset.id
@@ -328,6 +339,7 @@ final class SourceBrowserViewModel: ObservableObject {
             }
             guard !Task.isCancelled, selectedAssetID == id else { return }
             aiEvaluatedImage = cropped
+            aiEvaluatedImageSourceName = asset.url.lastPathComponent
         }
     }
 
@@ -1068,10 +1080,8 @@ final class SourceBrowserViewModel: ObservableObject {
             }
             let evaluatedImage = subjectCrop ?? cgImage
             guard selectedAssetID == id else { return }
-            // Only show the "Evaluated" crop when it's actually a crop (subject-isolation found a
-            // subject) — with the toggle off, or no subject found, the full frame was sent and
-            // showing it back as "Evaluated" would just duplicate the source photo for no reason.
-            aiEvaluatedImage = subjectCrop
+            aiEvaluatedImage = evaluatedImage
+            aiEvaluatedImageSourceName = sourceAsset.url.lastPathComponent
             let result = try await aiSuggestionService.suggest(
                 provider: provider, model: selection.modelName, image: evaluatedImage,
                 existingDescription: editableDescription, existingKeywords: editableKeywords,
@@ -1080,17 +1090,20 @@ final class SourceBrowserViewModel: ObservableObject {
             editableDescription = result.description
             editableKeywords = result.keywords.joined(separator: ", ")
             // The timeout-retry crop (`AISuggestionService`'s separate fallback, unrelated to the
-            // subject-isolation toggle) is a genuine crop worth surfacing even if `subjectCrop` was
-            // nil; otherwise keep whatever `subjectCrop` decided above.
-            aiEvaluatedImage = result.timeoutRetrySucceeded ? result.evaluatedImage : subjectCrop
+            // subject-isolation toggle) narrows the frame again, so the retry's own image is what
+            // actually produced this result.
+            if result.timeoutRetrySucceeded {
+                aiEvaluatedImage = result.evaluatedImage
+            }
             let categorySuffix = result.sceneCategory == .other ? "" : " [\(result.sceneCategory.rawValue)]"
             aiStatusMessage =
                 (result.timeoutRetrySucceeded ? "Suggested (after retry)" : "Suggested")
-                + categorySuffix + "; saving…"
+                + categorySuffix + sentFromSuffix(sourceAsset: sourceAsset) + "; saving…"
             let saveStatus = await performSave(scope: .manualSelection(targetAssets))
             guard selectedAssetID == id else { return }
             if let saveStatus {
-                aiStatusMessage = "Suggested\(categorySuffix); \(saveStatus)"
+                aiStatusMessage =
+                    "Suggested\(categorySuffix)\(sentFromSuffix(sourceAsset: sourceAsset)); \(saveStatus)"
             }
         } catch is CancellationError {
             guard selectedAssetID == id else { return }
@@ -1099,6 +1112,15 @@ final class SourceBrowserViewModel: ObservableObject {
             guard selectedAssetID == id else { return }
             aiStatusMessage = "AI suggestion failed: \(error.localizedDescription)"
         }
+    }
+
+    /// `" · from <file>"` when the asset sent to the AI isn't the one the big preview is showing —
+    /// `AISuggestionSourcePicker` prefers the capture set's RAW while `selectedAsset` is its
+    /// JPEG-first representative, so on a RAW+JPEG set the model and the user look at different
+    /// files. Empty when they agree, to keep the common single-file case's status line short.
+    private func sentFromSuffix(sourceAsset: PhotoAsset) -> String {
+        guard sourceAsset.id != selectedAssetID else { return "" }
+        return " · from \(sourceAsset.url.lastPathComponent)"
     }
 
     /// Starts `suggestAI()` as a cancellable `Task`, stashing the handle for `cancelAISuggestion()`.
@@ -1214,6 +1236,7 @@ final class SourceBrowserViewModel: ObservableObject {
         subjectCropTask?.cancel()
         manualSubjectCropRect = nil
         aiEvaluatedImage = nil
+        aiEvaluatedImageSourceName = nil
         aiStatusMessage = nil
         guard let asset = selectedAsset else {
             editableDescription = ""

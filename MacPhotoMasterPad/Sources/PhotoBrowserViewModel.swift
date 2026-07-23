@@ -3,9 +3,10 @@ import UIKit
 import os
 import MacPhotoMasterCore
 
-/// iPad-scoped counterpart to the macOS app's `SourceBrowserViewModel` — deliberately a much
-/// smaller slice while the iPad UI is still being built out. No AI suggestions, no GPS/altitude
-/// lookups — this wires up browsing, capture-set grouping, skip/un-skip, single-selection preview,
+/// iPad-scoped counterpart to the macOS app's `SourceBrowserViewModel` — still a smaller slice while
+/// the iPad UI is built out (no subject-isolation crop, no Ollama provider), but AI suggestions and
+/// GPS/geocoding have since landed. Wires up browsing, capture-set grouping, skip/un-skip,
+/// single-selection preview,
 /// grid multi-select, description/keywords metadata editing + save (staged via
 /// `SidecarStagingStore`, not written straight to the original file — see docs/ARCHITECTURE.md's
 /// iPad section), a live rename preview (`titlePreview`), and Process & Move (`process(scope:)`),
@@ -145,6 +146,19 @@ final class PhotoBrowserViewModel: ObservableObject {
     }
     @Published private(set) var isSuggestingAI = false
     @Published var aiStatusMessage: String?
+    /// The exact image the last `suggestAI()` call sent to the model, shown in the Metadata panel so
+    /// a misidentification is diagnosable rather than assumed to be a hallucination.
+    ///
+    /// The preview shows `previewAsset` (the capture set's JPEG-first representative) while the AI
+    /// is sent `AISuggestionSourcePicker`'s pick (the RAW), so the two are routinely different
+    /// files — and an in-camera crop the RAW doesn't share (e.g. the OM-3's 2x digital
+    /// teleconverter) then puts things in the model's view that aren't in the user's. Mirrors the
+    /// Mac app's `SourceBrowserViewModel.aiEvaluatedImage`, minus its subject-isolation crop paths,
+    /// which this app doesn't have.
+    @Published private(set) var aiEvaluatedImage: CGImage?
+    /// Filename of the asset `aiEvaluatedImage` was decoded from, shown alongside it so the
+    /// preview-vs-sent file distinction above is visible rather than inferred.
+    @Published private(set) var aiEvaluatedImageSourceName: String?
     private var suggestAITask: Task<Void, Never>?
     private static let aiModelDefaultsKey = "aiModelText"
 
@@ -435,6 +449,10 @@ final class PhotoBrowserViewModel: ObservableObject {
         // Shared status line for the Timeline-GPS suggestion — cleared up front so a previous
         // photo's message (e.g. a matched location) doesn't linger on a newly selected photo.
         gpsSuggestionStatusMessage = nil
+        // Same reasoning for the previous photo's AI result and the image it was derived from.
+        aiStatusMessage = nil
+        aiEvaluatedImage = nil
+        aiEvaluatedImageSourceName = nil
         guard let asset = previewAsset else {
             editableDescription = ""
             editableKeywords = ""
@@ -1144,6 +1162,15 @@ final class PhotoBrowserViewModel: ObservableObject {
         UserDefaults.standard.set(Array(compactPromptModels), forKey: Self.compactPromptModelsKey)
     }
 
+    /// `" · from <file>"` when the asset sent to the AI isn't the one the preview is showing —
+    /// `AISuggestionSourcePicker` prefers the capture set's RAW while `previewAsset` is its
+    /// JPEG-first representative, so on a RAW+JPEG set the model and the user look at different
+    /// files. Empty when they agree, to keep the common single-file case's status line short.
+    private func sentFromSuffix(sourceAsset: PhotoAsset) -> String {
+        guard sourceAsset.id != previewAssetID else { return "" }
+        return " · from \(sourceAsset.url.lastPathComponent)"
+    }
+
     /// Starts `suggestAI()` as a cancellable `Task`, stashing the handle for `cancelAISuggestion()`.
     /// The UI ("Suggest" button) calls this rather than `suggestAI()` directly.
     func startAISuggestion() {
@@ -1223,6 +1250,8 @@ final class PhotoBrowserViewModel: ObservableObject {
             let image = try await NativeMetadataReader().extractPreviewAsync(
                 at: sourceAsset.url, maxPixelSize: maxPixelSize)
             guard previewAsset?.id == previewID else { return }
+            aiEvaluatedImage = image
+            aiEvaluatedImageSourceName = sourceAsset.url.lastPathComponent
             let result = try await aiSuggestionService.suggest(
                 provider: provider, model: selection.modelName, image: image,
                 existingDescription: editableDescription, existingKeywords: editableKeywords,
@@ -1249,13 +1278,19 @@ final class PhotoBrowserViewModel: ObservableObject {
             }
             editableDescription = description
             editableKeywords = keywords.joined(separator: ", ")
+            // The timeout-retry fallback center-crops and re-sends, so its image — not the one
+            // decoded above — is what actually produced this result.
+            if result.timeoutRetrySucceeded, let retryImage = result.evaluatedImage {
+                aiEvaluatedImage = retryImage
+            }
             let categorySuffix = result.sceneCategory == .other ? "" : " [\(result.sceneCategory.rawValue)]"
+            let sentFrom = sentFromSuffix(sourceAsset: sourceAsset)
             aiStatusMessage =
                 (result.timeoutRetrySucceeded ? "Suggested (after retry)" : "Suggested")
-                + categorySuffix + "; saving…"
+                + categorySuffix + sentFrom + "; saving…"
             await performSave(scope: .manualSelection(targetAssets))
             guard previewAsset?.id == previewID else { return }
-            aiStatusMessage = "Suggested\(categorySuffix)"
+            aiStatusMessage = "Suggested\(categorySuffix)\(sentFrom)"
         } catch is CancellationError {
             aiStatusMessage = "AI suggestion cancelled"
         } catch {

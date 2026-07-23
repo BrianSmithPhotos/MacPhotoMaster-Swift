@@ -17,6 +17,7 @@
 		D23C30AB6035C90E93248B8E /* MetadataPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 134CE94E535084A60DF19BD5 /* MetadataPanelView.swift */; };
 		D602D8465FED435504DCE036 /* MacPhotoMasterPadApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA9FB40F140610C3DAFCE5FA /* MacPhotoMasterPadApp.swift */; };
 		ED08639FA2E341EB44424DA6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A96272D4BA18B963F5611944 /* ContentView.swift */; };
+		F6549851CC38F5C4235BA241 /* ZoomableImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B0D1D5D8C036698AF619CC /* ZoomableImageView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 		2B7FCED9F7F2258B0446A677 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		7C3EA4478AF643C1146C5B6E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9C52916AB855ADDBA1A91041 /* MacPhotoMaster-Swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "MacPhotoMaster-Swift"; path = ..; sourceTree = SOURCE_ROOT; };
+		A2B0D1D5D8C036698AF619CC /* ZoomableImageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomableImageView.swift; sourceTree = "<group>"; };
 		A96272D4BA18B963F5611944 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		BA9FB40F140610C3DAFCE5FA /* MacPhotoMasterPadApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPhotoMasterPadApp.swift; sourceTree = "<group>"; };
 		C7A4D55B9950CA100A6FFEE9 /* MacPhotoMasterPad.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MacPhotoMasterPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -82,6 +84,7 @@
 				2B7FCED9F7F2258B0446A677 /* SettingsView.swift */,
 				E8EFACB84A6F078CCFD97D04 /* SourcePanelView.swift */,
 				25076C2842DE051EBD743B1B /* TileTapCatcher.swift */,
+				A2B0D1D5D8C036698AF619CC /* ZoomableImageView.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -170,6 +173,7 @@
 				8AE211E1A640E82BD0EC12C5 /* SettingsView.swift in Sources */,
 				95E1B7C96C641C694916552B /* SourcePanelView.swift in Sources */,
 				2C7FAAC82AA7401085DD86D1 /* TileTapCatcher.swift in Sources */,
+				F6549851CC38F5C4235BA241 /* ZoomableImageView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

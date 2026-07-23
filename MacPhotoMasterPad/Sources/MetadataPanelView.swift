@@ -100,6 +100,25 @@ struct MetadataPanelView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
+                            if let aiEvaluatedImage = viewModel.aiEvaluatedImage {
+                                LabeledContent("Evaluated") {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Image(decorative: aiEvaluatedImage, scale: 1, orientation: .up)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(maxHeight: 160)
+                                        // Filename and pixel dimensions of what the model actually
+                                        // received. Both matter here: the file can differ from the
+                                        // previewed one (RAW vs JPEG representative), and MLX
+                                        // decodes at 1024 rather than 2048 for the jetsam ceiling.
+                                        Text(
+                                            "\(viewModel.aiEvaluatedImageSourceName ?? "—") · \(aiEvaluatedImage.width)x\(aiEvaluatedImage.height)"
+                                        )
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
                         }
                         Section("Camera") {
                             LabeledContent("Camera", value: asset.cameraModel)

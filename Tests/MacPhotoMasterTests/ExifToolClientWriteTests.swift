@@ -53,6 +53,7 @@ final class ExifToolClientWriteTests: XCTestCase {
         XCTAssertEqual(metadata["XMP-dc:Title"] as? String, "My Title")
         XCTAssertEqual(metadata["IPTC:Caption-Abstract"] as? String, "My description")
         XCTAssertEqual(metadata["XMP-dc:Description"] as? String, "My description")
+        XCTAssertEqual(metadata["XMP-iptcCore:AltTextAccessibility"] as? String, "My description")
         XCTAssertEqual(metadata["IPTC:Keywords"] as? [String], ["mountain", "sunrise"])
         XCTAssertEqual(metadata["XMP-dc:Subject"] as? [String], ["mountain", "sunrise"])
         // Read output isn't `-n` (numeric), so GPS comes back as exiftool's human-readable

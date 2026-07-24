@@ -146,6 +146,14 @@ struct ExifToolClient: MetadataWriter {
         }
         arguments.append("-IPTC:Caption-Abstract=\(description)")
         arguments.append("-XMP-dc:Description=\(description)")
+        // IPTC's accessibility alt text (standard 2021.1) gets the same string: it's the one field
+        // in this app whose job is already "describe what's in the picture", which is exactly what
+        // alt text is for. Lightroom Classic 12.3+ shows it in its own metadata box, and it's what
+        // a WordPress plugin reads to fill the alt attribute. Its sibling ExtDescrAccessibility is
+        // deliberately left unwritten — it's for a *longer* description of a complex image, and
+        // there's no second source here to fill it with; copying the same text into both would just
+        // show duplicate data in tools that display them separately.
+        arguments.append("-XMP-iptcCore:AltTextAccessibility=\(description)")
 
         arguments.append("-IPTC:Keywords=")
         arguments.append("-XMP-dc:Subject=")

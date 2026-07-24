@@ -89,7 +89,11 @@ deterministically, and copy files into local storage.
   stay one invocation per file.
 - Field → tag mapping (dual-write EXIF/IPTC/XMP so both older and newer metadata consumers see it):
   - Title → `IPTC:ObjectName`, `XMP-dc:Title`
-  - Description → `IPTC:Caption-Abstract`, `XMP-dc:Description`
+  - Description → `IPTC:Caption-Abstract`, `XMP-dc:Description`,
+    `XMP-iptcCore:AltTextAccessibility` (the IPTC 2021.1 accessibility field — same text, since the
+    description already *is* a description of the image; Lightroom Classic 12.3+ surfaces it, and
+    WordPress plugins read it to fill the alt attribute. `ExtDescrAccessibility` is deliberately not
+    written: it's for a longer description of a complex image and there's no separate source for it)
   - Keywords → `IPTC:Keywords`, `XMP-dc:Subject`
   - GPS → `GPSLatitude`/`GPSLatitudeRef`, `GPSLongitude`/`GPSLongitudeRef`, optional
     `GPSAltitude`/`GPSAltitudeRef` — Ref tags derived from the value's sign so southern/western

@@ -61,6 +61,42 @@ final class PhotoAssetLoaderTests: XCTestCase {
         XCTAssertTrue(assets.isEmpty)
     }
 
+    /// The shape the Mac app's iPad import meets: a processed-library tree, with JPEGs one level
+    /// deeper than their RAW siblings (`ProcessMoveService.destinationDirectory`) and an `.xmp`
+    /// sidecar next to each image that must not be mistaken for one.
+    func testLoadAssetsInTreeDescendsIntoMonthDayAndJPGFolders() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dayFolder = root.appendingPathComponent("6 June").appendingPathComponent("21")
+        let jpgFolder = dayFolder.appendingPathComponent("jpg")
+        try FileManager.default.createDirectory(at: jpgFolder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try writeSampleJPEG(to: dayFolder.appendingPathComponent("1010042_20260621_1405_OM-1_12-40mm.jpg"))
+        try writeSampleJPEG(to: jpgFolder.appendingPathComponent("1010043_20260621_1406_OM-1_12-40mm.jpg"))
+        try Data("<x:xmpmeta/>".utf8)
+            .write(to: dayFolder.appendingPathComponent("1010042_20260621_1405_OM-1_12-40mm.xmp"))
+
+        let assets = try await PhotoAssetLoader().loadAssets(inTree: root)
+
+        XCTAssertEqual(
+            assets.map(\.url.lastPathComponent),
+            [
+                "1010042_20260621_1405_OM-1_12-40mm.jpg",
+                "1010043_20260621_1406_OM-1_12-40mm.jpg",
+            ])
+    }
+
+    func testLoadAssetsInTreeThrowsForAFolderThatIsNotThere() async throws {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+        do {
+            _ = try await PhotoAssetLoader().loadAssets(inTree: missing)
+            XCTFail("Expected an unreadableFolder error")
+        } catch {
+            XCTAssertEqual(error as? PhotoAssetLoaderError, .unreadableFolder(missing))
+        }
+    }
+
     func testLoadAssetsReadsEveryFileWhenCountExceedsTheConcurrencyCap() async throws {
         // Deliberately more files than any plausible core count, to exercise the "refill the
         // queue as a child task finishes" bookkeeping in readAssets(at:) rather than just the

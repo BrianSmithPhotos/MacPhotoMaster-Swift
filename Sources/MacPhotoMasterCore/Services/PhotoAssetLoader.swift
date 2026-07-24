@@ -1,5 +1,9 @@
 import Foundation
 
+public enum PhotoAssetLoaderError: Error, Equatable {
+    case unreadableFolder(URL)
+}
+
 /// Scans a folder for supported image files and reads their metadata. See docs/SPEC.md §1 for
 /// supported file types.
 ///
@@ -35,6 +39,35 @@ public struct PhotoAssetLoader {
             let imageURLs = contents.filter { Self.supportedExtensions.contains($0.pathExtension.lowercased()) }
 
             return await Self.readAssets(at: imageURLs)
+        }.value
+    }
+
+    /// Same as `loadAssets(in:)` but descends into subfolders, for reading a whole processed-library
+    /// tree (`<M Month>/<DD>/` plus `<DD>/jpg/`) in one pass rather than a folder at a time — see
+    /// `ProcessMoveService.destinationDirectory`. Used by the Mac app's iPad import; the browsing
+    /// grid deliberately stays flat, one folder at a time.
+    ///
+    /// Results are sorted by path so a run over the same tree reports files in a stable order,
+    /// which `FileManager.enumerator` doesn't itself guarantee.
+    public func loadAssets(inTree folderURL: URL) async throws -> [PhotoAsset] {
+        try await Task.detached(priority: .userInitiated) {
+            // Checked up front rather than relying on the enumerator: with no error handler it
+            // reports a missing or non-directory URL by yielding nothing at all, so a mistyped or
+            // unmounted folder would otherwise be indistinguishable from one holding no photos —
+            // a misleading thing to tell someone about a folder they just picked.
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: folderURL.path, isDirectory: &isDirectory),
+                isDirectory.boolValue,
+                let enumerator = FileManager.default.enumerator(
+                    at: folderURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+            else {
+                throw PhotoAssetLoaderError.unreadableFolder(folderURL)
+            }
+
+            let imageURLs = enumerator.compactMap { $0 as? URL }
+                .filter { Self.supportedExtensions.contains($0.pathExtension.lowercased()) }
+
+            return await Self.readAssets(at: imageURLs).sorted { $0.url.path < $1.url.path }
         }.value
     }
 

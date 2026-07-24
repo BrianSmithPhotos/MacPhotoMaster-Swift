@@ -125,9 +125,35 @@ deterministically, and copy files into local storage.
 - Successfully processed files auto-skip from the current session view.
 - **iPad divergence:** the destination library is a fixed local folder inside the app's own sandbox
   (`Documents/ProcessedLibrary`), not user-picked — a Google-Drive-mounted destination was considered
-  and ruled out (Drive's background sync could race with the copy+SHA-256 verify above). Getting
-  processed files off the iPad afterward is a separate, not-yet-designed Mac-initiated pull, not part
-  of Process & Move itself. See docs/ARCHITECTURE.md "iPad file access & sidecar staging".
+  and ruled out (Drive's background sync could race with the copy+SHA-256 verify above). See
+  docs/ARCHITECTURE.md "iPad file access & sidecar staging".
+- **Finishing iPad-processed files on the Mac.** An iPad-processed file is only half done: with no
+  `exiftool` there, the in-camera art filter reaches neither the filename nor the keywords, and
+  description/keywords/GPS live only in the `.xmp` sidecar beside each image. The Mac app's "Import
+  from iPad" sheet completes them, as a batch with no review step (reviewing already happened on the
+  iPad).
+  - **Transport is manual and out of scope.** The import takes any local folder; how the bytes got
+    there is not the app's concern. Two routes work: dragging `ProcessedLibrary` out of Finder's
+    Files tab over USB, or sending it from the iPad's Files app to an SMB share hosted on the Mac.
+    Neither clears the iPad copy — Files downgrades a cross-provider transfer to a copy even when
+    Move is chosen — so deleting the source on the iPad is always a separate manual step. Prefer a
+    Mac-hosted share over a NAS: the files then land on local disk, where the import's `trashItem`
+    cleanup works (it routinely fails on network volumes, which have no `.Trashes`) and the SHA-256
+    verify isn't reading every RAW back over the network. iCloud is ruled out for the same reason as
+    Google Drive above: lazily materialized placeholders race with the SHA-256 verify.
+  - Per file: read the maker notes with `exiftool` for the art-filter token, read the sidecar back,
+    rebuild the filename (identical to the iPad's, plus the art-filter segment — both apps derive
+    camera/lens/capturedAt from the same reader, so there's no naming drift), and re-run the ordinary
+    Process & Move above with the exiftool writer. That write of title/description/keywords/GPS into
+    the destination copy *is* the sidecar being folded into the image, and the standard auto-metadata
+    rules (§6) are what put the art filter into the keywords and the "In camera effect" note into the
+    description.
+  - Source image and sidecar are trashed only after the destination copy verifies, then emptied
+    directories are pruned up to (never including) the picked folder. A partially failed run is
+    therefore safe to re-run over the same folder — it only sees what was left behind.
+  - A file whose sidecar is missing or unreadable, or whose name this app didn't generate, is
+    **skipped and named in the failure list**, left untouched. Importing it bare would silently
+    discard the iPad session's descriptions, keywords and GPS.
 
 ## 6. AI-assisted suggestions
 

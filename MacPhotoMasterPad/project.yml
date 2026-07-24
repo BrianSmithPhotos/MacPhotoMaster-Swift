@@ -39,6 +39,18 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations~ipad: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
+        # Process & Move writes into `Documents/ProcessedLibrary` (see PhotoBrowserViewModel
+        # .libraryRootURL), and those files have to leave the device for the Mac app to finish them
+        # off. Without both keys the folder is sealed inside the sandbox: file sharing exposes
+        # `Documents` in Finder's Files tab over USB, and opening-in-place exposes the same folder to
+        # the on-device Files app, from where they can be sent to a share or USB drive. The Files
+        # app's "On My iPad" listing needs *both* — one alone shows nothing. Note that Files
+        # downgrades a cross-provider transfer to a copy even when Move was chosen, so clearing the
+        # iPad copy is always a separate manual step.
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        # UIFileSharingEnabled has no INFOPLIST_KEY_ equivalent, so it lives in a real plist that the
+        # generated keys above merge into. See Info.plist.
+        INFOPLIST_FILE: Info.plist
 
 schemes:
   MacPhotoMasterPad:

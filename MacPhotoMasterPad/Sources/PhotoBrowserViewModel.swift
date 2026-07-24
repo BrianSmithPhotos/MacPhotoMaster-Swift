@@ -95,11 +95,15 @@ final class PhotoBrowserViewModel: ObservableObject {
     /// user-chosen, `UserDefaults`-persisted folder that can point anywhere, including external
     /// volumes): a Google-Drive-mounted folder was considered and ruled out, since Drive's own
     /// background sync writing/evicting bytes in the same folder `ProcessMoveService` copies into and
-    /// SHA-256-verifies would race with that verification. Files land here and stay local until a
-    /// separate, not-yet-built Mac-initiated pull moves them off the iPad — likely via Finder file
-    /// sharing, which can only see the app's own `Documents` directory (see project.yml's
-    /// `UIFileSharingEnabled`), hence staging inside `Documents` rather than anywhere else in the
-    /// sandbox. No security-scoped access needed since this is entirely inside the app's own sandbox.
+    /// SHA-256-verifies would race with that verification. Files land here and stay local until the
+    /// user moves them off the device, after which the Mac app's iPad import finishes the job (the
+    /// exiftool-only work: art-filter token into the filename and keywords, sidecar folded into the
+    /// image, final library routing — see docs/SPEC.md §5). Both routes off the device can only see
+    /// the app's own `Documents` directory — Finder file sharing over USB and the on-device Files
+    /// app, which need `UIFileSharingEnabled` (Info.plist) and `LSSupportsOpeningDocumentsInPlace`
+    /// (project.yml) respectively, and the Files listing needs both —
+    /// hence staging inside `Documents` rather than anywhere else in the sandbox. No security-scoped
+    /// access needed since this is entirely inside the app's own sandbox.
     let libraryRootURL: URL = PhotoBrowserViewModel.makeLibraryRootDirectory()
 
     private static func makeLibraryRootDirectory() -> URL {

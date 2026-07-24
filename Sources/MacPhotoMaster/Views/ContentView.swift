@@ -9,6 +9,7 @@ import MacPhotoMasterCore
 struct ContentView: View {
     @ObservedObject var browser: SourceBrowserViewModel
     @State private var isMetadataPanelPresented = true
+    @State private var isIPadImportPresented = false
 
     var body: some View {
         NavigationSplitView {
@@ -26,11 +27,21 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem {
                 Button {
+                    isIPadImportPresented = true
+                } label: {
+                    Label("Import from iPad", systemImage: "square.and.arrow.down.on.square")
+                }
+            }
+            ToolbarItem {
+                Button {
                     isMetadataPanelPresented.toggle()
                 } label: {
                     Label("Toggle Metadata Panel", systemImage: "sidebar.trailing")
                 }
             }
+        }
+        .sheet(isPresented: $isIPadImportPresented) {
+            IPadImportView(viewModel: browser)
         }
     }
 }

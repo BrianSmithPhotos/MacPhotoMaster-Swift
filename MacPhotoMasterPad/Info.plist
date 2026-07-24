@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The one key GENERATE_INFOPLIST_FILE can't supply: there is no
+	     INFOPLIST_KEY_UIFileSharingEnabled in Xcode's allowlist (checked against
+	     CoreBuildSystem.xcspec), so setting it as a build setting is silently inert. Everything
+	     else still comes from the INFOPLIST_KEY_* settings in project.yml, which the build system
+	     merges into this file. See project.yml for why the key is needed at all. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+</dict>
+</plist>

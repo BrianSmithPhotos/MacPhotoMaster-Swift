@@ -81,6 +81,15 @@ final class SourceBrowserViewModel: ObservableObject {
     @Published private(set) var isProcessing = false
     @Published var processStatusMessage: String?
 
+    /// State for `importIPadExport(from:)`, kept separate from `isProcessing`/`processStatusMessage`
+    /// because the two run against different files entirely — the import reads a pulled folder, not
+    /// the browsing session — and the import sheet is where its progress belongs.
+    @Published private(set) var isImportingIPadExport = false
+    @Published private(set) var iPadImportStatusMessage: String?
+    /// Set once an import finishes, so the sheet can list what was skipped. `nil` while one is
+    /// running or before the first run.
+    @Published private(set) var iPadImportSummary: IPadImportSummary?
+
     /// The metadata panel's editable fields, kept as free text (parsed via `MetadataEditParsing` at
     /// save time) rather than typed properties so the view can bind `TextField`s directly. Synced
     /// to `selectedAsset`'s current values by `loadEditBuffer` whenever the selection changes. See
@@ -1219,6 +1228,39 @@ final class SourceBrowserViewModel: ObservableObject {
                 processStatusMessage =
                     "Processed \(successCount)/\(assets.count) file(s); \(failures.count) failed:\n"
                     + failures.joined(separator: "\n")
+            }
+        }
+    }
+
+    /// Imports a folder of iPad-processed files into `libraryRootURL` via `IPadImportService` — see
+    /// that type for what the iPad couldn't finish and why. Unlike `process(scope:libraryRoot:)`
+    /// this has nothing to do with the current session: it reads a folder the user pulled off the
+    /// iPad, so it touches neither `captureSets` nor the processed-state store.
+    ///
+    /// No-op while a previous import is running or when no library folder is set.
+    func importIPadExport(from exportRoot: URL) {
+        guard !isImportingIPadExport, let libraryRoot = libraryRootURL else { return }
+
+        isImportingIPadExport = true
+        iPadImportSummary = nil
+        iPadImportStatusMessage = "Scanning \(exportRoot.lastPathComponent)…"
+        Task {
+            defer { isImportingIPadExport = false }
+            do {
+                let summary = try await IPadImportService().importAll(
+                    from: exportRoot, into: libraryRoot,
+                    onProgress: { [weak self] completed, total, outcome in
+                        Task { @MainActor in
+                            self?.iPadImportStatusMessage = "\(completed) of \(total): \(outcome.sourceName)"
+                        }
+                    })
+                iPadImportSummary = summary
+                iPadImportStatusMessage =
+                    summary.outcomes.isEmpty
+                    ? "No photos found in \(exportRoot.lastPathComponent)."
+                    : "Imported \(summary.importedCount) of \(summary.outcomes.count) file(s)."
+            } catch {
+                iPadImportStatusMessage = error.localizedDescription
             }
         }
     }

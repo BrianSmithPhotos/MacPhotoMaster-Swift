@@ -17,8 +17,8 @@ Swift/SwiftUI equivalent of the reference app's `ui/` + `services/` + `workers/`
   provider calls, timeline/elevation/geocode lookups, and the `MetadataWriter` protocol itself.
   Same role as the reference app's `services/`: no Qt/SwiftUI imports, easy to unit test in
   isolation. Prefer plain `struct`s/`actor`s with `async` functions over classes with mutable state
-  where possible. One exception stays in the macOS app target rather than Core: `ExifToolClient`
-  (below).
+  where possible. Two exceptions stay in the macOS app target rather than Core: `ExifToolClient`
+  and `IPadImportService`, which depends on it concretely (both below).
 - **`Sources/MacPhotoMasterCore/Models/`** — plain data types (`PhotoAsset`, `CaptureSet`, etc.),
   `Codable` where they cross a process/network boundary (Timeline JSON, AI provider responses).
 
@@ -79,10 +79,15 @@ destination, `PhotoBrowserViewModel.libraryRootURL`, is a fixed `Documents/Proce
 inside the app's own sandbox container — not user-picked, and deliberately not a Google-Drive-mounted
 folder (considered and rejected: Drive's background sync writing/evicting bytes in the same folder
 `ProcessMoveService` copies into and SHA-256-verifies would race with that verification). Getting
-processed files off the iPad is planned as a separate, not-yet-designed Mac-initiated pull rather than
-an iPad-side push into shared cloud storage — `Documents` was chosen specifically because Finder file
-sharing (`UIFileSharingEnabled`, not yet added to `project.yml`) can only expose an app's `Documents`
-directory, so this leaves that door open without committing to the mechanism yet.
+processed files off the iPad is a manual copy rather than an iPad-side push into shared cloud storage
+— `Documents` was chosen specifically because both routes off the device can only see an app's own
+`Documents` directory: Finder file sharing over USB (`UIFileSharingEnabled`) and the on-device Files
+app (`LSSupportsOpeningDocumentsInPlace`), and the Files listing appears only when *both* are set.
+`LSSupportsOpeningDocumentsInPlace` comes from `project.yml`; `UIFileSharingEnabled` has no
+`INFOPLIST_KEY_` equivalent in Xcode's allowlist — set as a build setting it is silently ignored — so
+it lives in a one-key `MacPhotoMasterPad/Info.plist` that `GENERATE_INFOPLIST_FILE` merges into. The
+Mac app finishes the job
+from there — see "iPad import (Mac side)" below.
 
 `Timeline.json`-derived GPS suggestion (step 6) and reverse geocoding (step 7) are also built and
 user-verified on the physical iPad — a location and altitude are suggested for GPS-less photos from
@@ -199,9 +204,39 @@ actual views:
   any staged draft back via `stagedDraft(for:)` and patches it into the `PhotoAsset` before Process &
   Move copies the RAW/JPEG bytes off the card (per SPEC.md §5's existing copy-first/verify model);
   `NativeMetadataWriter` then writes a real `.xmp` sidecar next to the copy in the destination
-  library, still unfolded — `ExifToolClient.foldInSidecarIfPresent(for:)` only runs once files reach a
-  Mac, same as the existing sidecar design already assumes. The original file on the card never gets
-  a sidecar at all.
+  library, still unfolded — folding it in only happens once the files reach a Mac ("iPad import"
+  below), same as the existing sidecar design already assumes. The original file on the card never
+  gets a sidecar at all.
+
+## iPad import (Mac side)
+
+`IPadImportService` finishes off files the iPad processed but couldn't complete — the art-filter
+token exiftool alone can read, and the sidecar folded into the image (SPEC.md §5). It lives in the
+`MacPhotoMaster` app target rather than Core for the same reason `ExifToolClient` does: it depends on
+it concretely, and there is no iPad side of this feature to share with.
+
+The work per file is deliberately thin, because everything downstream of the enrichment is the
+existing Mac path: build a `RenameContext` and hand the asset to the ordinary
+`ProcessMoveService(metadataWriter: ExifToolClient())`, whose write of title/description/keywords/GPS
+into the destination copy *is* the fold-in, and whose `AutoMetadataRules` calls put the art filter
+into the keywords. Three pieces were added or lifted into Core to make that possible:
+
+- **`IPadExportNameParsing`** recovers `sequence` and `batch` from an already-renamed file, anchoring
+  on the `YYYYMMDD_HHMM` pair. Needed because `RenameService.sequence(from:)` harvests every digit in
+  the stem — correct for a camera-original name, but it would swallow the date and time an
+  iPad-generated name already carries. The rebuilt `RenameContext` is handed a stand-in URL whose stem
+  is just the recovered sequence.
+- **`SidecarDraftParsing`** is the XMP-reading half of `SidecarStagingStore`, lifted out so it can
+  read a sidecar sitting beside a *destination* file rather than one keyed into the staging
+  directory. Chosen over `ExifToolClient.foldInSidecarIfPresent(for:)` here: one fewer process launch
+  per file, and it recovers altitude, which that path doesn't request.
+- **`PhotoAssetLoader.loadAssets(inTree:)`** walks a whole `<M Month>/<DD>/[jpg/]` tree in one pass.
+  The original `loadAssets(in:)` stays single-folder — the browsing grid is deliberately one folder at
+  a time.
+
+Sources are trashed (never `removeItem`) only after `ProcessMoveService` has verified the destination
+copy, which is what makes a partially failed run safe to re-run over the same folder: it sees only
+the leftovers.
 
 ## Concurrency rules
 

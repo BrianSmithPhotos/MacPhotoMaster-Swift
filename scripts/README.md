@@ -8,20 +8,25 @@ Wraps the SPM release executable in a real `MacPhotoMaster.app` bundle so it can
 Dock and double-clicked from Finder, instead of only being runnable via `swift run`.
 
 Why: `swift run` execs the bare binary with no `Info.plist`/bundle identity — no stable Dock icon,
-and a fresh ad-hoc code-signing identity on every rebuild that can force privacy grants (e.g. Files
-and Folders access for Google Drive Timeline sync) to be re-approved. A proper `.app` fixes both:
-a real `CFBundleIconFile` (built from `icons/purplegreenswallow1024x1024.png` via `iconutil`) and a
-consistent `CFBundleIdentifier` (`com.briansmithphotos.macphotomaster`) that ad-hoc codesign can
-re-sign identically across rebuilds.
+and no code signature that TCC can key a privacy grant to (e.g. Files and Folders access for Google
+Drive Timeline sync), so every rebuild re-prompts. A proper `.app` fixes both: a real
+`CFBundleIconFile` (built from `icons/purplegreenswallow1024x1024.png` via `iconutil`) and a
+consistent `CFBundleIdentifier` (`photos.briansmith.macphotomaster`).
 
 ```
 scripts/build-app-bundle.sh
 ```
 
 Builds `dist/MacPhotoMaster.app` (gitignored — a build artifact, not source). Drag it into
-`/Applications` or straight onto the Dock. Ad-hoc signed only (`codesign --sign -`, no Developer ID)
-— fine for running on this machine, not for distributing to others or passing Gatekeeper's
-`spctl` assessment on a machine where it'd carry a quarantine attribute.
+`/Applications` or straight onto the Dock. Signed with the `Apple Development` certificate rather
+than ad-hoc, because TCC keys its grants to the signature and an ad-hoc one is just the binary's own
+hash — it changes with every rebuild, so macOS sees a brand-new app each time and silently drops
+anything previously granted. Certificate-backed signing is what lets the narrow grants the app
+actually needs (removable volumes for the SD card, CloudStorage for `Timeline.json`) stick, instead
+of reaching for Full Disk Access. Override with `CODESIGN_IDENTITY` on a machine without that
+certificate; `CODESIGN_IDENTITY=-` restores ad-hoc signing. Still a development identity — fine for
+running on this machine, not for distributing to others or passing Gatekeeper's `spctl` assessment
+on a machine where it'd carry a quarantine attribute.
 
 ## strip-app-metadata.sh
 

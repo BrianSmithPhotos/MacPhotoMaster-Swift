@@ -8,8 +8,11 @@ import Security
 /// 2026-07-08). Keychain was chosen over `UserDefaults` because a `UserDefaults`-backed secret is
 /// a cleartext plist under `~/Library/Preferences` — not appropriate for API keys.
 public enum APIKeyStore {
-    /// Matches this app's bundle identifier (`scripts/build-app-bundle.sh`'s `BUNDLE_ID`) so
-    /// Keychain items are scoped to this app rather than shared/ambiguous across other tools.
+    /// Deliberately frozen at the old `com.briansmithphotos.*` bundle identifier, which the app
+    /// itself moved off in 2026-07 (the domain was never owned; it's now `photos.briansmith.*`).
+    /// This is only ever an opaque lookup key for `kSecAttrService` — nothing derives it from the
+    /// bundle ID at runtime — and changing it would strand every already-saved key, forcing the
+    /// user to re-enter them for no functional gain. Leave it alone.
     private static let service = "com.briansmithphotos.macphotomaster.apikeys"
 
     /// `envVar` wins when set (keeps `swift run`/terminal-launched debugging simple, matching the

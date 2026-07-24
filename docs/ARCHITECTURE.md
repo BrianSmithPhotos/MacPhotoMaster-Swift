@@ -352,7 +352,9 @@ propagate there), so the failure path is deliberately loud now rather than a sil
 
 `APIKeyStore` resolves both `EBIRD_API_KEY` and `OPENROUTER_API_KEY` from the process environment
 first, then falls back to the macOS Keychain (`kSecClassGenericPassword`, service
-`com.briansmithphotos.macphotomaster.apikeys`). The environment-only approach broke for any
+`com.briansmithphotos.macphotomaster.apikeys` — an opaque lookup key deliberately left at the app's
+pre-2026-07 bundle identifier so already-saved keys stay reachable; nothing derives it from the
+bundle ID at runtime). The environment-only approach broke for any
 GUI-launched process — Xcode's Run button, Finder, and Dock all inherit `launchd`'s environment,
 never a shell's `.zshrc` exports — so relying solely on it meant the packaged `.app` silently lost
 both keys regardless of what was exported in a terminal. `SettingsView`'s "API Keys" section reads/

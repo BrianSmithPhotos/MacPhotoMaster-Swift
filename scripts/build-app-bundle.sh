@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP_NAME="MacPhotoMaster"
-BUNDLE_ID="com.briansmithphotos.macphotomaster"
+BUNDLE_ID="photos.briansmith.macphotomaster"
 ICON_SOURCE="icons/purplegreenswallow1024x1024.png"
 DERIVED_DATA_DIR=".build/xcodebuild-release"
 BUILD_DIR="$DERIVED_DATA_DIR/Build/Products/Release"
@@ -95,10 +95,18 @@ chmod -R u+w "$APP_BUNDLE"
 # everything before signing.
 xattr -cr "$APP_BUNDLE"
 
-# Ad-hoc signing (no Developer ID) — enough for a stable identity across
-# rebuilds on this machine so privacy grants (Files and Folders, etc.) stick;
-# not suitable for distribution to other machines/Gatekeeper.
-codesign --force --deep --sign - "$APP_BUNDLE"
+# Signed with a certificate-backed identity rather than ad-hoc, so privacy
+# grants survive a rebuild. TCC keys its grants to the code signature, and an
+# ad-hoc signature is just the binary's own hash — it changes every time the
+# binary does, so macOS sees a brand-new app on each rebuild and silently stops
+# applying anything previously granted. That churn is what pushes you toward
+# Full Disk Access; a stable signature is what lets the narrow grants the app
+# actually needs (removable volumes for the SD card, CloudStorage for
+# Timeline.json) stick instead. Still a development identity, so it's for this
+# machine, not for distribution. Override for a machine without the
+# certificate; `-` restores ad-hoc signing.
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-Apple Development: BRIAN SMITH (M8V275SX93)}"
+codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_BUNDLE"
 
 echo "Built $APP_BUNDLE"
 echo "Drag it into /Applications (or straight onto the Dock) to pin it."

@@ -28,6 +28,39 @@ certificate; `CODESIGN_IDENTITY=-` restores ad-hoc signing. Still a development 
 running on this machine, not for distributing to others or passing Gatekeeper's `spctl` assessment
 on a machine where it'd carry a quarantine attribute.
 
+## backfill-standard-metadata.sh
+
+Backfills two standard metadata fields into already-organized library photos that
+were processed before the app learned to write them, so old files match what a
+fresh Process & Move now produces:
+
+1. **Focus distance** — copies `Olympus:FocusDistance` (a MakerNote only exiftool
+   and this app read) into `EXIF:SubjectDistance` + `XMP-exif:SubjectDistance`, the
+   standard fields Lightroom / Photo Mechanic / DxO display. Blank, `inf`
+   (infinity) and `0` readings are skipped, matching the app's own rule.
+2. **Alt text** — copies the existing caption (`XMP-dc:Description`, or
+   `IPTC:Caption-Abstract`) into `XMP-iptcCore:AltTextAccessibility`.
+
+Each pass only fills a gap — a file that already has the destination tag is left
+untouched — so it's safe to re-run and never overwrites app-written or hand-edited
+values.
+
+```
+scripts/backfill-standard-metadata.sh <directory>              # dry run: reports only
+scripts/backfill-standard-metadata.sh --apply <directory>      # perform the writes
+scripts/backfill-standard-metadata.sh --apply --year 2026 <directory>
+```
+
+Dry run is the default and writes nothing — it lists what each pass would change.
+`--year YYYY` filters by `DateTimeOriginal` (the `<M Month>/<DD>/` library folders
+carry no year), useful for limiting a run to one season's shots. Recurses across
+`.orf`/`.jpg`/`.jpeg`.
+
+**Warning:** `--apply` uses `exiftool -overwrite_original` — no per-file backup.
+It rewrites metadata only (image data is never touched), but run it against a
+library you have a normal backup of (Time Machine etc.), and use the dry run first
+to confirm the scope.
+
 ## strip-app-metadata.sh
 
 Restores a folder of photos (typically a real SD card's DCIM folder) to a

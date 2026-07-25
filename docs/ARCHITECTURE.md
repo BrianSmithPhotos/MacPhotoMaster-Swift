@@ -363,9 +363,9 @@ propagate there), so the failure path is deliberately loud now rather than a sil
 
 `APIKeyStore` resolves both `EBIRD_API_KEY` and `OPENROUTER_API_KEY` from the process environment
 first, then falls back to the macOS Keychain (`kSecClassGenericPassword`, service
-`com.briansmithphotos.macphotomaster.apikeys` — an opaque lookup key deliberately left at the app's
-pre-2026-07 bundle identifier so already-saved keys stay reachable; nothing derives it from the
-bundle ID at runtime). The environment-only approach broke for any
+`photos.briansmith.macphotomaster.apikeys`, accounts `EBIRD_API_KEY`/`OPENROUTER_API_KEY` — opaque
+`kSecAttrService`/`kSecAttrAccount` lookup keys, nothing derives them from the bundle ID at runtime).
+The environment-only approach broke for any
 GUI-launched process — Xcode's Run button, Finder, and Dock all inherit `launchd`'s environment,
 never a shell's `.zshrc` exports — so relying solely on it meant the packaged `.app` silently lost
 both keys regardless of what was exported in a terminal. `SettingsView`'s "API Keys" section reads/
@@ -375,6 +375,18 @@ the field in that case would silently have no effect. Keychain was chosen over `
 because a `UserDefaults`-backed secret is a cleartext plist under `~/Library/Preferences`, not
 appropriate for API keys — this is a deliberate exception to this doc's general preference for
 storing app state in `UserDefaults`/GRDB rather than the Keychain.
+
+The `service` string was `com.briansmithphotos.*` (the app's never-owned pre-2026-07 bundle domain)
+until 2026-07-24, when it was realigned to the current `photos.briansmith.*` bundle ID during a
+deliberate keychain reset — the name shown in the macOS keychain access prompt is this `service`
+string, so the old value read as a mismatched app. Renaming a `kSecAttrService` key strands
+already-saved items (nothing migrates them), so it was only safe to change while the reset was
+already forcing the keys to be re-entered. That reset also cured a recurring "wants to use your
+confidential information" prompt: the login keychain's default per-item ACL is pinned to the specific
+signed app that *created* the item (unlike TCC grants, which key on the stable designated
+requirement and so survive rebuilds under the cert-backed signing), so keys created under an earlier
+signing context re-prompt forever; deleting them and re-saving from the current cert-signed bundle
+makes that bundle the owner, and an owner reads its own items without any prompt.
 
 ## File safety
 

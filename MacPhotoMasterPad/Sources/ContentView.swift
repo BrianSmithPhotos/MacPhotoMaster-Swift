@@ -6,9 +6,19 @@ import MacPhotoMasterCore
 /// first working slice of the real iPad UI (source browsing, single- and grid-multi-select,
 /// preview, read-only metadata); editing and Save/Process are deliberately not here yet.
 struct ContentView: View {
+    /// The one modal sheet this screen can show at a time. Driven through a single `.sheet(item:)`
+    /// rather than two chained `.sheet(isPresented:)` modifiers: stacking two sheet presentations on
+    /// one view leaves a phantom `PresentationHostingController` registered as "presented" after the
+    /// visible sheet is dismissed, which then blocks the sidebar's Open Folder `.fileImporter` (also a
+    /// UIKit presentation on this same hosting controller) with an "already presenting" error.
+    private enum ActiveSheet: Identifiable {
+        case metadata
+        case settings
+        var id: Self { self }
+    }
+
     @StateObject private var browser = PhotoBrowserViewModel()
-    @State private var isMetadataPresented = false
-    @State private var isSettingsPresented = false
+    @State private var activeSheet: ActiveSheet?
 
     var body: some View {
         NavigationSplitView {
@@ -18,7 +28,7 @@ struct ContentView: View {
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            isMetadataPresented = true
+                            activeSheet = .metadata
                         } label: {
                             Label("Metadata", systemImage: "info.circle")
                         }
@@ -26,7 +36,7 @@ struct ContentView: View {
                     }
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            isSettingsPresented = true
+                            activeSheet = .settings
                         } label: {
                             Label("Settings", systemImage: "gearshape")
                         }
@@ -34,13 +44,15 @@ struct ContentView: View {
                 }
         }
         .navigationSplitViewStyle(.balanced)
-        .sheet(isPresented: $isMetadataPresented) {
-            MetadataPanelView(viewModel: browser)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $isSettingsPresented) {
-            SettingsView(viewModel: browser)
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .metadata:
+                MetadataPanelView(viewModel: browser)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            case .settings:
+                SettingsView(viewModel: browser)
+            }
         }
     }
 }

@@ -46,7 +46,7 @@ final class ExifToolClientWriteTests: XCTestCase {
 
         try await client.write(
             title: "My Title", description: "My description", keywords: ["mountain", "sunrise"],
-            gps: gps, to: url)
+            gps: gps, subjectDistance: 16.03, to: url)
 
         let metadata = try await client.readMetadata(at: url)
         XCTAssertEqual(metadata["IPTC:ObjectName"] as? String, "My Title")
@@ -61,6 +61,11 @@ final class ExifToolClientWriteTests: XCTestCase {
         // below cover the Ref tags directly.
         XCTAssertEqual(metadata["GPS:GPSLatitudeRef"] as? String, "North")
         XCTAssertEqual(metadata["GPS:GPSLongitudeRef"] as? String, "West")
+        // Focus distance lands in the standard EXIF/XMP subject-distance tags other apps read, not
+        // just the Olympus MakerNote this app pulls it from. Read output is `-G1`-grouped (so the
+        // EXIF tag surfaces under `ExifIFD:`) and human-formatted (trailing "m").
+        XCTAssertEqual(metadata["ExifIFD:SubjectDistance"] as? String, "16.03 m")
+        XCTAssertEqual(metadata["XMP-exif:SubjectDistance"] as? String, "16.03 m")
     }
 
     func testSingleFileWriteCleansUpBackupOnSuccess() async throws {

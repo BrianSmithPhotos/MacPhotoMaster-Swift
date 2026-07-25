@@ -67,12 +67,16 @@ final class NativeMetadataWriterTests: XCTestCase {
 
         try await writer.write(
             title: "My Title", description: "My description", keywords: ["mountain", "sunrise"],
-            gps: GPSCoordinate(latitude: 45.5, longitude: -122.6, altitude: 30), to: url)
+            gps: GPSCoordinate(latitude: 45.5, longitude: -122.6, altitude: 30),
+            subjectDistance: 16.03, to: url)
 
         let fields = try await readSidecarFields(url)
         XCTAssertEqual(fields["XMP-dc:Title"] as? String, "My Title")
         XCTAssertEqual(fields["XMP-dc:Description"] as? String, "My description")
         XCTAssertEqual(fields["XMP-dc:Subject"] as? [String], ["mountain", "sunrise"])
+        // Focus distance lands in the standard exif namespace so a later fold-in (or any XMP-aware
+        // reader) picks it up. `-G1` read output is human-formatted (trailing "m").
+        XCTAssertEqual(fields["XMP-exif:SubjectDistance"] as? String, "16.03 m")
     }
 
     /// The bug fixed during prototyping: XMP GPS tags encode hemisphere via sign, not a separate

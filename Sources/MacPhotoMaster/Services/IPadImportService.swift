@@ -57,12 +57,12 @@ struct IPadImportService {
         let assets = try await assetLoader.loadAssets(inTree: exportRoot)
         guard !assets.isEmpty else { return IPadImportSummary() }
 
-        let artFilterTokens = await artFilterTokens(for: assets)
+        let makerNotes = await makerNoteFields(for: assets)
 
         var summary = IPadImportSummary()
         for asset in assets {
             let outcome = await importOne(
-                asset, artFilterToken: artFilterTokens[asset.url] ?? "", libraryRoot: libraryRoot)
+                asset, makerNotes: makerNotes[asset.url] ?? MakerNoteFields(), libraryRoot: libraryRoot)
             summary.outcomes.append(outcome)
             onProgress(summary.outcomes.count, assets.count, outcome)
         }
@@ -71,18 +71,29 @@ struct IPadImportService {
         return summary
     }
 
+    /// The two maker-note fields only `exiftool` can recover on the Mac — the iPad's ImageIO reader
+    /// sees neither. `artFilterToken` drives the filename/keywords/description; `focusDistance` is the
+    /// raw `Olympus:FocusDistance` display string (e.g. `"16.03 m"`), later parsed into the standard
+    /// `EXIF:SubjectDistance` on write.
+    private struct MakerNoteFields {
+        var artFilterToken: String = ""
+        var focusDistance: String = ""
+    }
+
     /// One batched `exiftool` invocation for the whole tree rather than one launch per file — the
     /// same reasoning as `SourceBrowserViewModel.loadArtFilterTokens(for:)`, where per-invocation
     /// Perl startup dominates the actual read.
-    private func artFilterTokens(for assets: [PhotoAsset]) async -> [URL: String] {
+    private func makerNoteFields(for assets: [PhotoAsset]) async -> [URL: MakerNoteFields] {
         let results = (try? await exifTool.readMetadata(at: assets.map(\.url))) ?? [:]
         return results.compactMapValues { result in
             guard case .success(let metadata) = result else { return nil }
-            return ArtFilterTokenParsing.token(from: metadata)
+            return MakerNoteFields(
+                artFilterToken: ArtFilterTokenParsing.token(from: metadata),
+                focusDistance: (metadata["Olympus:FocusDistance"] as? String) ?? "")
         }
     }
 
-    private func importOne(_ asset: PhotoAsset, artFilterToken: String, libraryRoot: URL) async
+    private func importOne(_ asset: PhotoAsset, makerNotes: MakerNoteFields, libraryRoot: URL) async
         -> IPadImportOutcome
     {
         let sourceName = asset.url.lastPathComponent
@@ -111,7 +122,10 @@ struct IPadImportService {
         var asset = asset
         asset.descriptionText = draft.description
         asset.keywords = draft.keywords
-        asset.artFilterToken = artFilterToken
+        asset.artFilterToken = makerNotes.artFilterToken
+        // Only readable here (exiftool sees the Olympus MakerNote the iPad's ImageIO reader can't);
+        // ProcessMoveService parses it into the standard EXIF:SubjectDistance on the destination copy.
+        asset.focusDistance = makerNotes.focusDistance
         // The pulled file carries no GPS of its own — nothing was ever written into it — so the
         // sidecar is the only source for a Timeline-derived fix.
         if let gps = draft.gps {
@@ -126,7 +140,7 @@ struct IPadImportService {
             cameraModel: asset.cameraModel,
             lensModel: asset.lensModel,
             batch: parsedName.batch,
-            artFilterToken: artFilterToken)
+            artFilterToken: makerNotes.artFilterToken)
 
         do {
             let result = try await processMoveService.processAndCopy(

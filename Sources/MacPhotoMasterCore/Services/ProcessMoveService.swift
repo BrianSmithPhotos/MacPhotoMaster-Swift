@@ -65,6 +65,7 @@ public struct ProcessMoveService {
         let keywords = AutoMetadataRules.keywordsWithAutoTokens(
             asset.keywords, artFilterToken: asset.artFilterToken, cameraToken: asset.cameraModel,
             lensToken: asset.lensModel, soocToken: soocToken)
+        let subjectDistance = MetadataWriteFieldRules.subjectDistanceMeters(from: asset.focusDistance)
 
         do {
             try Self.verifyCopy(source: asset.url, destination: destinationURL)
@@ -73,6 +74,7 @@ public struct ProcessMoveService {
                 description: description,
                 keywords: keywords,
                 gps: Self.gpsCoordinate(for: asset),
+                subjectDistance: subjectDistance,
                 to: destinationURL)
         } catch {
             Self.discardIncompleteCopy(at: destinationURL)

@@ -30,11 +30,14 @@ public enum NativeMetadataWriteError: Error {
 public struct NativeMetadataWriter: MetadataWriter {
     public init() {}
 
-    public func write(title: String?, description: String, keywords: [String], gps: GPSCoordinate?, to url: URL)
-        async throws
-    {
+    public func write(
+        title: String?, description: String, keywords: [String], gps: GPSCoordinate?,
+        subjectDistance: Double? = nil, to url: URL
+    ) async throws {
         try MetadataWriteFieldRules.validate(gps: gps)
-        let data = try Self.xmpData(title: title, description: description, keywords: keywords, gps: gps)
+        let data = try Self.xmpData(
+            title: title, description: description, keywords: keywords, gps: gps,
+            subjectDistance: subjectDistance)
         try data.write(to: Self.sidecarURL(for: url), options: .atomic)
     }
 
@@ -61,7 +64,8 @@ public struct NativeMetadataWriter: MetadataWriter {
     }
 
     private static func xmpData(
-        title: String?, description: String, keywords: [String], gps: GPSCoordinate?
+        title: String?, description: String, keywords: [String], gps: GPSCoordinate?,
+        subjectDistance: Double?
     ) throws -> Data {
         let metadata = CGImageMetadataCreateMutable()
 
@@ -89,6 +93,20 @@ public struct NativeMetadataWriter: MetadataWriter {
                     metadata, kCGImagePropertyGPSDictionary, kCGImagePropertyGPSAltitude,
                     altitude as CFNumber)
             }
+        }
+
+        // Standard exif namespace so a fold-in or any XMP-aware viewer sees focus distance (metres),
+        // not just the Olympus MakerNote this app reads for display. In practice this is nil on the
+        // iPad (no MakerNote reader there); it's populated when the value is available, e.g. a
+        // Mac-side write.
+        if let subjectDistance {
+            // Swift's shortest round-tripping string ("16.03"), not the raw `CFNumber`: ImageIO
+            // serializes a double at full float precision ("16.030000000000001"), which would then
+            // fold into the real file that way. XMP is text anyway, so a clean string reads back
+            // identically without the noise.
+            CGImageMetadataSetValueMatchingImageProperty(
+                metadata, kCGImagePropertyExifDictionary, kCGImagePropertyExifSubjectDistance,
+                String(subjectDistance) as CFString)
         }
 
         guard let xmpData = CGImageMetadataCreateXMPData(metadata, nil) else {

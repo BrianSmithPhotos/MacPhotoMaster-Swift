@@ -98,12 +98,21 @@ deterministically, and copy files into local storage.
   - GPS → `GPSLatitude`/`GPSLatitudeRef`, `GPSLongitude`/`GPSLongitudeRef`, optional
     `GPSAltitude`/`GPSAltitudeRef` — Ref tags derived from the value's sign so southern/western
     coordinates read back with the correct hemisphere.
+  - Focus distance → `EXIF:SubjectDistance` (metres) + `XMP-exif:SubjectDistance`. The app reads
+    focus distance for display from the Olympus `FocusDistance` MakerNote, which other apps
+    (Lightroom, Photo Mechanic, DxO) don't surface; copying it into the standard SubjectDistance tag
+    on write makes it visible downstream. Per-file-unique like Title, so it rides the single-file
+    write path only (never the batched overload), and is written only when the MakerNote yields a
+    usable finite positive distance — a blank field, an "inf" reading, or `0` writes nothing.
 - **iPad divergence:** no `exiftool`, so there's no in-place write at all — `NativeMetadataWriter`
   always writes a `.xmp` sidecar instead (see its doc comment), and on iPad that sidecar is staged in
   local app storage, never on the camera/card itself, keyed by original filename + size rather than
   path. The sidecar only reaches the original file's actual tags later, via
   `ExifToolClient.foldInSidecarIfPresent(for:)` once the file (copied at Process & Move, below) is on
   a Mac. See docs/ARCHITECTURE.md "iPad file access & sidecar staging" for the reasoning.
+  Focus distance is a further casualty of the missing MakerNote reader: the iPad can't read it at
+  all, so nothing lands in `SubjectDistance` there — it's recovered and written during the Mac-side
+  import (`IPadImportService`), which reads the Olympus MakerNote via exiftool.
 
 ## 4. Rename
 

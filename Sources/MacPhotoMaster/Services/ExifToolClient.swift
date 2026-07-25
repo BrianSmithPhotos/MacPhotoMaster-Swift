@@ -83,9 +83,14 @@ struct ExifToolClient: MetadataWriter {
     /// Relies on exiftool's own automatic `<path>_original` backup rather than `-overwrite_original`:
     /// on success the backup is deleted; on failure the backup is restored over the (possibly
     /// half-written) file so the write is all-or-nothing from the caller's perspective.
-    func write(title: String?, description: String, keywords: [String], gps: GPSCoordinate?, to url: URL) async throws {
+    func write(
+        title: String?, description: String, keywords: [String], gps: GPSCoordinate?,
+        subjectDistance: Double? = nil, to url: URL
+    ) async throws {
         try MetadataWriteFieldRules.validate(gps: gps)
-        let arguments = Self.writeArguments(title: title, description: description, keywords: keywords, gps: gps) + [url.path]
+        let arguments = Self.writeArguments(
+            title: title, description: description, keywords: keywords, gps: gps,
+            subjectDistance: subjectDistance) + [url.path]
         do {
             _ = try await run(arguments: arguments, timeoutSeconds: Self.singleFileTimeout)
             cleanupBackup(for: url)
@@ -109,7 +114,9 @@ struct ExifToolClient: MetadataWriter {
         try MetadataWriteFieldRules.validate(gps: gps)
         guard !urls.isEmpty else { return [:] }
 
-        let arguments = Self.writeArguments(title: nil, description: description, keywords: keywords, gps: gps) + urls.map(\.path)
+        let arguments = Self.writeArguments(
+            title: nil, description: description, keywords: keywords, gps: gps, subjectDistance: nil)
+            + urls.map(\.path)
         do {
             _ = try await run(arguments: arguments, timeoutSeconds: Self.batchTimeoutPerFile * Double(urls.count))
             for url in urls { cleanupBackup(for: url) }
@@ -138,7 +145,10 @@ struct ExifToolClient: MetadataWriter {
     /// (blank `-IPTC:Keywords=`/`-XMP-dc:Subject=`) before being rewritten one `-tag=value` pair at
     /// a time — the idempotent way to "replace the keyword list" with exiftool, since its `+=`
     /// append operator would duplicate keywords on every re-save.
-    private static func writeArguments(title: String?, description: String, keywords: [String], gps: GPSCoordinate?) -> [String] {
+    private static func writeArguments(
+        title: String?, description: String, keywords: [String], gps: GPSCoordinate?,
+        subjectDistance: Double?
+    ) -> [String] {
         var arguments: [String] = []
         if let title {
             arguments.append("-IPTC:ObjectName=\(title)")
@@ -176,6 +186,14 @@ struct ExifToolClient: MetadataWriter {
                 // byte and appears to have the same latent bug).
                 arguments.append("-GPSAltitudeRef=\(altitude >= 0 ? "Above Sea Level" : "Below Sea Level")")
             }
+        }
+
+        // Standard EXIF/XMP home for focus distance (metres), so viewers that don't parse Olympus
+        // MakerNotes still show it — the maker-note tag this app reads for display is where OM bodies
+        // record it, but they leave EXIF:SubjectDistance itself empty.
+        if let subjectDistance {
+            arguments.append("-EXIF:SubjectDistance=\(subjectDistance)")
+            arguments.append("-XMP-exif:SubjectDistance=\(subjectDistance)")
         }
         return arguments
     }

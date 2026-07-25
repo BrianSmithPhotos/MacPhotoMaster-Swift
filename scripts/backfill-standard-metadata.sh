@@ -15,10 +15,17 @@
 # or 0 are skipped, matching the app's own rule.
 #
 # Usage:
-#   scripts/backfill-standard-metadata.sh [--apply] [--year YYYY] <directory>
+#   scripts/backfill-standard-metadata.sh [--apply] [--force-focus] [--year YYYY] <directory>
 #
 #   (no --apply)   Dry run: lists what each pass WOULD change, writes nothing.
 #   --apply        Perform the writes.
+#   --force-focus  Write EXIF:SubjectDistance even when the file already has one.
+#                  By default the focus pass skips a file that already carries a
+#                  SubjectDistance, so it never overwrites another tool's value.
+#                  DxO PhotoLab writes its own SubjectDistance on export (a generic
+#                  "far" figure), which that default would leave in place; this flag
+#                  overrides it with the camera's own Olympus:FocusDistance whenever
+#                  that reads as a usable finite distance (still skipping blank/inf/0).
 #   --year YYYY    Restrict to files whose DateTimeOriginal is that year
 #                  (the library folders carry no year, so this filters by capture
 #                  date; omit to process every file under <directory>).
@@ -30,29 +37,37 @@
 set -euo pipefail
 
 apply=0
+force_focus=0
 year=""
 target=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply) apply=1; shift ;;
+    --force-focus) force_focus=1; shift ;;
     --year) year="${2:?--year needs a value, e.g. --year 2026}"; shift 2 ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR>1 && /^set -euo/{exit} NR>1{sub(/^# ?/,""); print}' "$0"; exit 0 ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *) target="$1"; shift ;;
   esac
 done
 
-: "${target:?usage: backfill-standard-metadata.sh [--apply] [--year YYYY] <directory>}"
+: "${target:?usage: backfill-standard-metadata.sh [--apply] [--force-focus] [--year YYYY] <directory>}"
 
 common=(-r -ext orf -ext jpg -ext jpeg)
 if [ -n "$year" ]; then
   common+=(-if "\$DateTimeOriginal =~ /^$year/")
 fi
 
-# Only touch files that don't already carry the destination tag, so a re-run is a
-# no-op and app-written values are never overwritten.
-focus_if='not $ExifIFD:SubjectDistance and $Olympus:FocusDistance and $Olympus:FocusDistance ne "inf" and ($Olympus:FocusDistance#) > 0'
+# The focus value must be a usable finite distance regardless of mode (blank/inf/0
+# are meaningless, matching the app's rule).
+focus_if='$Olympus:FocusDistance and $Olympus:FocusDistance ne "inf" and ($Olympus:FocusDistance#) > 0'
+# Default: also skip files that already carry a SubjectDistance, so a re-run is a
+# no-op and another tool's value is never overwritten. --force-focus drops that
+# guard so the camera value wins.
+if [ "$force_focus" -eq 0 ]; then
+  focus_if="not \$ExifIFD:SubjectDistance and $focus_if"
+fi
 alt_if='not $XMP:AltTextAccessibility and ($XMP-dc:Description or $IPTC:Caption-Abstract)'
 
 if [ "$apply" -eq 0 ]; then

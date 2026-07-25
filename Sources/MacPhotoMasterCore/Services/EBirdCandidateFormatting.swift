@@ -75,6 +75,25 @@ public enum EBirdCandidateFormatting {
         return map
     }
 
+    /// Post-hoc validation of a guided provider's typed `species` guess against the photo's eBird
+    /// region: returns the matching Latin binomial when `species`' common name is a real species
+    /// recorded in that region, else `nil`. This is the guardrail the up-front candidate list used to
+    /// provide — `FoundationModelsProvider` can't fit that list in its small context window, so it
+    /// guesses species from free recall and readily emits an out-of-region (or outright non-existent,
+    /// e.g. "American Goldeneye") name. Checking the guess against authoritative regional data *after*
+    /// generation lets the caller keep only the ones that hold up, at zero prompt-token cost.
+    ///
+    /// Match is case-insensitive on the exact common name — deliberately stricter than
+    /// `attachScientificNames`' whole-word/plural search, because here a false accept promotes a
+    /// hallucinated ID into trusted metadata, so an exact regional name is the bar.
+    public static func regionalScientificName(
+        forSpecies species: String, scientificNameByCommonName: [String: String]
+    ) -> String? {
+        let key = species.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return nil }
+        return scientificNameByCommonName[key]
+    }
+
     /// Attaches Latin binomials to whatever species the model actually identified, deterministically.
     /// Searches the model's `description` and the user's `trustedKeywords` (their pre-existing,
     /// hand-confirmed keywords) for region-species common names — as a **whole word**,
@@ -86,19 +105,22 @@ public enum EBirdCandidateFormatting {
     /// given a long candidate list will sometimes drop a list species into its keywords that isn't the
     /// actual subject (an unidentified heron once picked up "Acorn Woodpecker"), and certifying that
     /// with a binomial would launder a hallucination into authoritative-looking metadata. Only the
-    /// description (the model's stated ID) and the user's trusted keywords drive matching.
+    /// description (the model's stated ID), the optional typed `species` field (a structured provider's
+    /// stated ID — see `FoundationModelsProvider`; empty for the others), and the user's trusted
+    /// keywords drive matching. The typed `species` is grouped with the description rather than the
+    /// fresh keywords precisely because it is a committed identification, not an incidental term.
     ///
     /// Whole-word matching is likewise load-bearing: substring matching once inserted a wrong binomial
     /// (a short common name hiding inside other prose). If the model used a descriptive phrase ("white
     /// egret") rather than an exact common name ("Great Egret"), nothing matches — a safe miss, never a
     /// wrong hit.
     public static func attachScientificNames(
-        description: String, keywords: [String], trustedKeywords: [String],
+        description: String, keywords: [String], trustedKeywords: [String], species: String = "",
         scientificNameByCommonName: [String: String]
     ) -> (description: String, keywords: [String]) {
         guard !scientificNameByCommonName.isEmpty else { return (description, keywords) }
         let commonNamesLongestFirst = scientificNameByCommonName.keys.sorted { $0.count > $1.count }
-        let searchText = ([description] + trustedKeywords).joined(separator: "\n")
+        let searchText = ([description, species] + trustedKeywords).joined(separator: "\n")
 
         var newDescription = description
         var newKeywords = keywords

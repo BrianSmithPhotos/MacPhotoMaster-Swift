@@ -254,6 +254,27 @@ final class EBirdCandidateFormattingTests: XCTestCase {
         XCTAssertEqual(result.description, original)
     }
 
+    func testAttachMatchesTypedSpeciesFieldNotInDescription() {
+        // A guided provider (FoundationModelsProvider) hands the committed ID via the typed `species`
+        // field, which may not appear in the description prose ("a large heron"). It's trusted like
+        // the description, so its binomial is attached as a keyword.
+        let result = EBirdCandidateFormatting.attachScientificNames(
+            description: "A large heron stalks the shallows.", keywords: ["heron"], trustedKeywords: [],
+            species: "Great Blue Heron", scientificNameByCommonName: Self.heronMap)
+
+        XCTAssertTrue(result.keywords.contains("Ardea herodias"))
+    }
+
+    func testAttachEmptySpeciesChangesNothing() {
+        // The text-only providers leave species empty; behavior must be identical to omitting it.
+        let result = EBirdCandidateFormatting.attachScientificNames(
+            description: "A Great Blue Heron by the pond.", keywords: ["pond"], trustedKeywords: [],
+            species: "", scientificNameByCommonName: Self.heronMap)
+
+        XCTAssertEqual(result.description, "A Great Blue Heron (Ardea herodias) by the pond.")
+        XCTAssertTrue(result.keywords.contains("Ardea herodias"))
+    }
+
     func testAttachNoOpWhenNoCommonNameFound() {
         let result = EBirdCandidateFormatting.attachScientificNames(
             description: "A wooden bridge over a river.", keywords: ["bridge"], trustedKeywords: [],
@@ -261,5 +282,36 @@ final class EBirdCandidateFormattingTests: XCTestCase {
 
         XCTAssertEqual(result.description, "A wooden bridge over a river.")
         XCTAssertEqual(result.keywords, ["bridge"])
+    }
+
+    func testRegionalScientificNameAcceptsRegionalSpecies() {
+        // A guided provider's guess that IS a real species in the region validates, returning its
+        // binomial — case-insensitively on the exact common name.
+        XCTAssertEqual(
+            EBirdCandidateFormatting.regionalScientificName(
+                forSpecies: "great blue heron", scientificNameByCommonName: Self.heronMap),
+            "Ardea herodias")
+    }
+
+    func testRegionalScientificNameRejectsNonRegionalSpecies() {
+        // The failure the post-hoc validation exists to catch: FoundationModelsProvider names a species
+        // ("American Goldeneye") absent from the region list, so it must not validate.
+        XCTAssertNil(
+            EBirdCandidateFormatting.regionalScientificName(
+                forSpecies: "American Goldeneye", scientificNameByCommonName: Self.heronMap))
+    }
+
+    func testRegionalScientificNameRejectsPartialCommonName() {
+        // Stricter than attachScientificNames' whole-word search: a partial name is not an exact match,
+        // so it does not validate — a false accept here would promote a hallucinated ID into metadata.
+        XCTAssertNil(
+            EBirdCandidateFormatting.regionalScientificName(
+                forSpecies: "Blue Heron", scientificNameByCommonName: Self.heronMap))
+    }
+
+    func testRegionalScientificNameEmptySpeciesIsNil() {
+        XCTAssertNil(
+            EBirdCandidateFormatting.regionalScientificName(
+                forSpecies: "   ", scientificNameByCommonName: Self.heronMap))
     }
 }

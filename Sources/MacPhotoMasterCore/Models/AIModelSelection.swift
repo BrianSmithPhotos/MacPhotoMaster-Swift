@@ -5,6 +5,11 @@ public enum AIProviderID: String {
     case ollama
     case openRouter = "openrouter"
     case mlx
+    /// Apple's on-device Foundation Models with `@Generable` guided generation — one system model,
+    /// so the model-name segment is nominal (`foundation:apple`). macOS/iOS 26 for text, but image
+    /// input (which this app always sends) needs 26+... in practice 27, gated at runtime by
+    /// `FoundationModelsProvider`. See `FoundationModelsProvider`.
+    case foundation
 }
 
 /// Parses the `"<provider>:<model>"` convention `SourceBrowserViewModel.aiModelText` uses (e.g.
@@ -28,6 +33,7 @@ public struct AIModelSelection {
     /// freely editable for any model not in this list.
     public static let presets: [String] = [
         "mlx:mlx-community/gemma-4-31b-it-8bit",
+        "foundation:apple",
         "ollama:qwen3.6:35b",
         "openrouter:google/gemini-3.1-flash-lite-image",
         "openrouter:google/gemini-2.5-flash",

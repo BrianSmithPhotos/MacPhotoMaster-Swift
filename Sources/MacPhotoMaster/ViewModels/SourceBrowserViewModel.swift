@@ -210,6 +210,7 @@ final class SourceBrowserViewModel: ObservableObject {
     private let ollamaProvider: AIProvider = OllamaProvider()
     private let openRouterProvider: AIProvider = OpenRouterProvider()
     private let mlxProvider: AIProvider = MLXNativeProvider()
+    private let foundationProvider: AIProvider = FoundationModelsProvider()
     private let aiSuggestionService = AISuggestionService()
     private static let ebirdLogger = Logger(subsystem: "MacPhotoMaster", category: "EBirdSpecies")
 
@@ -222,6 +223,10 @@ final class SourceBrowserViewModel: ObservableObject {
     /// alongside it since both come from the same GPS fix. Not part of docs/SPEC.md or the reference
     /// app — added to improve wildlife identification accuracy beyond a single generic prompt.
     private var birdCandidateSpeciesByRepresentativeID: [PhotoAsset.ID: String] = [:]
+    /// Region common-name -> Latin binomial, mirroring the iPad. Used to post-hoc-validate the
+    /// `foundation:` provider's typed species guess (see `EBirdCandidateFormatting.regionalScientificName`)
+    /// and to attach binomials, since that provider is sent no candidate list to work from.
+    private var birdScientificNamesByRepresentativeID: [PhotoAsset.ID: [String: String]] = [:]
     /// Guards against re-querying Nominatim for the same capture set more than once per session —
     /// mirrors the reference app's `_geocode_auto_applied_paths`.
     private var geocodeAppliedRepresentativeIDs: Set<PhotoAsset.ID> = []
@@ -987,6 +992,8 @@ final class SourceBrowserViewModel: ObservableObject {
             return
         }
         birdCandidateSpeciesByRepresentativeID[representativeID] = candidateList
+        birdScientificNamesByRepresentativeID[representativeID] =
+            EBirdCandidateFormatting.scientificNameByCommonName(speciesCodes: codes, taxonomy: taxonomy)
         Self.ebirdLogger.log(
             "Bird candidates: region=\(regionCode, privacy: .public) speciesCodes=\(codes.count, privacy: .public) matched=\(taxonomy.count, privacy: .public)"
         )
@@ -1032,7 +1039,7 @@ final class SourceBrowserViewModel: ObservableObject {
         guard !isSuggestingAI, let id = selectedAssetID else { return }
         guard let selection = AIModelSelection.parse(aiModelText) else {
             aiStatusMessage =
-                "Invalid AI model — expected \"ollama:<model>\", \"openrouter:<model>\", or \"mlx:<model>\""
+                "Invalid AI model — expected \"ollama:<model>\", \"openrouter:<model>\", \"mlx:<model>\", or \"foundation:apple\""
             return
         }
         let provider: AIProvider
@@ -1040,6 +1047,7 @@ final class SourceBrowserViewModel: ObservableObject {
         case .ollama: provider = ollamaProvider
         case .openRouter: provider = openRouterProvider
         case .mlx: provider = mlxProvider
+        case .foundation: provider = foundationProvider
         }
 
         let targetAssets: [PhotoAsset]
@@ -1065,8 +1073,13 @@ final class SourceBrowserViewModel: ObservableObject {
             let sourceAsset = AISuggestionSourcePicker.pickSourceAsset(from: sourceSetMembers)
         else { return }
         let locationContext = sourceRepresentativeID.flatMap { locationContextByRepresentativeID[$0] } ?? ""
+        // Foundation Models has a small (~4k-token) context window that the image already eats a large
+        // share of, so the up-to-500-species eBird candidate list overflows it ("Exceeded model
+        // context window size"). Skip the list for that provider: its typed `species` field plus the
+        // deterministic `attachScientificNames` lookup already deliver region binomials, and the small
+        // location-context line (kept below) still biases identification toward local species.
         let birdCandidateSpecies =
-            eBirdDisabledModels.contains(aiModelText)
+            selection.providerID == .foundation || eBirdDisabledModels.contains(aiModelText)
             ? ""
             : sourceRepresentativeID.flatMap { birdCandidateSpeciesByRepresentativeID[$0] } ?? ""
 
@@ -1074,7 +1087,11 @@ final class SourceBrowserViewModel: ObservableObject {
         aiStatusMessage = "Generating AI suggestions…"
         defer { isSuggestingAI = false }
         do {
-            let cgImage = try await NativeMetadataReader().extractPreviewAsync(at: sourceAsset.url)
+            // Cap the frame at 1024px for Foundation Models (same as the iPad) to keep the image's
+            // token cost within that small context window; the other Mac providers keep the full 2048.
+            let maxPixelSize = selection.providerID == .foundation ? 1024 : 2048
+            let cgImage = try await NativeMetadataReader().extractPreviewAsync(
+                at: sourceAsset.url, maxPixelSize: maxPixelSize)
             let subjectCrop: CGImage?
             if !subjectIsolationEnabled {
                 subjectCrop = nil
@@ -1091,13 +1108,43 @@ final class SourceBrowserViewModel: ObservableObject {
             guard selectedAssetID == id else { return }
             aiEvaluatedImage = evaluatedImage
             aiEvaluatedImageSourceName = sourceAsset.url.lastPathComponent
+            // Foundation Models uses `@Generable` guided generation, so it takes the `.guided` prompt
+            // (no "return JSON" framing, typed species field); every other Mac provider takes `.full`.
+            let promptProfile: PromptProfile = selection.providerID == .foundation ? .guided : .full
             let result = try await aiSuggestionService.suggest(
                 provider: provider, model: selection.modelName, image: evaluatedImage,
                 existingDescription: editableDescription, existingKeywords: editableKeywords,
-                locationContext: locationContext, birdCandidateSpecies: birdCandidateSpecies)
+                locationContext: locationContext, birdCandidateSpecies: birdCandidateSpecies,
+                promptProfile: promptProfile)
             guard selectedAssetID == id else { return }
-            editableDescription = result.description
-            editableKeywords = result.keywords.joined(separator: ", ")
+            var description = result.description
+            var keywords = result.keywords
+            if let scientificNames = sourceRepresentativeID.flatMap({ birdScientificNamesByRepresentativeID[$0] }) {
+                // Post-hoc-validate a guided provider's typed species guess against the photo's eBird
+                // region: `foundation:` is sent no candidate list (it won't fit its context window), so
+                // it guesses freely and often names an out-of-region or non-existent species ("American
+                // Goldeneye"). Trust it only when it's a real species in the region; a failed lookup
+                // yields "", so `attachScientificNames` still enriches any region species named in the
+                // description/trusted keywords, but the bogus typed guess is neither binomial-attached
+                // nor added as a keyword.
+                let validatedSpecies =
+                    EBirdCandidateFormatting.regionalScientificName(
+                        forSpecies: result.species, scientificNameByCommonName: scientificNames) != nil
+                    ? result.species : ""
+                let trustedKeywords = MetadataEditParsing.parseKeywords(editableKeywords)
+                let enriched = EBirdCandidateFormatting.attachScientificNames(
+                    description: description, keywords: keywords, trustedKeywords: trustedKeywords,
+                    species: validatedSpecies, scientificNameByCommonName: scientificNames)
+                description = enriched.description
+                keywords = enriched.keywords
+                if !validatedSpecies.isEmpty,
+                    !keywords.contains(where: { $0.caseInsensitiveCompare(validatedSpecies) == .orderedSame })
+                {
+                    keywords.insert(validatedSpecies, at: 0)
+                }
+            }
+            editableDescription = description
+            editableKeywords = keywords.joined(separator: ", ")
             // The timeout-retry crop (`AISuggestionService`'s separate fallback, unrelated to the
             // subject-isolation toggle) narrows the frame again, so the retry's own image is what
             // actually produced this result.

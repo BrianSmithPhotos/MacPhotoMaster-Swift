@@ -5,6 +5,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# The FoundationModelsProvider needs the macOS 27 SDK for Foundation Models image input, which only
+# ships in Xcode-beta right now — so the whole app is built with that toolchain (see CLAUDE.md
+# "Hardware & model notes"). Override DEVELOPER_DIR for a machine whose beta lives elsewhere.
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
+
 APP_NAME="MacPhotoMaster"
 BUNDLE_ID="photos.briansmith.macphotomaster"
 ICON_SOURCE="icons/purplegreenswallow1024x1024.png"

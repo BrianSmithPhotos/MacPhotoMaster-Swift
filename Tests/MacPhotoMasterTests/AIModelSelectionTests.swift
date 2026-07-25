@@ -34,6 +34,12 @@ final class AIModelSelectionTests: XCTestCase {
         XCTAssertNil(AIModelSelection.parse("ollama:"))
     }
 
+    func testParsesFoundationModelPreset() {
+        let selection = AIModelSelection.parse("foundation:apple")
+        XCTAssertEqual(selection?.providerID, .foundation)
+        XCTAssertEqual(selection?.modelName, "apple")
+    }
+
     func testAllPresetsParseSuccessfully() {
         for preset in AIModelSelection.presets {
             XCTAssertNotNil(AIModelSelection.parse(preset), "failed to parse preset: \(preset)")

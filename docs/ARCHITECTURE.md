@@ -317,15 +317,26 @@ rather than failing the whole parse; the result feeds `TimelineLocationCache.imp
 Mirror the reference app's split: a small `AIProvider` protocol (async chat/vision call, given an
 image + prompt, returning parsed suggestions) with concrete implementations per backend. Prompting
 and response-parsing logic lives in one shared place and stays backend-agnostic; adding a backend
-means adding one new type conforming to `AIProvider`. Three backends exist: `OllamaProvider` (local
-HTTP daemon), `OpenRouterProvider` (cloud HTTP), and `MLXNativeProvider` (native in-process
-inference via `mlx-swift-lm`, no server/daemon/Python involved — see `docs/MLX_PROVIDER.md`).
+means adding one new type conforming to `AIProvider`. Four backends exist: `OllamaProvider` (local
+HTTP daemon), `OpenRouterProvider` (cloud HTTP), `MLXNativeProvider` (native in-process
+inference via `mlx-swift-lm`, no server/daemon/Python involved — see `docs/MLX_PROVIDER.md`), and
+`FoundationModelsProvider` (Apple on-device Foundation Models via `@Generable` guided generation).
+
+`FoundationModelsProvider` is the one backend whose output shape is *guaranteed* rather than parsed
+hopefully: its `@Generable PhotoMetadata` schema returns a typed `{description, keywords, species}`
+value, which it serializes to JSON to cross the shared `chat -> String` seam unchanged. Callers pass
+`PromptProfile.guided` (the `.full` prompt minus the "return JSON" framing, plus a line pointing at
+the typed `species` field), and `AISuggestionResult.species` carries the field into the iPad's eBird
+`attachScientificNames` binomial lookup. It requires the macOS 27 / iOS 27 SDK (Xcode-beta) to build
+because Foundation Models image input is only there; the OS floor is enforced at runtime via
+`#available`, so the other three backends still work below 27. See CLAUDE.md "Hardware & model notes"
+for the toolchain constraint.
 
 `SourceBrowserViewModel.eBirdDisabledModels` gates the eBird candidate-species prompt addition
 (below) per OpenRouter model string, persisted in `UserDefaults` and editable via a per-model
-Toggle in `SettingsView` — the local Ollama/MLX backends always get the candidate list since it
-costs nothing extra there, but it's added input-token cost on a paid OpenRouter request, so a few
-flagship models default to off. Deliberately not a general model-management system: it's a `Set`
+Toggle in `SettingsView` — the local Ollama/MLX/Foundation backends always get the candidate list
+since it costs nothing extra there, but it's added input-token cost on a paid OpenRouter request, so
+a few flagship models default to off. Deliberately not a general model-management system: it's a `Set`
 checked against `AIModelSelection.presets`, nothing more.
 
 `OpenRouterProvider`'s API key resolves via `APIKeyStore` (below) rather than reading

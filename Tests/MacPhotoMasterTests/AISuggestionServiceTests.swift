@@ -63,6 +63,25 @@ final class AISuggestionServiceTests: XCTestCase {
         XCTAssertNil(AISuggestionService.parse(text))
     }
 
+    func testParseReadsOptionalSpeciesField() {
+        // FoundationModelsProvider serializes its typed result with a "species" key.
+        let text =
+            #"{"description": "A great egret wading.", "keywords": ["egret"], "species": "Great Egret"}"#
+
+        let result = AISuggestionService.parse(text)
+
+        XCTAssertEqual(result?.species, "Great Egret")
+    }
+
+    func testParseDefaultsSpeciesToEmptyWhenKeyAbsent() {
+        // Every other provider omits "species"; it must default empty, not fail the parse.
+        let text = #"{"description": "A red bird on a branch.", "keywords": ["red bird"]}"#
+
+        let result = AISuggestionService.parse(text)
+
+        XCTAssertEqual(result?.species, "")
+    }
+
     // MARK: - buildUserPrompt / scene category
 
     func testBuildUserPromptForOtherCategoryUsesGenericWordLimitButStillIncludesSpeciesInstruction() {
@@ -168,6 +187,27 @@ final class AISuggestionServiceTests: XCTestCase {
         XCTAssertFalse(commonOnly.contains("exact common and scientific name"))
         XCTAssertTrue(commonOnly.contains("do not write a scientific name"))
         XCTAssertTrue(commonOnly.contains("Great Blue Heron"))
+    }
+
+    // MARK: - buildUserPrompt / guided profile (Foundation Models)
+
+    func testGuidedPromptDropsJSONFramingButKeepsTypedSpeciesAndContext() {
+        // Guided generation guarantees the output shape via @Generable, so the "return JSON" framing
+        // must be gone (telling it to emit JSON pollutes the description field); the species-field
+        // instruction and the shared context/species-ID guidance must remain.
+        let guided = AISuggestionService.buildUserPrompt(
+            existingDescription: "", existingKeywords: "", locationContext: "", category: .bird,
+            birdCandidateSpecies: "Great Blue Heron", promptProfile: .guided,
+            birdCandidatesAreCommonNamesOnly: true)
+
+        XCTAssertFalse(guided.contains("strict JSON"))
+        XCTAssertFalse(guided.contains("\"k1\""))
+        XCTAssertTrue(guided.contains("species field"))
+        XCTAssertTrue(guided.contains("Latin binomial"))
+        XCTAssertTrue(guided.contains("never invent one"))
+        // Shared context tail still flows through.
+        XCTAssertTrue(guided.contains("Great Blue Heron"))
+        XCTAssertTrue(guided.contains("at most 60 words"))
     }
 
     // MARK: - suggest / fallback

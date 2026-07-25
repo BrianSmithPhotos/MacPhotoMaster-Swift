@@ -214,6 +214,7 @@ final class PhotoBrowserViewModel: ObservableObject {
     private let reverseGeocodeService = ReverseGeocodeService()
     private let openRouterProvider: AIProvider = OpenRouterProvider()
     private let mlxProvider: AIProvider = MLXNativeProvider()
+    private let foundationProvider: AIProvider = FoundationModelsProvider()
     private let aiSuggestionService = AISuggestionService()
     private let ebirdService = EBirdSpeciesListService()
     private var ebirdCache: EBirdCache?
@@ -1200,15 +1201,17 @@ final class PhotoBrowserViewModel: ObservableObject {
     func suggestAI() async {
         guard !isSuggestingAI, let previewID = previewAsset?.id else { return }
         guard let selection = AIModelSelection.parse(aiModelText) else {
-            aiStatusMessage = "Invalid AI model — expected \"mlx:<model>\" or \"openrouter:<model>\""
+            aiStatusMessage =
+                "Invalid AI model — expected \"mlx:<model>\", \"openrouter:<model>\" or \"foundation:apple\""
             return
         }
         let provider: AIProvider
         switch selection.providerID {
         case .mlx: provider = mlxProvider
         case .openRouter: provider = openRouterProvider
+        case .foundation: provider = foundationProvider
         case .ollama:
-            aiStatusMessage = "Ollama isn't available on iPad — use an mlx: or openrouter: model"
+            aiStatusMessage = "Ollama isn't available on iPad — use an mlx:, openrouter: or foundation: model"
             return
         }
 
@@ -1235,8 +1238,12 @@ final class PhotoBrowserViewModel: ObservableObject {
             let sourceAsset = AISuggestionSourcePicker.pickSourceAsset(from: sourceSetMembers)
         else { return }
         let locationContext = sourceRepresentativeID.flatMap { locationContextByRepresentativeID[$0] } ?? ""
+        // Foundation Models' small context window can't hold the hundreds-of-species candidate list on
+        // top of the image; skip it (the typed `species` field + deterministic binomial lookup cover
+        // it, and the location-context line still biases toward local species). See the Mac
+        // SourceBrowserViewModel for the full rationale ("Exceeded model context window size").
         let birdCandidateSpecies =
-            eBirdDisabledModels.contains(aiModelText)
+            selection.providerID == .foundation || eBirdDisabledModels.contains(aiModelText)
             ? ""
             : sourceRepresentativeID.flatMap { birdCandidateSpeciesByRepresentativeID[$0] } ?? ""
 
@@ -1250,17 +1257,27 @@ final class PhotoBrowserViewModel: ObservableObject {
             // peaks past that ceiling. Halving the longest edge to 1024 cuts the vision-encoder peak
             // ~4x (memory scales with pixel count), keeping it well under the limit. OpenRouter is a
             // network call, not memory-bound, so it keeps the full-resolution frame (verified working).
-            let maxPixelSize = selection.providerID == .mlx ? 1024 : 2048
+            // Foundation Models runs on-device too, so it gets the same 1024px cap as MLX for the
+            // iPad's jetsam ceiling; OpenRouter (network) keeps the full frame.
+            let onDevice = selection.providerID == .mlx || selection.providerID == .foundation
+            let maxPixelSize = onDevice ? 1024 : 2048
             let image = try await NativeMetadataReader().extractPreviewAsync(
                 at: sourceAsset.url, maxPixelSize: maxPixelSize)
             guard previewAsset?.id == previewID else { return }
             aiEvaluatedImage = image
             aiEvaluatedImageSourceName = sourceAsset.url.lastPathComponent
+            // Foundation Models uses `@Generable` guided generation, so it takes the `.guided` prompt
+            // (no "return JSON" framing, typed species field); MLX small models take `.compact`; the
+            // rest take `.full`.
+            let promptProfile: PromptProfile =
+                selection.providerID == .foundation
+                ? .guided
+                : (compactPromptModels.contains(aiModelText) ? .compact : .full)
             let result = try await aiSuggestionService.suggest(
                 provider: provider, model: selection.modelName, image: image,
                 existingDescription: editableDescription, existingKeywords: editableKeywords,
                 locationContext: locationContext, birdCandidateSpecies: birdCandidateSpecies,
-                promptProfile: compactPromptModels.contains(aiModelText) ? .compact : .full,
+                promptProfile: promptProfile,
                 birdCandidatesAreCommonNamesOnly: true)
             guard previewAsset?.id == previewID else { return }
             // Deterministically attach the Latin binomial the model likely omitted: if it named a bird
@@ -1269,16 +1286,33 @@ final class PhotoBrowserViewModel: ObservableObject {
             var description = result.description
             var keywords = result.keywords
             if let scientificNames = sourceRepresentativeID.flatMap({ birdScientificNamesByRepresentativeID[$0] }) {
-                // Trust the description (the model's stated ID) and the user's pre-existing keywords,
-                // but not the model's freshly-generated keywords — a small model can hallucinate a
-                // candidate species into those. `editableKeywords` here still holds the pre-suggestion
-                // (user) keywords; `suggestAI` only writes the model's output back below.
+                // Post-hoc-validate a guided provider's typed species guess against the photo's eBird
+                // region: `foundation:` is sent no candidate list (it won't fit its context window), so
+                // it guesses freely and often names an out-of-region or non-existent species. Trust it
+                // only when it's a real species in the region; a failed lookup yields "", so the
+                // description/trusted-keyword enrichment below still runs, but the bogus typed guess is
+                // neither binomial-attached nor added as a keyword. Trust the description (the model's
+                // stated ID) and the user's pre-existing keywords, never the model's freshly-generated
+                // keywords — a small model can hallucinate a candidate species into those.
+                // `editableKeywords` here still holds the pre-suggestion (user) keywords.
+                let validatedSpecies =
+                    EBirdCandidateFormatting.regionalScientificName(
+                        forSpecies: result.species, scientificNameByCommonName: scientificNames) != nil
+                    ? result.species : ""
                 let trustedKeywords = MetadataEditParsing.parseKeywords(editableKeywords)
                 let enriched = EBirdCandidateFormatting.attachScientificNames(
                     description: description, keywords: keywords, trustedKeywords: trustedKeywords,
-                    scientificNameByCommonName: scientificNames)
+                    species: validatedSpecies, scientificNameByCommonName: scientificNames)
                 description = enriched.description
                 keywords = enriched.keywords
+                // A validated species common name (e.g. "Great Egret") isn't necessarily in the model's
+                // keywords or description, so add it as a keyword itself — its binomial was already
+                // appended by attachScientificNames above.
+                if !validatedSpecies.isEmpty,
+                    !keywords.contains(where: { $0.caseInsensitiveCompare(validatedSpecies) == .orderedSame })
+                {
+                    keywords.insert(validatedSpecies, at: 0)
+                }
             }
             editableDescription = description
             editableKeywords = keywords.joined(separator: ", ")

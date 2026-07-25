@@ -24,9 +24,16 @@ import os
 /// full prompt — they echo its JSON example's placeholder keywords verbatim and don't honor its
 /// "if the subject is a bird…" conditional (bird-ID'ing non-wildlife). The iPad selects `.compact`
 /// per-model; see `PhotoBrowserViewModel.compactPromptModels`.
+///
+/// `.guided` is for `FoundationModelsProvider`, whose `@Generable` schema *guarantees* a
+/// well-formed `{description, keywords, species}` result — so it drops the "Return only strict JSON"
+/// framing (which would make guided generation emit JSON text into a string field) and instead adds
+/// a line telling the model to fill the typed `species` field. All the substantive
+/// context/species-ID guidance is shared verbatim with `.full` via `contextLines`.
 public enum PromptProfile {
     case full
     case compact
+    case guided
 }
 
 public struct AISuggestionService {
@@ -125,6 +132,12 @@ public struct AISuggestionService {
                 locationContext: locationContext, category: category,
                 birdCandidateSpecies: birdCandidateSpecies,
                 birdCandidatesAreCommonNamesOnly: birdCandidatesAreCommonNamesOnly)
+        case .guided:
+            return guidedUserPrompt(
+                existingDescription: existingDescription, existingKeywords: existingKeywords,
+                locationContext: locationContext, category: category,
+                birdCandidateSpecies: birdCandidateSpecies,
+                birdCandidatesAreCommonNamesOnly: birdCandidatesAreCommonNamesOnly)
         }
     }
 
@@ -159,6 +172,65 @@ public struct AISuggestionService {
                 + "family or genus, or say the exact species is uncertain) instead of guessing a "
                 + "specific binomial.",
         ]
+        lines.append(
+            contentsOf: contextLines(
+                existingDescription: existingDescription, existingKeywords: existingKeywords,
+                locationContext: locationContext, birdCandidateSpecies: birdCandidateSpecies,
+                birdCandidatesAreCommonNamesOnly: birdCandidatesAreCommonNamesOnly))
+        return lines.joined(separator: "\n")
+    }
+
+    /// The `FoundationModelsProvider` variant — same substance as `.full`, but with the JSON-format
+    /// framing replaced by a single line pointing at the typed `species` field, since the
+    /// `@Generable` schema already guarantees the `{description, keywords, species}` shape. The
+    /// species-ID precision block (real binomials only; put the binomial in the description) is kept:
+    /// the typed `species` field carries the common name, but the binomial still belongs in the prose
+    /// for plants, where there's no eBird lookup to attach it.
+    private static func guidedUserPrompt(
+        existingDescription: String, existingKeywords: String, locationContext: String,
+        category: SceneCategory, birdCandidateSpecies: String, birdCandidatesAreCommonNamesOnly: Bool = false
+    ) -> String {
+        let descriptionWordLimit =
+            category == .other ? genericDescriptionWordLimit : categorizedDescriptionWordLimit
+        var lines = [
+            "Describe this photograph for photo metadata.",
+            "Description: at most \(descriptionWordLimit) words, plain English, no markdown.",
+            "Keywords: 10 to 15 lowercase keywords, most specific/identifying terms first.",
+            "If the primary subject is a bird or flowering plant that you can confidently identify, "
+                + "put its exact common name in the species field; if you are unsure of the exact "
+                + "species, leave the species field empty rather than guessing.",
+            "If the primary subject is a bird, identify the species as precisely as you can and "
+                + "include its Latin binomial (genus species) in the description. If more than one "
+                + "species is plausible, name the most likely one and mention the field mark "
+                + "(plumage, bill shape, size, etc.) that distinguishes it from the next most likely "
+                + "look-alike.",
+            "If the primary subject is a flower or flowering plant, identify the species as "
+                + "precisely as you can and include its Latin binomial (genus species) in the "
+                + "description. If more than one species is plausible, name the most likely one and "
+                + "mention the distinguishing feature (petal count/shape, color pattern, leaf form, "
+                + "etc.).",
+            "For any species identification: only give a Latin binomial that is a real, correctly "
+                + "spelled genus and species you are confident applies to what's shown — never invent "
+                + "one or blend genus/species names from different candidates. If you cannot "
+                + "confidently identify the exact species, say so in the description (e.g. name the "
+                + "family or genus, or say the exact species is uncertain) instead of guessing a "
+                + "specific binomial.",
+        ]
+        lines.append(
+            contentsOf: contextLines(
+                existingDescription: existingDescription, existingKeywords: existingKeywords,
+                locationContext: locationContext, birdCandidateSpecies: birdCandidateSpecies,
+                birdCandidatesAreCommonNamesOnly: birdCandidatesAreCommonNamesOnly))
+        return lines.joined(separator: "\n")
+    }
+
+    /// The existing-context/location/eBird-candidate tail shared verbatim by `.full` and `.guided`
+    /// (the two profiles for capable models). `.compact` keeps its own terser wording.
+    private static func contextLines(
+        existingDescription: String, existingKeywords: String, locationContext: String,
+        birdCandidateSpecies: String, birdCandidatesAreCommonNamesOnly: Bool
+    ) -> [String] {
+        var lines: [String] = []
         let trimmedDescription = existingDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedDescription.isEmpty {
             lines.append("Existing description for context (may be outdated): \(trimmedDescription)")
@@ -202,7 +274,7 @@ public struct AISuggestionService {
                         + trimmedBirdCandidates)
             }
         }
-        return lines.joined(separator: "\n")
+        return lines
     }
 
     /// Pared-down prompt for small on-device models (e.g. FastVLM-0.5B). Two deliberate differences
@@ -296,7 +368,12 @@ public struct AISuggestionService {
         else { return nil }
         let keywords = normalizeKeywords(jsonObject["keywords"])
         guard !keywords.isEmpty else { return nil }
-        return AISuggestionResult(description: description, keywords: keywords)
+        // Optional: only `FoundationModelsProvider` (its `@Generable` schema) emits `species`; every
+        // other provider omits it, so it stays empty and the eBird enrichment simply finds nothing to
+        // key off.
+        let species = (jsonObject["species"] as? String)?.trimmingCharacters(
+            in: .whitespacesAndNewlines) ?? ""
+        return AISuggestionResult(description: description, keywords: keywords, species: species)
     }
 
     private static func extractJSONObject(from text: String) -> [String: Any]? {

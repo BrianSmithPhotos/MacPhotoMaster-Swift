@@ -69,6 +69,17 @@ Ollama daemon involved). The `mlx:` provider was added as an exercise in the nat
 because Ollama's own MLX backend was found lacking — see `docs/MLX_PROVIDER.md` for the decision
 record and current model allowlist.
 
+A third, Apple-native path is the **`foundation:` provider** (`FoundationModelsProvider`): on-device
+Foundation Models with `@Generable` guided generation, which *guarantees* a typed
+`{description, keywords, species}` result rather than the free-form JSON the small local models emit
+unreliably. The typed `species` field feeds the eBird `attachScientificNames` binomial lookup
+directly on iPad. **Build constraint:** Foundation Models image input needs the macOS 27 / iOS 27
+SDK, which currently ships only in **Xcode-beta** — so the whole repo is now built with that
+toolchain. Run `swift build`/`swift test` with
+`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`, and `scripts/build-app-bundle.sh`
+sets it automatically. The OS floor is enforced at runtime (`#available`), so the app still runs and
+its other providers still work below macOS 27; only the `foundation:` provider requires it.
+
 ## File Safety
 
 - Deleting a file goes through `NSWorkspace.shared.recycle(_:completionHandler:)` or

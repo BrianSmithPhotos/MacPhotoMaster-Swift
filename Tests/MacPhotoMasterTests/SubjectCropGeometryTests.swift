@@ -55,6 +55,23 @@ final class SubjectCropGeometryTests: XCTestCase {
         XCTAssertEqual(result.minY, 0, accuracy: 0.001)
     }
 
+    func testImagePointMapsCenterOfContainerToCenterOfImage() {
+        let container = CGSize(width: 1000, height: 1000)  // fit rect: (0, 250, 1000, 500)
+        let result = SubjectCropGeometry.imagePoint(
+            forViewPoint: CGPoint(x: 500, y: 500), imageSize: imageSize, containerSize: container)
+        XCTAssertEqual(result.x, 1000, accuracy: 0.001)
+        XCTAssertEqual(result.y, 500, accuracy: 0.001)
+    }
+
+    func testImagePointClampsTapInLetterboxMarginToImageEdge() {
+        let container = CGSize(width: 1000, height: 1000)  // fit rect: (0, 250, 1000, 500)
+        // Tap above the image, in the top letterbox band.
+        let result = SubjectCropGeometry.imagePoint(
+            forViewPoint: CGPoint(x: 500, y: 10), imageSize: imageSize, containerSize: container)
+        XCTAssertEqual(result.x, 1000, accuracy: 0.001)
+        XCTAssertEqual(result.y, 0, accuracy: 0.001)
+    }
+
     func testViewRectAndImageRectRoundTripForARectFullyInsideBounds() {
         let container = CGSize(width: 1200, height: 900)
         let original = CGRect(x: 300, y: 100, width: 800, height: 400)

@@ -127,9 +127,12 @@ without a relaunch). Two iPad-specific refinements vs. the Mac: the prompt carri
 `EBirdCandidateFormatting.attachScientificNames` lookup rather than trusted from the model — whole-word
 matched (a wrong-binomial guard), only against the description + the user's trusted keywords (not the
 model's own keywords, which can hallucinate a candidate), plural-aware, and inherently additive. See
-docs/SPEC.md §6/§7. Still deferred (last 8b item): subject isolation. A possible future path for
-rock-solid structured output — Apple Foundation Models / `@Generable` guided generation as an on-device
-provider — is recorded in memory, not scheduled.
+docs/SPEC.md §6/§7. Subject isolation ("Crop to Subject") now ships on iPad as well: the preview swaps
+its zoomable scroll view for a static Fit canvas whose single `DragGesture` overlay draws a rubber-band
+crop or, on a tap, picks the Vision instance under the finger via
+`SubjectIsolationService.subjectInstanceRect` (mapped through `SubjectCropGeometry`). A possible future
+path for rock-solid structured output — Apple Foundation Models / `@Generable` guided generation as an
+on-device provider — is recorded in memory, not scheduled.
 
 `ExifToolClient` is the one Service that stays in the `MacPhotoMaster` (macOS) target instead of
 moving to Core: it shells out to the `exiftool` binary via `Process`, and process/subprocess

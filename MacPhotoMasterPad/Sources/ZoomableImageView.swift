@@ -9,7 +9,8 @@ import UIKit
 /// centered when it's smaller than the pane, and recomputing what "Fit" means when the pane resizes
 /// (rotation, Split View).
 ///
-/// No crop-mode interlock here: the iPad app has no subject-isolation mode to conflict with.
+/// No crop-mode interlock here: like the Mac, `PreviewPanelView` swaps this scroll view out for a
+/// static crop canvas while subject isolation is on, so zoom and crop never coexist in one view.
 struct ZoomableImageView: UIViewRepresentable {
     let image: CGImage
     /// Current scale as a multiple of Fit — 1.0 means the whole frame is visible. Two-way: the

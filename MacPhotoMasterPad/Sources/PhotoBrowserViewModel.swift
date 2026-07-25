@@ -163,6 +163,29 @@ final class PhotoBrowserViewModel: ObservableObject {
     /// Filename of the asset `aiEvaluatedImage` was decoded from, shown alongside it so the
     /// preview-vs-sent file distinction above is visible rather than inferred.
     @Published private(set) var aiEvaluatedImageSourceName: String?
+    /// User-chosen crop override in preview-image-pixel space (the 2048px decode
+    /// `extractPreviewAsync` produces), set either by dragging a rectangle on the big preview or by
+    /// tapping a Vision-detected subject (`pickSubjectInstance`). When present it replaces
+    /// `SubjectIsolationService`'s auto-crop for both the eager "Evaluated" preview and the next
+    /// `suggestAI()` call. Cleared on every selection change by `loadEditBuffer()`. Mirrors the Mac
+    /// app's `manualSubjectCropRect`.
+    @Published private(set) var manualSubjectCropRect: CGRect?
+    /// Handle to the in-flight eager crop-preview computation — cancelled and replaced on every
+    /// retrigger (toggle, manual pick, selection change) so a slow Vision request for an abandoned
+    /// photo can't clobber `aiEvaluatedImage` after the fact. Mirrors the Mac app's `subjectCropTask`.
+    private var subjectCropTask: Task<Void, Never>?
+    /// Whether `suggestAI()` crops to a detected subject before sending the image to the model —
+    /// `SubjectIsolationService`'s auto-crop, or `manualSubjectCropRect` when the user has drawn or
+    /// tapped an override on the big preview. Good for a small/distant subject (a bird/flower filling
+    /// little of the frame); bad for a general scene, where the auto-crop can latch onto an incidental
+    /// foreground object. Off by default; the user flips it on per close-subject session. Persisted;
+    /// the iPad `MetadataPanelView` exposes it as a "Crop to Subject" Toggle. Turning it on (or
+    /// changing photos while on) eagerly computes and shows the crop via `recomputeSubjectCropPreview()`.
+    /// Mirrors the Mac app's `subjectIsolationEnabled`; unlike the Mac's drag-only manual override, the
+    /// iPad adds tap-to-pick so a touch chooses which subject when Vision finds several (`pickSubjectInstance`).
+    @Published private(set) var subjectIsolationEnabled: Bool =
+        UserDefaults.standard.bool(forKey: PhotoBrowserViewModel.subjectIsolationEnabledKey)
+    private static let subjectIsolationEnabledKey = "subjectIsolationEnabled"
     private var suggestAITask: Task<Void, Never>?
     private static let aiModelDefaultsKey = "aiModelText"
 
@@ -454,10 +477,14 @@ final class PhotoBrowserViewModel: ObservableObject {
         // Shared status line for the Timeline-GPS suggestion — cleared up front so a previous
         // photo's message (e.g. a matched location) doesn't linger on a newly selected photo.
         gpsSuggestionStatusMessage = nil
-        // Same reasoning for the previous photo's AI result and the image it was derived from.
+        // Same reasoning for the previous photo's AI result and the image it was derived from, plus
+        // its subject crop: a manual override belongs to the photo it was drawn on, and the in-flight
+        // crop task is for the outgoing selection.
         aiStatusMessage = nil
         aiEvaluatedImage = nil
         aiEvaluatedImageSourceName = nil
+        subjectCropTask?.cancel()
+        manualSubjectCropRect = nil
         guard let asset = previewAsset else {
             editableDescription = ""
             editableKeywords = ""
@@ -468,6 +495,11 @@ final class PhotoBrowserViewModel: ObservableObject {
         editableKeywords = asset.keywords.joined(separator: ", ")
         updateRenamePreview()
         applyStagedDraftIfPresent(for: asset)
+        // With the toggle on, eagerly recompute the auto-crop for the newly previewed photo so the
+        // "Evaluated" thumbnail tracks the selection without waiting for a Suggest — mirrors the Mac.
+        if subjectIsolationEnabled {
+            recomputeSubjectCropPreview()
+        }
     }
 
     /// Recomputes `renamePreviewFilename` for `previewAsset` against `sessionBatch`'s current value
@@ -1190,6 +1222,97 @@ final class PhotoBrowserViewModel: ObservableObject {
         suggestAITask?.cancel()
     }
 
+    /// Called from `MetadataPanelView`'s "Crop to Subject" Toggle — see `subjectIsolationEnabled`'s
+    /// doc comment. Eagerly computes and shows the crop the moment it's switched on, rather than
+    /// waiting for a `suggestAI()` call. Mirrors the Mac app's `setSubjectIsolationEnabled`.
+    func setSubjectIsolationEnabled(_ enabled: Bool) {
+        subjectIsolationEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.subjectIsolationEnabledKey)
+        if enabled {
+            recomputeSubjectCropPreview()
+        } else {
+            subjectCropTask?.cancel()
+            manualSubjectCropRect = nil
+            aiEvaluatedImage = nil
+            aiEvaluatedImageSourceName = nil
+        }
+    }
+
+    /// Called from the big preview's drag-to-crop overlay: `rect` (preview-image-pixel space) on a
+    /// drag commit, `nil` to reset back to the auto-computed crop. Mirrors the Mac app's
+    /// `setManualCropRect`.
+    func setManualCropRect(_ rect: CGRect?) {
+        manualSubjectCropRect = rect
+        recomputeSubjectCropPreview()
+    }
+
+    /// Called from a tap on the big preview while the toggle is on — picks the Vision subject under
+    /// `imagePoint` (preview-image-pixel space) as the manual crop, so a touch chooses which subject
+    /// when several are detected. The iPad's touch counterpart to the Mac's drag-only manual override;
+    /// a tap that lands on no instance leaves the current crop unchanged.
+    func pickSubjectInstance(atImagePoint imagePoint: CGPoint) {
+        guard subjectIsolationEnabled, let asset = previewAsset else { return }
+        let id = asset.id
+        subjectCropTask?.cancel()
+        subjectCropTask = Task {
+            guard let cgImage = try? await NativeMetadataReader().extractPreviewAsync(at: asset.url)
+            else { return }
+            guard !Task.isCancelled, previewAsset?.id == id else { return }
+            let rect = await computeSubjectInstanceRect(in: cgImage, at: imagePoint)
+            guard !Task.isCancelled, previewAsset?.id == id, let rect else { return }
+            manualSubjectCropRect = rect
+            aiEvaluatedImage = cgImage.cropping(to: rect)
+            aiEvaluatedImageSourceName = asset.url.lastPathComponent
+        }
+    }
+
+    /// Shared by `setSubjectIsolationEnabled`, `setManualCropRect`, and a selection change: (re)runs
+    /// whichever crop currently applies — the manual override if one's set, otherwise
+    /// `SubjectIsolationService`'s auto-crop — against the previewed asset, publishing the result to
+    /// `aiEvaluatedImage` for the "Evaluated" preview. No-op (and clears the preview) when the toggle
+    /// is off or nothing's previewed. Mirrors the Mac app's `recomputeSubjectCropPreview`, keyed on
+    /// `previewAsset` since that (not `selectedAssetID`) is what the big preview shows on iPad.
+    private func recomputeSubjectCropPreview() {
+        subjectCropTask?.cancel()
+        guard subjectIsolationEnabled, let asset = previewAsset else {
+            aiEvaluatedImage = nil
+            aiEvaluatedImageSourceName = nil
+            return
+        }
+        let id = asset.id
+        let manualRect = manualSubjectCropRect
+        subjectCropTask = Task {
+            guard let cgImage = try? await NativeMetadataReader().extractPreviewAsync(at: asset.url)
+            else { return }
+            guard !Task.isCancelled, previewAsset?.id == id else { return }
+            let cropped: CGImage?
+            if let manualRect {
+                cropped = cgImage.cropping(to: manualRect)
+            } else {
+                cropped = await computeSubjectCrop(in: cgImage)
+            }
+            guard !Task.isCancelled, previewAsset?.id == id else { return }
+            aiEvaluatedImage = cropped
+            aiEvaluatedImageSourceName = asset.url.lastPathComponent
+        }
+    }
+
+    /// Runs `SubjectIsolationService.isolateSubject` off the main actor — a blocking synchronous
+    /// Vision request, now invoked on every toggle flip and selection change, so leaving it on
+    /// `MainActor` would jank the preview. Mirrors the Mac app's `computeSubjectCrop`.
+    private func computeSubjectCrop(in image: CGImage) async -> CGImage? {
+        await Task.detached(priority: .userInitiated) {
+            SubjectIsolationService.isolateSubject(in: image)
+        }.value
+    }
+
+    /// Off-main-actor `SubjectIsolationService.subjectInstanceRect` for the tap-to-pick path.
+    private func computeSubjectInstanceRect(in image: CGImage, at point: CGPoint) async -> CGRect? {
+        await Task.detached(priority: .userInitiated) {
+            SubjectIsolationService.subjectInstanceRect(in: image, at: point)
+        }.value
+    }
+
     /// AI description/keyword suggestion for the current selection — ported from the Mac app's
     /// `suggestAI()`, trimmed to this cut's scope: MLX + OpenRouter providers (no Ollama on iPad),
     /// the full preview frame (no subject-isolation crop yet), and no eBird candidate list (both
@@ -1260,9 +1383,36 @@ final class PhotoBrowserViewModel: ObservableObject {
             // Foundation Models runs on-device too, so it gets the same 1024px cap as MLX for the
             // iPad's jetsam ceiling; OpenRouter (network) keeps the full frame.
             let onDevice = selection.providerID == .mlx || selection.providerID == .foundation
-            let maxPixelSize = onDevice ? 1024 : 2048
-            let image = try await NativeMetadataReader().extractPreviewAsync(
-                at: sourceAsset.url, maxPixelSize: maxPixelSize)
+            // Subject isolation (docs/SPEC.md §6, mirrors the Mac): when on, crop to the manual
+            // override or `SubjectIsolationService`'s auto-pick before sending. The crop source is
+            // always the full 2048px decode so the manual rect — captured in that space by the preview
+            // overlay/tap — lines up regardless of provider, and the auto-crop runs at full quality; a
+            // successful crop is itself small, so it stays within the on-device memory/context ceiling
+            // without the 1024 pre-cap the uncropped on-device path needs. On a crop miss (or with the
+            // toggle off), fall back to the capped frame: 1024 for on-device to stay under the iPad
+            // jetsam limit, 2048 for the network provider.
+            let image: CGImage
+            if subjectIsolationEnabled {
+                let fullImage = try await NativeMetadataReader().extractPreviewAsync(
+                    at: sourceAsset.url, maxPixelSize: 2048)
+                let crop: CGImage?
+                if let manualRect = manualSubjectCropRect {
+                    crop = fullImage.cropping(to: manualRect)
+                } else {
+                    crop = await computeSubjectCrop(in: fullImage)
+                }
+                if let crop {
+                    image = crop
+                } else if onDevice {
+                    image = try await NativeMetadataReader().extractPreviewAsync(
+                        at: sourceAsset.url, maxPixelSize: 1024)
+                } else {
+                    image = fullImage
+                }
+            } else {
+                image = try await NativeMetadataReader().extractPreviewAsync(
+                    at: sourceAsset.url, maxPixelSize: onDevice ? 1024 : 2048)
+            }
             guard previewAsset?.id == previewID else { return }
             aiEvaluatedImage = image
             aiEvaluatedImageSourceName = sourceAsset.url.lastPathComponent

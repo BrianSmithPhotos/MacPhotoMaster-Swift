@@ -59,6 +59,66 @@ public enum SubjectIsolationService {
         return cropped
     }
 
+    /// Padded image-pixel bounding box of the single foreground instance whose mask covers
+    /// `imagePoint` — the tap-to-pick counterpart to `isolateSubject`'s "most salient instance"
+    /// auto-crop, used on iPad so a tap chooses *which* subject when Vision finds several (a pair of
+    /// birds, a subject beside a distractor). `imagePoint` is in image-pixel space (y down, first
+    /// stored row = 0), the same space as the returned rect and as `CGImage.cropping(to:)`. Returns
+    /// `nil` when the request fails, finds no instances, or the tap lands on background — the caller
+    /// then leaves the current crop unchanged. When instances overlap at the point, the one with the
+    /// smallest bounding box wins, since the tighter instance is the more specific pick.
+    public static func subjectInstanceRect(in image: CGImage, at imagePoint: CGPoint) -> CGRect? {
+        let request = VNGenerateForegroundInstanceMaskRequest()
+        let handler = VNImageRequestHandler(cgImage: image, options: [:])
+        do {
+            try handler.perform([request])
+        } catch {
+            logger.log(
+                "Instance pick request failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+        guard let observation = request.results?.first, !observation.allInstances.isEmpty else {
+            return nil
+        }
+
+        var bestBox: CGRect?
+        for instance in observation.allInstances {
+            guard let mask = try? observation.generateMask(forInstances: [instance]) else { continue }
+            let maskWidth = CVPixelBufferGetWidth(mask)
+            let maskHeight = CVPixelBufferGetHeight(mask)
+            guard maskWidth > 0, maskHeight > 0 else { continue }
+            let maskX = Int(imagePoint.x / CGFloat(image.width) * CGFloat(maskWidth))
+            let maskY = Int(imagePoint.y / CGFloat(image.height) * CGFloat(maskHeight))
+            guard maskValue(in: mask, atX: maskX, y: maskY) > 0.5,
+                let box = boundingBox(ofNonZeroPixelsIn: mask)
+            else { continue }
+            let scaleX = CGFloat(image.width) / CGFloat(maskWidth)
+            let scaleY = CGFloat(image.height) / CGFloat(maskHeight)
+            let imageBox = CGRect(
+                x: box.minX * scaleX, y: box.minY * scaleY,
+                width: box.width * scaleX, height: box.height * scaleY)
+            if bestBox == nil || imageBox.width * imageBox.height < bestBox!.width * bestBox!.height {
+                bestBox = imageBox
+            }
+        }
+        guard let chosen = bestBox else { return nil }
+        return pad(chosen, by: paddingFraction, clampingTo: image)
+    }
+
+    /// Single-pixel read of a `kCVPixelFormatType_OneComponent32Float` mask, bounds-checked — returns
+    /// 0 for an out-of-range coordinate so a tap in the letterbox margin reads as background.
+    private static func maskValue(in pixelBuffer: CVPixelBuffer, atX x: Int, y: Int) -> Float32 {
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        guard x >= 0, x < width, y >= 0, y < height else { return 0 }
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return 0 }
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let row = baseAddress.advanced(by: y * bytesPerRow).assumingMemoryBound(to: Float32.self)
+        return row[x]
+    }
+
     /// `generateMask(forInstances:)` returns a single-channel `kCVPixelFormatType_OneComponent32Float`
     /// buffer at the analysis resolution (not the input image's resolution) — instance-labeled, 0 for
     /// background, >0 for foreground — so the resulting box is in mask-space and must be scaled back

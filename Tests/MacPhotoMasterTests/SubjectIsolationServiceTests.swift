@@ -22,6 +22,20 @@ final class SubjectIsolationServiceTests: XCTestCase {
         XCTAssertNil(SubjectIsolationService.isolateSubject(in: image))
     }
 
+    /// Same fail-closed sanity check for the tap-to-pick path: a flat swatch has no instance under
+    /// the tap point, so it returns `nil` rather than crashing or throwing. Not an accuracy assertion.
+    func testSubjectInstanceRectReturnsNilForNonPhotographicImage() {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(
+            data: nil, width: 40, height: 20, bitsPerComponent: 8, bytesPerRow: 0,
+            space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(red: 0, green: 1, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 40, height: 20))
+        let image = context.makeImage()!
+
+        XCTAssertNil(SubjectIsolationService.subjectInstanceRect(in: image, at: CGPoint(x: 20, y: 10)))
+    }
+
     func testBoundingBoxOfNonZeroPixelsFindsExpectedRect() {
         let width = 10
         let height = 10

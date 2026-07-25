@@ -56,11 +56,11 @@ deterministically, and copy files into local storage.
     preview shows, so an un-signposted zoom state makes a correct AI description look like a
     hallucination. Tapping/clicking the readout returns to Fit, as does ⌘0 (Mac) or a double-click/
     double-tap; changing the selection resets to Fit.
-  - Mac only: **disabled while subject-isolation crop mode is on** (§6). That mode owns the drag gesture for
-    drawing the crop rectangle and maps view coordinates to image pixels assuming an unzoomed
-    `.fit` layout; supporting both would mean composing the zoom transform into that mapping for no
-    real gain. Turning crop mode on resets the preview to Fit; the zoom control is inert until it's
-    turned off again. The iPad app has no crop mode, so no interlock there.
+  - **Disabled while subject-isolation crop mode is on** (§6), on both Mac and iPad. That mode owns
+    the drag gesture for drawing the crop rectangle (and, on iPad, tap-to-pick) and maps view
+    coordinates to image pixels assuming an unzoomed `.fit` layout; supporting both would mean
+    composing the zoom transform into that mapping for no real gain. Turning crop mode on resets the
+    preview to Fit; the zoom control is inert (Mac) or hidden (iPad) until it's turned off again.
   - Zoom reads the same 2048px-cap decode the preview already loads, so past roughly 100% of that
     it is soft rather than more detailed. Re-decoding at a higher cap when zoomed in is deferred.
 
@@ -189,12 +189,18 @@ deterministically, and copy files into local storage.
   switched on only for close, small/distant subjects (birds, flowers, or otherwise). Turning the
   toggle on (or switching photos while it's already on) immediately computes and shows the crop —
   it no longer waits for a Suggest click. The crop itself is `SubjectIsolationService`'s AI pick by
-  default, but the user can click-drag a rectangle on the big preview (`PreviewPanelView`) to
-  override it; a plain click, or the "Reset to AI Crop" button next to the toggle, reverts to the AI
-  crop. See `docs/ARCHITECTURE.md` "eBird species-list cache".
+  default, but the user can override it on the big preview (`PreviewPanelView`): on the Mac by
+  click-dragging a rectangle (a plain click, or the "Reset to AI Crop" button, reverts to the AI
+  pick); on iPad the same drag-to-box works and a **tap** additionally picks whichever detected
+  subject is under the finger (`SubjectIsolationService.subjectInstanceRect`), so a touch can choose
+  between several subjects — the "Reset to Auto Crop" button reverts. See `docs/ARCHITECTURE.md`
+  "eBird species-list cache".
 - **iPad divergence:** two providers only — native on-device MLX (`mlx:`) and OpenRouter
-  (`openrouter:`); Ollama's daemon can't run on iPad. The AI image is sent full-frame (subject
-  isolation is the one remaining deferred 8b item). On-device MLX needs the Metal/memory setup in
+  (`openrouter:`); Ollama's daemon can't run on iPad. Subject isolation ("Crop to Subject") now
+  works on iPad too — the toggle lives in the metadata sheet, and the big preview swaps its zoomable
+  scroll view for a static Fit canvas whose overlay takes a drag-to-box crop or a tap-to-pick subject
+  (see the "Crop to Subject" bullet above); off, the AI image is sent full-frame. On-device MLX needs
+  the Metal/memory setup in
   `docs/MLX_PROVIDER.md` ("On-device (iPad)"); the recommended/default on-device model is
   **gemma-3-4b** (good keywords + descriptions in seconds). Small models (FastVLM-0.5B) use a
   `.compact` prompt profile — no copyable JSON keyword example, and species-ID instructions gated on

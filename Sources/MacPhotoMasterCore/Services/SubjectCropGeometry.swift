@@ -36,6 +36,23 @@ public enum SubjectCropGeometry {
         return raw.intersection(CGRect(origin: .zero, size: imageSize))
     }
 
+    /// Maps a single point in container-local view space (e.g. a tap location) to image-pixel space,
+    /// clamped to the image's bounds — the point counterpart to `imageRect(forViewRect:...)`, used by
+    /// the iPad tap-to-pick subject selection. A tap in the letterbox margin clamps to the nearest
+    /// image edge rather than returning a coordinate outside the image.
+    public static func imagePoint(forViewPoint viewPoint: CGPoint, imageSize: CGSize, containerSize: CGSize)
+        -> CGPoint
+    {
+        let fit = fitRect(imageSize: imageSize, containerSize: containerSize)
+        guard fit.width > 0, fit.height > 0 else { return .zero }
+        let invScale = imageSize.width / fit.width
+        let x = (viewPoint.x - fit.minX) * invScale
+        let y = (viewPoint.y - fit.minY) * invScale
+        return CGPoint(
+            x: min(max(x, 0), imageSize.width),
+            y: min(max(y, 0), imageSize.height))
+    }
+
     /// Inverse of `imageRect(forViewRect:imageSize:containerSize:)` — maps an image-pixel rect back
     /// to view space, for drawing an overlay outline over a committed crop rect.
     public static func viewRect(forImageRect imageRect: CGRect, imageSize: CGSize, containerSize: CGSize)

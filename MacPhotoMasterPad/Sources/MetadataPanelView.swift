@@ -19,10 +19,12 @@ import MacPhotoMasterCore
 /// `.task` below) and applied straight to the asset, with a manual altitude re-lookup button — but
 /// there are no editable lat/long fields, unlike the Mac app.
 ///
-/// The AI Suggestions section has a model picker (free-text field + presets menu, `mlx:`/`openrouter:`
-/// only on iPad) and a Suggest/Cancel button driving `PhotoBrowserViewModel.startAISuggestion()`; the
-/// result auto-saves like the Mac app. Subject isolation and the eBird candidate list are deferred to
-/// step 8b, so there's no "Evaluated" image or eBird toggle here yet.
+/// The AI Suggestions section has a model picker (free-text field + presets menu, `mlx:`/`openrouter:`/
+/// `foundation:` on iPad) and a Suggest/Cancel button driving `PhotoBrowserViewModel.startAISuggestion()`;
+/// the result auto-saves like the Mac app. A "Crop to Subject" Toggle mirrors the Mac's — when on, the
+/// preview switches to a static crop canvas (see `PreviewPanelView`) and the model is sent the cropped
+/// subject; the resulting "Evaluated" thumbnail below confirms what it actually received. The eBird
+/// candidate list is wired up in the view model, toggled per-model in `SettingsView` rather than here.
 ///
 /// Process & Move mirrors the Mac app's four-button row (Single Image/Capture Set/Current
 /// Selection/Session), calling `PhotoBrowserViewModel.process(scope:)` directly — unlike the Mac
@@ -82,6 +84,24 @@ struct MetadataPanelView: View {
                                 } label: {
                                     Image(systemName: "chevron.down")
                                 }
+                            }
+
+                            Toggle(
+                                "Crop to Subject",
+                                isOn: Binding(
+                                    get: { viewModel.subjectIsolationEnabled },
+                                    set: { viewModel.setSubjectIsolationEnabled($0) }
+                                ))
+                            if viewModel.subjectIsolationEnabled {
+                                Text("Drag a box on the preview, or tap a subject. Zoom is off.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if viewModel.manualSubjectCropRect != nil {
+                                Button("Reset to Auto Crop") {
+                                    viewModel.setManualCropRect(nil)
+                                }
+                                .font(.caption)
                             }
 
                             if viewModel.isSuggestingAI {

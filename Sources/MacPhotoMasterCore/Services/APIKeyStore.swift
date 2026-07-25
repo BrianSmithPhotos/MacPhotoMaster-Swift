@@ -8,12 +8,14 @@ import Security
 /// 2026-07-08). Keychain was chosen over `UserDefaults` because a `UserDefaults`-backed secret is
 /// a cleartext plist under `~/Library/Preferences` — not appropriate for API keys.
 public enum APIKeyStore {
-    /// Deliberately frozen at the old `com.briansmithphotos.*` bundle identifier, which the app
-    /// itself moved off in 2026-07 (the domain was never owned; it's now `photos.briansmith.*`).
-    /// This is only ever an opaque lookup key for `kSecAttrService` — nothing derives it from the
-    /// bundle ID at runtime — and changing it would strand every already-saved key, forcing the
-    /// user to re-enter them for no functional gain. Leave it alone.
-    private static let service = "com.briansmithphotos.macphotomaster.apikeys"
+    /// The `kSecAttrService` lookup key for both stored keys. An opaque string, not derived from the
+    /// bundle ID at runtime, so changing it strands every already-saved key and forces re-entry —
+    /// which is why it stayed on the old `com.briansmithphotos.*` value long after the app moved to
+    /// `photos.briansmith.*` in 2026-07 (the old domain was never owned). Realigned to the current
+    /// bundle ID in 2026-07 during a deliberate keychain reset (the re-entry was already happening to
+    /// re-own the items under the cert-backed signature), so the name shown in the macOS keychain
+    /// prompt now matches the app. Only change it again alongside a reset that re-enters the keys.
+    private static let service = "photos.briansmith.macphotomaster.apikeys"
 
     /// `envVar` wins when set (keeps `swift run`/terminal-launched debugging simple, matching the
     /// existing test suite's `setenv`/`unsetenv` pattern); otherwise falls back to whatever's saved

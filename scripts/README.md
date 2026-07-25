@@ -57,11 +57,15 @@ Dry run is the default and writes nothing — it lists what each pass would chan
 carry no year), useful for limiting a run to one season's shots. Recurses across
 `.orf`/`.jpg`/`.jpeg`.
 
-`--force-focus` is for DxO PhotoLab exports: DxO writes its own `SubjectDistance`
-on export (a generic "far" figure), which the gap-fill default leaves in place.
-The flag overrides it with the camera's own `Olympus:FocusDistance` whenever that
-reads as a usable finite distance — blank/`inf`/0 are still skipped, so
-infinity-focused shots (where DxO's figure is as good as any) are left alone.
+`--force-focus` overwrites an existing `SubjectDistance` with the camera's own
+`Olympus:FocusDistance` (when that's a usable finite distance; blank/`inf`/0 are
+still skipped). It's the escape hatch for replacing a value you don't trust from
+another tool. Note it is **not** needed for DxO PhotoLab exports: DxO already
+copies the real `FocusDistance` into `SubjectDistance` faithfully, substituting a
+placeholder only for infinity-focus frames (which the `inf` guard skips anyway),
+so on DxO folders this flag rewrites identical values for no gain and forces a
+full re-upload per file. Prefer the plain default there — where the focus pass is
+typically a no-op and the alt-text pass does the useful work.
 
 **Warning:** `--apply` uses `exiftool -overwrite_original` — no per-file backup.
 It rewrites metadata only (image data is never touched), but run it against a

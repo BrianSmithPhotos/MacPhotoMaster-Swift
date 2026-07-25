@@ -19,13 +19,16 @@
 #
 #   (no --apply)   Dry run: lists what each pass WOULD change, writes nothing.
 #   --apply        Perform the writes.
-#   --force-focus  Write EXIF:SubjectDistance even when the file already has one.
-#                  By default the focus pass skips a file that already carries a
-#                  SubjectDistance, so it never overwrites another tool's value.
-#                  DxO PhotoLab writes its own SubjectDistance on export (a generic
-#                  "far" figure), which that default would leave in place; this flag
-#                  overrides it with the camera's own Olympus:FocusDistance whenever
-#                  that reads as a usable finite distance (still skipping blank/inf/0).
+#   --force-focus  Overwrite an existing EXIF:SubjectDistance with the camera's own
+#                  Olympus:FocusDistance (when that reads as a usable finite distance;
+#                  blank/inf/0 are still skipped). The focus pass skips files that
+#                  already have a SubjectDistance by default, so this is the escape
+#                  hatch for replacing a value you don't trust from another tool.
+#                  Note: DxO PhotoLab already copies the real FocusDistance into
+#                  SubjectDistance on export, only substituting a placeholder for
+#                  infinity-focus frames (which the inf guard skips anyway) -- so on
+#                  DxO exports this flag typically rewrites identical values for no
+#                  gain (and forces a full re-upload per file). Prefer the default.
 #   --year YYYY    Restrict to files whose DateTimeOriginal is that year
 #                  (the library folders carry no year, so this filters by capture
 #                  date; omit to process every file under <directory>).

@@ -73,6 +73,14 @@ if [ "$force_focus" -eq 0 ]; then
 fi
 alt_if='not $XMP:AltTextAccessibility and ($XMP-dc:Description or $IPTC:Caption-Abstract)'
 
+# exiftool exits 2 when every file fails the -if condition -- for a gap-fill pass
+# that just means "nothing to backfill", not an error. Under `set -e` an unhandled
+# exit 2 from the focus pass would abort the script before the alt-text pass runs,
+# so tolerate it here while still letting a genuine failure (exit 1) stop the run.
+run_exiftool() {
+  exiftool "$@" || [ $? -eq 2 ]
+}
+
 if [ "$apply" -eq 0 ]; then
   echo "== DRY RUN (no files will be changed) =="
   echo
@@ -89,7 +97,7 @@ if [ "$apply" -eq 0 ]; then
 fi
 
 echo "== Pass 1: focus distance -> EXIF:SubjectDistance =="
-exiftool "${common[@]}" -overwrite_original -if "$focus_if" \
+run_exiftool "${common[@]}" -overwrite_original -if "$focus_if" \
   '-EXIF:SubjectDistance<Olympus:FocusDistance#' \
   '-XMP-exif:SubjectDistance<Olympus:FocusDistance#' \
   "$target"
@@ -97,7 +105,7 @@ exiftool "${common[@]}" -overwrite_original -if "$focus_if" \
 echo "== Pass 2: caption -> XMP-iptcCore:AltTextAccessibility =="
 # Both source assignments are listed; exiftool uses the last one that has a value,
 # so XMP-dc:Description (the app's canonical caption field) wins when present.
-exiftool "${common[@]}" -overwrite_original -if "$alt_if" \
+run_exiftool "${common[@]}" -overwrite_original -if "$alt_if" \
   '-XMP-iptcCore:AltTextAccessibility<IPTC:Caption-Abstract' \
   '-XMP-iptcCore:AltTextAccessibility<XMP-dc:Description' \
   "$target"

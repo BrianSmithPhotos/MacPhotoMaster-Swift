@@ -7,6 +7,11 @@ struct IPadImportOutcome: Equatable {
     /// `nil` when the file was skipped or failed — `reason` says which.
     var destinationURL: URL?
     var reason: String?
+    /// The RAW-developed JPEG variant this import also produced, for a file the iPad marked with
+    /// `RawDevelopService.developMarkerKeyword`. `nil` when it wasn't marked — or when the develop
+    /// failed, which `developFailureReason` reports separately because the RAW itself still imported.
+    var derivedDestinationURL: URL?
+    var developFailureReason: String?
 
     var isImported: Bool { destinationURL != nil }
 }
@@ -15,7 +20,9 @@ struct IPadImportSummary: Equatable {
     var outcomes: [IPadImportOutcome] = []
 
     var importedCount: Int { outcomes.filter(\.isImported).count }
+    var developedCount: Int { outcomes.filter { $0.derivedDestinationURL != nil }.count }
     var failures: [IPadImportOutcome] { outcomes.filter { !$0.isImported } }
+    var developFailures: [IPadImportOutcome] { outcomes.filter { $0.developFailureReason != nil } }
 }
 
 /// Finishes off files the iPad processed but couldn't complete, then moves them into the real
@@ -119,9 +126,14 @@ struct IPadImportService {
                 reason: "Not a filename this app generated, so its sequence and batch can't be recovered.")
         }
 
+        // The iPad can't develop a RAW itself, so it staged a marker keyword instead; this is where
+        // that request is redeemed. It's stripped either way — it's this app's bookkeeping and must
+        // never reach the library copy's keywords.
+        let isMarkedForDevelop = RawDevelopService.isMarkedForDevelop(draft.keywords)
+
         var asset = asset
         asset.descriptionText = draft.description
-        asset.keywords = draft.keywords
+        asset.keywords = RawDevelopService.removingDevelopMarker(from: draft.keywords)
         asset.artFilterToken = makerNotes.artFilterToken
         // Only readable here (exiftool sees the Olympus MakerNote the iPad's ImageIO reader can't);
         // ProcessMoveService parses it into the standard EXIF:SubjectDistance on the destination copy.
@@ -145,11 +157,83 @@ struct IPadImportService {
         do {
             let result = try await processMoveService.processAndCopy(
                 asset: asset, renameContext: context, libraryRoot: libraryRoot)
+            // Develop before the source is trashed — it is the RAW being read.
+            let developed = isMarkedForDevelop
+                ? await developRAW(asset, sequence: parsedName.sequence, batch: parsedName.batch,
+                    libraryRoot: libraryRoot)
+                : (destinationURL: nil, failureReason: nil)
             discardImportedSource(at: asset.url, sidecarURL: sidecarURL)
-            return IPadImportOutcome(sourceName: sourceName, destinationURL: result.destinationURL, reason: nil)
+            return IPadImportOutcome(
+                sourceName: sourceName, destinationURL: result.destinationURL, reason: nil,
+                derivedDestinationURL: developed.destinationURL,
+                developFailureReason: developed.failureReason)
         } catch {
             return IPadImportOutcome(
                 sourceName: sourceName, destinationURL: nil, reason: error.localizedDescription)
+        }
+    }
+
+    /// Renders the marked RAW to a JPEG and puts that variant in the library beside it, carrying the
+    /// same description/keywords/GPS the RAW just got plus the decoder token in the art-filter slot.
+    ///
+    /// A failure here is reported but doesn't fail the import: the RAW itself is already verified
+    /// into the library by this point, and failing it would only mean a retry that can't reach the
+    /// same file again. `derivedFrom` is what keeps `sooc` off a derivative — a developed file is
+    /// emphatically not straight out of camera.
+    private func developRAW(
+        _ asset: PhotoAsset, sequence: String, batch: String, libraryRoot: URL
+    ) async -> (destinationURL: URL?, failureReason: String?) {
+        guard PhotoAssetLoader.isRaw(asset.url) else { return (nil, nil) }
+
+        // App-created scratch that never held user data, removed rather than trashed — the same
+        // documented exception `RawDevelopService.developViaDNG` makes for its intermediate DNG.
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IPadImportDevelop-\(UUID().uuidString)")
+        do {
+            try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        } catch {
+            return (nil, error.localizedDescription)
+        }
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        let renderURL = scratch
+            .appendingPathComponent(asset.url.deletingPathExtension().lastPathComponent)
+            .appendingPathExtension("jpg")
+
+        do {
+            let developed = try await RawDevelopService(dngConverter: AdobeDNGConverter())
+                .develop(asset.url, to: renderURL)
+
+            // Built from the rendered file's own EXIF rather than copied off the RAW's asset: the
+            // render carries capture time, camera and lens through untouched, and reading them back
+            // is what proves the derivative routes to the same day folder as its original.
+            let reader = NativeMetadataReader()
+            var derived = reader.mapToPhotoAsset(
+                url: renderURL, metadata: try reader.readMetadata(at: renderURL))
+            derived.derivedFrom = asset.url
+            derived.descriptionText = asset.descriptionText
+            derived.keywords = asset.keywords + [developed.token]
+            derived.focusDistance = asset.focusDistance
+            derived.gpsLatitude = asset.gpsLatitude
+            derived.gpsLongitude = asset.gpsLongitude
+            derived.gpsAltitude = asset.gpsAltitude
+
+            // `artFilterToken` on the context but not on the asset: the token belongs in the
+            // filename's art-filter slot, but a RAW carries no in-camera effect, so the
+            // "In camera effect" description note must not fire.
+            let context = RenameContext(
+                sourceURL: Self.sequenceOnlyURL(for: renderURL, sequence: sequence),
+                capturedAt: derived.capturedAt,
+                cameraModel: derived.cameraModel,
+                lensModel: derived.lensModel,
+                batch: batch,
+                artFilterToken: developed.token)
+
+            let result = try await processMoveService.processAndCopy(
+                asset: derived, renameContext: context, libraryRoot: libraryRoot)
+            return (result.destinationURL, nil)
+        } catch {
+            return (nil, error.localizedDescription)
         }
     }
 

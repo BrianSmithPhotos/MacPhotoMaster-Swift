@@ -15,6 +15,13 @@ public enum AutoMetadataRules {
         soocJPEGExtensions.contains(url.pathExtension.lowercased()) ? "sooc" : ""
     }
 
+    /// The rule above, minus its one exception: a `RawDevelopService` output is a JPEG by extension
+    /// but emphatically not straight out of camera — Apple's RAW engine rendered it, which is the
+    /// whole reason it exists.
+    public static func soocToken(for asset: PhotoAsset) -> String {
+        asset.derivedFrom == nil ? soocToken(for: asset.url) : ""
+    }
+
     /// Appends camera/lens/art-filter/SOOC tokens to `keywords`, case-insensitively de-duplicated
     /// against what's already there and against each other. Blank tokens are skipped.
     public static func keywordsWithAutoTokens(

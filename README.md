@@ -23,6 +23,10 @@ in this one.
   with oMLX".
 - Optional, for eBird-verified bird-species candidate lists in AI prompts: an
   [eBird](https://ebird.org) API key.
+- Optional, for Develop RAW on a camera Apple's newest RAW decoder doesn't list (e.g. OM System
+  bodies today): [Adobe DNG Converter](https://helpx.adobe.com/camera-raw/using/adobe-dng-converter.html).
+  Without it those files develop at the newest decoder they themselves offer — see `docs/SPEC.md` §5
+  "RAW develop".
 - Both API keys are entered in Settings (Cmd+,) > API Keys, where they're stored in the macOS
   Keychain via `APIKeyStore` — this is the reliable path for GUI-launched builds (Xcode's Run
   button, Finder, Dock), none of which inherit a shell's `.zshrc` exports. Setting the process
@@ -69,6 +73,12 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
   filmstrip (`ProcessedStateStore`) so a re-opened folder still shows what's already gone through
   once — it never prevents reprocessing. Auto-skipping successfully processed files (per
   `docs/SPEC.md` §5) isn't wired yet.
+- **RAW develop** (§5): right-click a capture set or a RAW in the filmstrip → Develop RAW renders a
+  JPEG variant with Apple's RAW engine and joins it to the capture set. Decoder chosen per file: the
+  newest one the file itself reaches, or via a temporary DNG for a camera that decoder doesn't list
+  (Adobe DNG Converter, optional). The derivative stages in Application Support — never on the SD
+  card — and carries a decoder-honest `RAW9`/`RAW8` token into its filename and keywords. On iPad,
+  which can't write a DNG, the action instead marks the file for the Mac's import to develop.
 - **AI-assisted suggestions** (§6): pluggable provider interface with three backends — local
   Ollama, cloud OpenRouter, and a native in-process MLX backend (`mlx-swift-lm`, see
   `docs/MLX_PROVIDER.md`) — vision pre-check, retry-with-crop fallback, and group-aware

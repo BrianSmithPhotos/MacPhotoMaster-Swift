@@ -168,6 +168,37 @@ deterministically, and copy files into local storage.
     **skipped and named in the failure list**, left untouched. Importing it bare would silently
     discard the iPad session's descriptions, keywords and GPS.
 
+### RAW develop
+
+Right-click a capture set (or a RAW in the preview filmstrip) → **Develop RAW** renders that RAW to a
+JPEG variant with Apple's RAW engine and joins it to the capture set as an ordinary member, editable,
+saveable and processable like any other file. It is not a develop UI: the render is at the filter's
+default settings, the point being Apple's engine applied to the file as the camera recorded it.
+
+- **Decoder routing**, checked per file, because decoder support is per *camera model*, not per
+  format:
+  1. the file's own `supportedDecoderVersions` contains `9` → decode direct at v9;
+  2. else, if Adobe DNG Converter is installed → convert to DNG in a temp directory and decode that
+     at `9.dng` (the DNG pipeline is model-agnostic, which makes this the general answer for an
+     unsupported body);
+  3. else → decode at the newest version the file itself offers.
+  No maintenance is needed when a body joins the decoder-9 list — it simply starts taking branch 1.
+- **Naming**: the decoder that actually ran goes in the filename's art-filter slot and the keywords
+  as `RAW9`/`RAW8` (§4). It is decoder-honest, not aspirational: a file that had to fall back reads
+  `RAW8`. A developed file never gets the `sooc` keyword, and never gets the "In camera effect"
+  description note — a RAW carries no in-camera effect.
+- **Storage**: the derivative is staged in Application Support, never written to the SD card (which
+  may be full, and stays in use across a multi-day trip — the same reasoning as the iPad's sidecar
+  staging). It is trashed once Process & Move has verified it into the library.
+- **iPad divergence**: iPadOS cannot write a DNG (ImageIO lists no DNG output type), so a body
+  outside the decoder-9 list cannot be developed there at all. The iPad instead offers **Mark for RAW
+  develop**, which stages a marker keyword in the sidecar and badges the tile; the marker rides
+  Process & Move into the destination `.xmp`, and the Mac's "Import from iPad" develops the file and
+  strips the marker. The marker is never shown in the keyword field and never reaches the library
+  copy's keywords.
+  - A develop failure at import time is reported but does not fail the import: the RAW itself is
+    already verified into the library by then.
+
 ## 6. AI-assisted suggestions
 
 - Backend-agnostic: a small provider interface (think: local Ollama server vs. a cloud API like

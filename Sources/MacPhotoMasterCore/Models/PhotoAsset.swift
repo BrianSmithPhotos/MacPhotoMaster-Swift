@@ -26,4 +26,11 @@ public struct PhotoAsset: Identifiable, Hashable {
     public var gpsLatitude: Double?
     public var gpsLongitude: Double?
     public var gpsAltitude: Double?
+
+    /// The RAW file this asset was developed from, for a `RawDevelopService` output — `nil` for
+    /// every file that came off the camera. One field doing three jobs: it marks the asset as
+    /// derived, it names the original whose filename the rename must be built from (the derivative
+    /// lives under a staging key, whose digits `RenameService.sequence(from:)` would otherwise
+    /// harvest), and it keys `RawDerivedStore`.
+    public var derivedFrom: URL?
 }

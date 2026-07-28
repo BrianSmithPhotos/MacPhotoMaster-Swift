@@ -212,6 +212,12 @@ final class SourceBrowserViewModel: ObservableObject {
     private let mlxProvider: AIProvider = MLXNativeProvider()
     private let foundationProvider: AIProvider = FoundationModelsProvider()
     private let aiSuggestionService = AISuggestionService()
+    /// Where RAW-developed JPEGs are staged. `nil` only if Application Support is unwritable, in
+    /// which case Develop RAW is simply unavailable rather than the folder failing to load.
+    ///
+    /// Unlike the SQLite-backed stores below this needs no `ensure…` accessor: its init only creates
+    /// a directory, cheap enough to do up front, and `load(_:)` needs it synchronously.
+    private let rawDerivedStore: RawDerivedStore? = try? RawDerivedStore.makeDefault()
     private static let ebirdLogger = Logger(subsystem: "MacPhotoMaster", category: "EBirdSpecies")
 
     /// Reverse-geocode context text (docs/SPEC.md §6/§7), keyed by capture-set representative id so
@@ -409,19 +415,28 @@ final class SourceBrowserViewModel: ObservableObject {
     /// *structured* child task: it's automatically awaited (and cancelled, if this enclosing
     /// `Task` is cancelled) by the time this scope exits, so there's no separate lifetime to
     /// manage the way there would be with two unstructured `Task { }`s.
-    private func load(_ folderURL: URL) {
+    ///
+    /// `preservingSelection` is for a reload triggered by an action on the folder already being
+    /// shown (developing a RAW, processing a derivative away) rather than by navigation: those must
+    /// not throw the user back to the first tile of a folder they were part-way through reviewing.
+    private func load(_ folderURL: URL, preservingSelection: Bool = false) {
         isLoading = true
         loadErrorMessage = nil
         Task { await syncAndImportTimelineIfNeeded() }
         Task {
             defer { isLoading = false }
+            let previousSelectionID = preservingSelection ? selectedAssetID : nil
             do {
                 async let assetsTask = loader.loadAssets(in: folderURL)
                 async let subfoldersTask = folderBrowser.subfolders(of: folderURL)
                 let (assets, folders) = try await (assetsTask, subfoldersTask)
                 let skippedPaths = await skippedAssetPaths(inFolder: folderURL)
                 processedAssetPaths = await loadProcessedAssetPaths(inFolder: folderURL)
-                let allSets = grouping.group(assets)
+                // RAW-developed JPEGs live in app storage rather than this folder, so they're
+                // merged in before grouping. Their EXIF capture time came through the render
+                // untouched, which is what puts each one in its original's capture set.
+                let derived = rawDerivedStore?.derivedAssets(forOriginals: assets) ?? []
+                let allSets = grouping.group(assets + derived)
                 captureSets = allSets.filter { set in
                     guard let representativePath = set.representative?.url.path else { return true }
                     return !skippedPaths.contains(representativePath)
@@ -433,7 +448,19 @@ final class SourceBrowserViewModel: ObservableObject {
                 folderPathByCaptureSetID = Dictionary(
                     uniqueKeysWithValues: allSets.map { ($0.id, folderURL.path) })
                 subfolders = folders
-                selectFirstTile()
+                if let previousSelectionID,
+                    displayedCaptureSets.flatMap(\.members).contains(where: { $0.id == previousSelectionID })
+                {
+                    // Only assign when it actually changed: `selectedAssetID`'s `didSet` resets the
+                    // metadata edit buffer, which would silently discard anything typed into the
+                    // form while the develop that triggered this reload was running.
+                    if selectedAssetID != previousSelectionID {
+                        selectedAssetID = previousSelectionID
+                    }
+                    refreshVariantStrip()
+                } else {
+                    selectFirstTile()
+                }
             } catch {
                 loadErrorMessage = error.localizedDescription
             }
@@ -1217,6 +1244,75 @@ final class SourceBrowserViewModel: ObservableObject {
         skip(selectedCaptureSet)
     }
 
+    @Published private(set) var isDevelopingRAW = false
+    @Published var developStatusMessage: String?
+
+    /// Whether Develop RAW has anything to do for `scope` — drives the context menu item's enabled
+    /// state, so it must stay cheap enough to evaluate during a view update. It answers from the
+    /// loaded capture sets rather than the filesystem: derivatives are merged in by `load(_:)`, so
+    /// "already developed" is just "some member points back at this RAW".
+    func canDevelopRAW(scope: ProcessMoveScope) -> Bool {
+        rawDerivedStore != nil && !rawAssetsNeedingDevelop(in: scope).isEmpty
+    }
+
+    private func rawAssetsNeedingDevelop(in scope: ProcessMoveScope) -> [PhotoAsset] {
+        let alreadyDeveloped = Set(captureSets.flatMap(\.members).compactMap(\.derivedFrom))
+        return scope.assets.filter {
+            PhotoAssetLoader.isRaw($0.url) && !alreadyDeveloped.contains($0.url)
+        }
+    }
+
+    /// Renders every not-yet-developed RAW file in `scope` to a JPEG in `RawDerivedStore`, then
+    /// reloads so the results appear as members of their originals' capture sets. See docs/SPEC.md
+    /// §5 "RAW develop" and `RawDevelopService` for how the decoder is chosen.
+    ///
+    /// The decoder token is written into the derivative's own IPTC keywords rather than held in
+    /// memory. A staged derivative outlives the session that made it, and the token has to survive
+    /// with it: it is what puts `RAW9` in the processed filename, and recomputing it later would
+    /// mean decoding the RAW again just to ask which decoder ran.
+    ///
+    /// One file's failure doesn't stop the rest, same as `process(scope:libraryRoot:)`.
+    func developRAW(scope: ProcessMoveScope) {
+        guard !isDevelopingRAW, let store = rawDerivedStore else { return }
+        let targets = rawAssetsNeedingDevelop(in: scope)
+        guard !targets.isEmpty else { return }
+        let folderURL = breadcrumb.last
+
+        isDevelopingRAW = true
+        developStatusMessage = "Developing \(targets.count) RAW file(s)…"
+        Task {
+            defer { isDevelopingRAW = false }
+            // Absent DNG Converter is not an error: `RawDevelopService` falls back to the newest
+            // decoder the file itself offers, and the token reports whichever one that was.
+            let service = RawDevelopService(dngConverter: AdobeDNGConverter())
+            var failures: [String] = []
+
+            for (index, target) in targets.enumerated() {
+                developStatusMessage =
+                    "Developing \(index + 1) of \(targets.count): \(target.url.lastPathComponent)…"
+                do {
+                    let destination = try store.derivedURL(for: target.url)
+                    let result = try await service.develop(target.url, to: destination)
+                    try await exifTool.write(
+                        title: nil, description: "", keywords: [result.token], gps: nil,
+                        to: destination)
+                } catch {
+                    failures.append("\(target.url.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+
+            if let folderURL {
+                load(folderURL, preservingSelection: true)
+            }
+            let successCount = targets.count - failures.count
+            developStatusMessage =
+                failures.isEmpty
+                ? "Developed \(successCount) RAW file(s)."
+                : "Developed \(successCount)/\(targets.count); \(failures.count) failed:\n"
+                    + failures.joined(separator: "\n")
+        }
+    }
+
     /// Resolves `scope` to its concrete assets (see `ProcessMoveScope.assets`) and copies each into
     /// `libraryRoot` via `ProcessMoveService`, per docs/SPEC.md §5. One asset's failure (a bad copy,
     /// a metadata-write error) doesn't stop the rest of the scope from processing — failures are
@@ -1248,25 +1344,33 @@ final class SourceBrowserViewModel: ObservableObject {
                 uniqueKeysWithValues: captureSets.flatMap(\.members).map { ($0.id, $0) })
             var failures: [String] = []
             var processedPaths: [String] = []
+            var developedOriginals: [URL] = []
             for asset in assets {
                 let asset = assetByID[asset.id] ?? asset
-                let context = RenameContext(
-                    sourceURL: asset.url,
-                    capturedAt: asset.capturedAt,
-                    cameraModel: asset.cameraModel,
-                    lensModel: asset.lensModel,
-                    batch: sessionBatch,
-                    artFilterToken: asset.artFilterToken)
+                let context = Self.renameContext(for: asset, batch: sessionBatch)
                 do {
                     _ = try await processMoveService.processAndCopy(
                         asset: asset, renameContext: context, libraryRoot: libraryRoot)
                     processedPaths.append(asset.url.path)
+                    if let original = asset.derivedFrom {
+                        developedOriginals.append(original)
+                    }
                 } catch {
                     failures.append("\(asset.url.lastPathComponent): \(error.localizedDescription)")
                 }
             }
+            // The derivative existed only to reach the library; now that it's verified in, the
+            // staging copy is dropped so app storage doesn't accumulate a second copy of every
+            // developed frame. It's regenerable from the RAW in a second or two if ever needed.
+            for original in developedOriginals {
+                try? rawDerivedStore?.discard(for: original)
+            }
             if let folderPath, !processedPaths.isEmpty {
                 await markAssetsProcessed(processedPaths, inFolder: folderPath)
+            }
+            // Only after the processed state is recorded, so the reloaded grid shows the badges.
+            if !developedOriginals.isEmpty, let folderPath {
+                load(URL(fileURLWithPath: folderPath), preservingSelection: true)
             }
             let successCount = assets.count - failures.count
             if failures.isEmpty {
@@ -1306,10 +1410,22 @@ final class SourceBrowserViewModel: ObservableObject {
                     summary.outcomes.isEmpty
                     ? "No photos found in \(exportRoot.lastPathComponent)."
                     : "Imported \(summary.importedCount) of \(summary.outcomes.count) file(s)."
+                        + Self.developSuffix(for: summary)
             } catch {
                 iPadImportStatusMessage = error.localizedDescription
             }
         }
+    }
+
+    /// Reports the RAW-develop half of an import, which only happens for files the iPad marked. Says
+    /// nothing at all when none were marked — the common case.
+    private static func developSuffix(for summary: IPadImportSummary) -> String {
+        var parts: [String] = []
+        if summary.developedCount > 0 { parts.append("Developed \(summary.developedCount) RAW file(s).") }
+        if !summary.developFailures.isEmpty {
+            parts.append("\(summary.developFailures.count) RAW develop(s) failed.")
+        }
+        return parts.isEmpty ? "" : " " + parts.joined(separator: " ")
     }
 
     /// Resets the metadata edit buffer to `selectedAsset`'s current field values (or clears it when
@@ -1347,6 +1463,37 @@ final class SourceBrowserViewModel: ObservableObject {
         }
     }
 
+    /// The rename inputs for `asset`, shared by the preview and the actual process run so the name
+    /// shown is the name written.
+    ///
+    /// A RAW-developed derivative needs both fields redirected. Its own filename is a
+    /// `RawDerivedStore` key, and `RenameService.sequence(from:)` harvests every digit in the stem,
+    /// so the leading file size would be absorbed into the frame number — the rename is handed a
+    /// stand-in built from the original's name instead, the same device `IPadImportService`
+    /// documents at `sequenceOnlyURL`. And the decoder token goes in the art-filter *filename* slot
+    /// while `asset.artFilterToken` stays empty: an ORF carries no in-camera effect, so the
+    /// "In camera effect …" description note (`AutoMetadataRules`) must not fire for it.
+    /// Internal rather than private so the derived-asset rules above can be unit tested without
+    /// standing up a whole browsing session.
+    static func renameContext(for asset: PhotoAsset, batch: String) -> RenameContext {
+        guard let original = asset.derivedFrom else {
+            return RenameContext(
+                sourceURL: asset.url,
+                capturedAt: asset.capturedAt,
+                cameraModel: asset.cameraModel,
+                lensModel: asset.lensModel,
+                batch: batch,
+                artFilterToken: asset.artFilterToken)
+        }
+        return RenameContext(
+            sourceURL: original.deletingPathExtension().appendingPathExtension(asset.url.pathExtension),
+            capturedAt: asset.capturedAt,
+            cameraModel: asset.cameraModel,
+            lensModel: asset.lensModel,
+            batch: batch,
+            artFilterToken: RawDevelopService.token(in: asset.keywords))
+    }
+
     /// Recomputes `renamePreviewFilename` for `selectedAsset` against `sessionBatch`'s current
     /// value — see that property's doc comment for why this exists and when it's called.
     private func updateRenamePreview() {
@@ -1354,14 +1501,7 @@ final class SourceBrowserViewModel: ObservableObject {
             renamePreviewFilename = ""
             return
         }
-        let context = RenameContext(
-            sourceURL: asset.url,
-            capturedAt: asset.capturedAt,
-            cameraModel: asset.cameraModel,
-            lensModel: asset.lensModel,
-            batch: sessionBatch,
-            artFilterToken: asset.artFilterToken)
-        let candidate = renameService.buildFilename(for: context)
+        let candidate = renameService.buildFilename(for: Self.renameContext(for: asset, batch: sessionBatch))
 
         var existingNames = Self.existingFileNames(in: asset.url.deletingLastPathComponent())
         existingNames.remove(asset.url.lastPathComponent)
@@ -1507,7 +1647,7 @@ final class SourceBrowserViewModel: ObservableObject {
         var groupedTargets: [AutoMetadataGroupKey: [(id: PhotoAsset.ID, url: URL)]] = [:]
         for target in targets {
             let asset = assetByID[target.id] ?? target
-            let soocToken = AutoMetadataRules.soocToken(for: asset.url)
+            let soocToken = AutoMetadataRules.soocToken(for: asset)
             let finalKeywords = AutoMetadataRules.keywordsWithAutoTokens(
                 keywords, artFilterToken: asset.artFilterToken, cameraToken: asset.cameraModel,
                 lensToken: asset.lensModel, soocToken: soocToken)

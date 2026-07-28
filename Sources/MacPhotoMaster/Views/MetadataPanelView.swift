@@ -235,6 +235,14 @@ struct MetadataPanelView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            // Develop RAW is reached from a context menu rather than a button here, but its
+            // progress belongs in the same place as the other long-running action's.
+            if let developStatusMessage = viewModel.developStatusMessage {
+                Text(developStatusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding([.horizontal, .bottom])
     }

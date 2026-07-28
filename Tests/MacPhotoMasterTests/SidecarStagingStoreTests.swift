@@ -122,6 +122,23 @@ final class SidecarStagingStoreTests: XCTestCase {
         XCTAssertEqual(draft?.title, "Staged")
     }
 
+    /// The iPad's "Mark for RAW develop" adds no transport of its own — it rides this channel as an
+    /// ordinary keyword, and `IPadImportService` reads it back on the Mac. That only works if the
+    /// marker survives the XMP write/parse round trip intact, so this asserts the one hop this
+    /// module owns.
+    func testDevelopMarkerSurvivesTheSidecarRoundTrip() async throws {
+        let url = try makeTempFile(named: "P1234567.ORF")
+        let store = try makeStore()
+
+        try await store.stage(
+            title: nil, description: "heron on a post",
+            keywords: ["heron", RawDevelopService.developMarkerKeyword], gps: nil, for: url)
+
+        let draft = try XCTUnwrap(try store.stagedDraft(for: url))
+        XCTAssertTrue(RawDevelopService.isMarkedForDevelop(draft.keywords))
+        XCTAssertEqual(RawDevelopService.removingDevelopMarker(from: draft.keywords), ["heron"])
+    }
+
     /// Same filename, different byte size (e.g. a same-numbered shot from a reformatted card) must
     /// not collide with an unrelated staged draft.
     func testDifferentFileSizeDoesNotCollide() async throws {

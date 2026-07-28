@@ -16,7 +16,18 @@ public enum PhotoAssetLoaderError: Error, Equatable {
 public struct PhotoAssetLoader {
     public init() {}
 
-    public static let supportedExtensions: Set<String> = ["jpg", "jpeg", "orf"]
+    /// RAW formats the app browses and can develop. Kept separate from `supportedExtensions` because
+    /// `RawDevelopService` needs to ask "is this a RAW file?" without re-deriving the answer by
+    /// subtracting the JPEG cases — and because adding a camera format should be one entry here, not
+    /// two lists to keep in step. `CIRAWFilter` decides per file whether it can actually decode one;
+    /// this set only says which extensions are worth offering to it.
+    public static let rawExtensions: Set<String> = ["orf", "raf"]
+
+    public static let supportedExtensions: Set<String> = Set(["jpg", "jpeg"]).union(rawExtensions)
+
+    public static func isRaw(_ url: URL) -> Bool {
+        rawExtensions.contains(url.pathExtension.lowercased())
+    }
 
     /// Caps how many files are read at once. Each `NativeMetadataReader` read is CPU-bound
     /// (ImageIO parsing, no network/disk wait once the file's paged in), so throughput is bounded

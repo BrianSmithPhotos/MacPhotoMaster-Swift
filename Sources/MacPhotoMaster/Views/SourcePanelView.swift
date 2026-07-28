@@ -82,6 +82,12 @@ struct SourcePanelView: View {
                                     switch viewModel.sourceViewFilter {
                                     case .active:
                                         Button("Skip") { viewModel.skip(captureSet) }
+                                        Button("Develop RAW") {
+                                            viewModel.developRAW(scope: .captureSet(captureSet))
+                                        }
+                                        .disabled(
+                                            viewModel.isDevelopingRAW
+                                                || !viewModel.canDevelopRAW(scope: .captureSet(captureSet)))
                                     case .skipped:
                                         Button("Un-skip") { viewModel.unskip(captureSet) }
                                     }

@@ -92,6 +92,52 @@ final class ProcessMoveServiceTests: XCTestCase {
         XCTAssertEqual(metadata["GPS:GPSLatitudeRef"] as? String, "North")
     }
 
+    /// A RAW-developed JPEG going through the same path as any other file. Three things have to hold
+    /// at once, and each would be wrong by default:
+    /// - no `sooc` keyword, because Apple's RAW engine rendered this, not the camera;
+    /// - `RAW9` in the filename's art-filter slot, and no "In camera effect" note in the description
+    ///   — the token records the decoder, and an ORF carries no in-camera effect;
+    /// - the camera's own frame number, which means `RenameContext.sourceURL` must be a stand-in
+    ///   built from the original's name. The real file sits under a `RawDerivedStore` key whose
+    ///   leading size digits `RenameService.sequence(from:)` would otherwise harvest.
+    func testProcessAndCopyOfARawDevelopedJPEGSkipsSoocAndCarriesTheDecoderToken() async throws {
+        let sourceDirectory = try makeTempDirectory()
+        let libraryRoot = try makeTempDirectory()
+        let originalURL = sourceDirectory.appendingPathComponent("P1066411.ORF")
+        let derivedURL = try makeSourceJPEG(named: "19763130_P1066411.ORF.jpg", in: sourceDirectory)
+
+        var asset = PhotoAsset(id: derivedURL)
+        asset.derivedFrom = originalURL
+        asset.descriptionText = "Heron at dawn"
+        asset.keywords = ["RAW9"]
+        asset.cameraModel = "OM-3"
+        asset.lensModel = "OM 100-400mm"
+        asset.capturedAt = DateComponents(
+            calendar: Calendar(identifier: .gregorian), timeZone: .current,
+            year: 2026, month: 7, day: 27, hour: 9, minute: 29
+        ).date
+
+        let renameContext = RenameContext(
+            sourceURL: originalURL.deletingPathExtension().appendingPathExtension("jpg"),
+            capturedAt: asset.capturedAt,
+            cameraModel: asset.cameraModel,
+            lensModel: asset.lensModel,
+            batch: "SanRafael",
+            artFilterToken: "RAW9")
+
+        let service = ProcessMoveService(metadataWriter: ExifToolClient())
+        let result = try await service.processAndCopy(
+            asset: asset, renameContext: renameContext, libraryRoot: libraryRoot)
+
+        XCTAssertEqual(
+            result.destinationURL.path,
+            libraryRoot.appendingPathComponent("7 July/27/jpg/1066411_SanRafael_20260727_0929_RAW9_OM-3_OM-100-400mm.jpg").path)
+
+        let metadata = try await ExifToolClient().readMetadata(at: result.destinationURL)
+        XCTAssertEqual(metadata["IPTC:Keywords"] as? [String], ["RAW9", "OM-3", "OM 100-400mm"])
+        XCTAssertEqual(metadata["IPTC:Caption-Abstract"] as? String, "Heron at dawn")
+    }
+
     func testProcessAndCopyThrowsWhenSourceIsMissing() async throws {
         let libraryRoot = try makeTempDirectory()
         let missingURL = FileManager.default.temporaryDirectory.appendingPathComponent("does-not-exist-\(UUID().uuidString).jpg")

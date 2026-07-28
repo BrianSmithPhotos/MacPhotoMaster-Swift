@@ -49,6 +49,18 @@ final class PhotoAssetLoaderTests: XCTestCase {
         XCTAssertEqual(assets.map(\.url.lastPathComponent), ["real.jpg"])
     }
 
+    /// The two sets have to stay in step — `supportedExtensions` is what the folder scan filters on
+    /// and `rawExtensions` is what `RawDevelopService` offers to `CIRAWFilter`, so a RAW format
+    /// reachable by one but not the other would either be unbrowsable or undevelopable.
+    func testRawExtensionsAreAllSupportedAndRecognisedAsRaw() {
+        XCTAssertTrue(PhotoAssetLoader.rawExtensions.isSubset(of: PhotoAssetLoader.supportedExtensions))
+        XCTAssertEqual(PhotoAssetLoader.rawExtensions, ["orf", "raf"])
+
+        XCTAssertTrue(PhotoAssetLoader.isRaw(URL(fileURLWithPath: "/x/P1010042.ORF")))
+        XCTAssertTrue(PhotoAssetLoader.isRaw(URL(fileURLWithPath: "/x/DSCF5072.RAF")))
+        XCTAssertFalse(PhotoAssetLoader.isRaw(URL(fileURLWithPath: "/x/P1010042.JPG")))
+    }
+
     func testLoadAssetsReturnsEmptyArrayForFolderWithNoSupportedFiles() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

@@ -117,6 +117,16 @@ private struct SelectedImagesStripView: View {
                         onPlainSelect: { viewModel.setActivePreview(member.id) },
                         onToggleSelect: { viewModel.toggleVariantSelection(member.id) }
                     )
+                    // Per-file counterpart to the capture-set action in `SourcePanelView`: develop
+                    // just this one RAW rather than every RAW in its set.
+                    .contextMenu {
+                        Button("Develop RAW") {
+                            viewModel.developRAW(scope: .singleAsset(member))
+                        }
+                        .disabled(
+                            viewModel.isDevelopingRAW
+                                || !viewModel.canDevelopRAW(scope: .singleAsset(member)))
+                    }
                 }
             }
             .padding(.top, 4)

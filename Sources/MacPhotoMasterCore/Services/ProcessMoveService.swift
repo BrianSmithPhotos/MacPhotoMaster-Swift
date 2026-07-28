@@ -59,7 +59,7 @@ public struct ProcessMoveService {
 
         let title = (proposedName as NSString).deletingPathExtension
 
-        let soocToken = AutoMetadataRules.soocToken(for: asset.url)
+        let soocToken = AutoMetadataRules.soocToken(for: asset)
         let description = AutoMetadataRules.descriptionWithArtFilterNote(
             asset.descriptionText, artFilterToken: asset.artFilterToken)
         let keywords = AutoMetadataRules.keywordsWithAutoTokens(

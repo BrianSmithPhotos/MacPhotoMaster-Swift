@@ -15,6 +15,15 @@ final class AutoMetadataRulesTests: XCTestCase {
         XCTAssertEqual(AutoMetadataRules.soocToken(for: URL(fileURLWithPath: "/tmp/P1010042.ORF")), "")
     }
 
+    func testSoocTokenForARawDevelopedJPEGIsEmpty() {
+        var derived = PhotoAsset(id: URL(fileURLWithPath: "/tmp/derived.jpg"))
+        derived.derivedFrom = URL(fileURLWithPath: "/tmp/P1010042.ORF")
+
+        XCTAssertEqual(AutoMetadataRules.soocToken(for: derived), "")
+        // The camera's own JPEG alongside it still gets the token.
+        XCTAssertEqual(AutoMetadataRules.soocToken(for: PhotoAsset(id: URL(fileURLWithPath: "/tmp/P1010042.JPG"))), "sooc")
+    }
+
     // MARK: - keywordsWithAutoTokens
 
     func testKeywordsWithAutoTokensAppendsAllProvidedTokens() {

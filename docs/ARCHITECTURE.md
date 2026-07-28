@@ -241,6 +241,49 @@ Sources are trashed (never `removeItem`) only after `ProcessMoveService` has ver
 copy, which is what makes a partially failed run safe to re-run over the same folder: it sees only
 the leftovers.
 
+A fourth job was added later: redeeming the iPad's **RAW develop marker** (see below). It fits the
+same shape — read something out of the sidecar, act on it, hand the result to the ordinary
+`ProcessMoveService` — so it is a second `processAndCopy` call rather than a new pipeline.
+
+## RAW develop
+
+`RawDevelopService` (Core) renders a RAW to a JPEG via `CIRAWFilter` +
+`CIContext.writeJPEGRepresentation`, choosing a decoder per file (SPEC.md §5 "RAW develop"). The
+platform split follows `MetadataWriter`/`ExifToolClient` exactly: the service takes an optional
+`any DNGConverting`, and the only implementation, `AdobeDNGConverter`, lives in the `MacPhotoMaster`
+app target because it shells out to a Mac-only application. An absent converter is not an error — it
+makes the service fall back to the newest decoder the file itself offers.
+
+- **`decoderVersion` is always set explicitly.** Apple documents the default as the newest available
+  version, but an X-T5 `.RAF` that lists `9` as supported still opens at `8`. Trusting the default
+  would silently ship a decoder-8 render from the one camera that doesn't need the DNG detour.
+- **`CIRAWFilter(imageURL:)` is not a validity gate.** It returns a filter for any readable file,
+  including a text file, and only then reports `["None"]` as its decoder list with a zero
+  `nativeSize`. Screening for a numbered decoder is what actually says "this is a RAW this OS can
+  develop".
+- **The DNG detour loses the original's `BaselineExposure`.** Adobe's converter writes its own, and
+  Apple's decoder honours whatever the DNG says. Measured across the three sample files: the OM-3
+  (0.50) and X-T5 (0.10) come through unchanged, but the X-E4's +1.02 — Fuji's ISO offset — is
+  rewritten to -0.70, rendering about 1.7 stops dark (mean luminance 0.489 direct, 0.227 via DNG,
+  against an embedded camera preview of 0.489). `developViaDNG` therefore copies the original
+  filter's `baselineExposure` onto the DNG's, which restores the X-E4 and is a no-op for a file the
+  converter left alone. `testDevelopViaDNGMatchesTheDirectRenderExposure` guards it.
+- **`RawDerivedStore`** stages derivatives under Application Support, keyed `<size>_<originalName>`
+  — same key ordering as `SidecarStagingStore`, for the same `deletingPathExtension()` collision
+  reason documented there.
+- **`PhotoAsset.derivedFrom`** does three jobs at once: it marks an asset as derived (suppressing
+  `sooc`), names the original whose filename the rename must be built from (the staging key's digits
+  would otherwise be harvested as a sequence), and keys the store. `CaptureSet.representative`
+  deliberately prefers a non-derived member so developing a file never changes which tile represents
+  its set — skip and processed state are keyed by representative path.
+- **The decoder token lives in the derivative's keywords**, not in memory: a staged derivative
+  outlives the session that made it, and recomputing the token would mean decoding the RAW again.
+  `RawDevelopService.token(in:)` reads it back for the filename's art-filter slot at process time.
+- **iPad**: no DNG output type exists in ImageIO there, so the iPad only stages
+  `RawDevelopService.developMarkerKeyword` into the sidecar. That reuses an existing end-to-end
+  channel (staged sidecar → Process & Move → destination `.xmp` → `IPadImportService`) rather than
+  adding a transport, which is the whole reason a keyword was chosen over a marker store.
+
 ## Concurrency rules
 
 - Never call `exiftool`, hit the network, or touch the filesystem from a SwiftUI `View` body or a

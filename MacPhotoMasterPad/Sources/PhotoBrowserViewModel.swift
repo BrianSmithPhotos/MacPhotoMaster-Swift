@@ -210,6 +210,13 @@ final class PhotoBrowserViewModel: ObservableObject {
     @Published private(set) var processedAssetPaths: Set<String> = []
     private var processedStore: ProcessedStateStore?
 
+    /// Paths of RAW files in the currently loaded folder whose staged sidecar carries
+    /// `RawDevelopService.developMarkerKeyword` — drives the tile badge, and is what
+    /// `performSave` consults to keep the marker alive across an ordinary metadata save.
+    /// iPadOS can't develop a RAW itself (see that keyword's doc comment), so marking is the whole
+    /// of the iPad's part in this: the Mac's iPad import acts on it later.
+    @Published private(set) var developMarkedPaths: Set<String> = []
+
     /// "Select mode" for the grid — while on, tapping a tile toggles `multiSelectedIDs` instead of
     /// changing the preview, and a batch Skip/Un-skip action bar becomes available. Turning it off
     /// always clears the multi-selection rather than leaving stale picks around for next time.
@@ -541,7 +548,10 @@ final class PhotoBrowserViewModel: ObservableObject {
             guard let draft = try? store.stagedDraft(for: asset.url) else { return }
             guard previewAsset?.id == asset.id else { return }
             editableDescription = draft.description
-            editableKeywords = draft.keywords.joined(separator: ", ")
+            // The develop marker is app bookkeeping, not one of the user's keywords, so it stays out
+            // of the editable buffer — `performSave` puts it back when restaging.
+            editableKeywords = RawDevelopService.removingDevelopMarker(from: draft.keywords)
+                .joined(separator: ", ")
         }
     }
 
@@ -583,7 +593,8 @@ final class PhotoBrowserViewModel: ObservableObject {
                 // by `suggestGPSIfNeeded()`, or embedded GPS), not the shared buffer — each photo may
                 // carry its own fix. `title` stays nil (rename-derived, only written at Process time).
                 try await store.stage(
-                    title: nil, description: description, keywords: keywords,
+                    title: nil, description: description,
+                    keywords: keywordsToStage(keywords, for: target),
                     gps: Self.gpsCoordinate(for: target), for: target.url)
                 updateAsset(target.id) { updated in
                     updated.descriptionText = description
@@ -597,6 +608,81 @@ final class PhotoBrowserViewModel: ObservableObject {
             failureCount == 0
             ? "Saved to \(targets.count) file(s)."
             : "Saved \(targets.count - failureCount)/\(targets.count) file(s); \(failureCount) failed."
+    }
+
+    /// `keywords` plus the develop marker when this file is marked. A save rewrites the whole
+    /// sidecar, so without this an ordinary edit would quietly drop a pending develop request.
+    private func keywordsToStage(_ keywords: [String], for asset: PhotoAsset) -> [String] {
+        guard developMarkedPaths.contains(asset.url.path) else { return keywords }
+        return keywords + [RawDevelopService.developMarkerKeyword]
+    }
+
+    // MARK: - Mark for RAW develop (docs/SPEC.md §5)
+
+    /// RAW members are the only files a develop marker means anything on — a capture set's SOOC
+    /// JPEG is already developed.
+    private static func rawMembers(of captureSet: CaptureSet) -> [PhotoAsset] {
+        captureSet.members.filter { PhotoAssetLoader.isRaw($0.url) }
+    }
+
+    func canMarkForRawDevelop(_ captureSet: CaptureSet) -> Bool {
+        !Self.rawMembers(of: captureSet).isEmpty
+    }
+
+    func isMarkedForRawDevelop(_ captureSet: CaptureSet) -> Bool {
+        Self.rawMembers(of: captureSet).contains { developMarkedPaths.contains($0.url.path) }
+    }
+
+    /// Marks (or unmarks) every RAW in `captureSet` for the Mac to develop at import time. The
+    /// marker is a keyword in the staged sidecar rather than a new store of its own, so it travels
+    /// through Process & Move into the destination copy's `.xmp` with no new transport.
+    func toggleRawDevelopMark(_ captureSet: CaptureSet) {
+        let targets = Self.rawMembers(of: captureSet)
+        guard !targets.isEmpty else { return }
+        let shouldMark = !isMarkedForRawDevelop(captureSet)
+        Task {
+            guard let store = await ensureSidecarStagingStore() else { return }
+            for target in targets {
+                await restage(target, markedForDevelop: shouldMark, in: store)
+            }
+        }
+    }
+
+    /// Adds or removes the marker in `asset`'s staged sidecar. `stage` rewrites the sidecar whole,
+    /// so any existing draft has to be read back and passed through rather than overwritten with a
+    /// marker-only one.
+    private func restage(
+        _ asset: PhotoAsset, markedForDevelop: Bool, in store: SidecarStagingStore
+    ) async {
+        let draft = try? store.stagedDraft(for: asset.url)
+        var keywords = RawDevelopService.removingDevelopMarker(from: draft?.keywords ?? asset.keywords)
+        if markedForDevelop { keywords.append(RawDevelopService.developMarkerKeyword) }
+        do {
+            try await store.stage(
+                title: draft?.title, description: draft?.description ?? asset.descriptionText,
+                keywords: keywords, gps: draft?.gps ?? Self.gpsCoordinate(for: asset), for: asset.url)
+            if markedForDevelop {
+                developMarkedPaths.insert(asset.url.path)
+            } else {
+                developMarkedPaths.remove(asset.url.path)
+            }
+        } catch {
+            saveStatusMessage =
+                "Could not mark \(asset.url.lastPathComponent) for RAW develop: \(error.localizedDescription)"
+        }
+    }
+
+    /// Which RAW files in a just-loaded folder are already marked. Only RAW files are read — the
+    /// marker is meaningless on anything else — so this is a handful of small sidecar reads rather
+    /// than one per photo in the folder.
+    private func loadDevelopMarkedPaths(among assets: [PhotoAsset]) async -> Set<String> {
+        guard let store = await ensureSidecarStagingStore() else { return [] }
+        var paths: Set<String> = []
+        for asset in assets where PhotoAssetLoader.isRaw(asset.url) {
+            guard let draft = try? store.stagedDraft(for: asset.url) else { continue }
+            if RawDevelopService.isMarkedForDevelop(draft.keywords) { paths.insert(asset.url.path) }
+        }
+        return paths
     }
 
     /// Mutates the in-memory asset so the grid/preview reflect a successful save immediately, without
@@ -748,6 +834,7 @@ final class PhotoBrowserViewModel: ObservableObject {
                 let (assets, folders) = try await (assetsTask, subfoldersTask)
                 let skippedPaths = await skippedAssetPaths(inFolder: folderURL)
                 processedAssetPaths = await loadProcessedAssetPaths(inFolder: folderURL)
+                developMarkedPaths = await loadDevelopMarkedPaths(among: assets)
                 let allSets = grouping.group(assets)
                 captureSets = allSets.filter { set in
                     guard let path = set.representative?.url.path else { return true }

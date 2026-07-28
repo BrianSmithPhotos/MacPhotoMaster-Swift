@@ -81,6 +81,7 @@ struct SourcePanelView: View {
                                     isSelectMode: viewModel.isSelecting,
                                     isMultiSelected: viewModel.multiSelectedIDs.contains(representative.id),
                                     isProcessed: viewModel.isProcessed(captureSet),
+                                    isMarkedForRawDevelop: viewModel.isMarkedForRawDevelop(captureSet),
                                     onSelect: {
                                         if viewModel.isSelecting {
                                             viewModel.toggleMultiSelect(representative.id)
@@ -102,6 +103,16 @@ struct SourcePanelView: View {
                                         switch viewModel.sourceViewFilter {
                                         case .active:
                                             Button("Skip") { viewModel.skip(captureSet) }
+                                            // iPad can't develop a RAW itself, so this only records
+                                            // the request — the Mac's iPad import does the work.
+                                            if viewModel.canMarkForRawDevelop(captureSet) {
+                                                Button(
+                                                    viewModel.isMarkedForRawDevelop(captureSet)
+                                                        ? "Unmark RAW Develop" : "Mark for RAW Develop"
+                                                ) {
+                                                    viewModel.toggleRawDevelopMark(captureSet)
+                                                }
+                                            }
                                         case .skipped:
                                             Button("Un-skip") { viewModel.unskip(captureSet) }
                                         }
@@ -201,6 +212,10 @@ private struct CaptureTileView: View {
     /// small bottom-leading checkmark so it never competes with the Select-mode badge (top-leading)
     /// or the member-count badge (bottom-trailing).
     let isProcessed: Bool
+    /// Whether this set's RAW is waiting for the Mac to develop it — the only feedback the iPad can
+    /// give, since the develop itself happens at import time on the other machine. Top-trailing, the
+    /// one corner none of the other badges use.
+    let isMarkedForRawDevelop: Bool
     let onSelect: () -> Void
     let onModifierClick: (UIKeyModifierFlags) -> Void
 
@@ -243,6 +258,15 @@ private struct CaptureTileView: View {
                         .font(.title3)
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(.white, isMultiSelected ? Color.accentColor : .black.opacity(0.35))
+                        .padding(6)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if isMarkedForRawDevelop {
+                    Image(systemName: "hourglass.circle.fill")
+                        .font(.caption)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .orange)
                         .padding(6)
                 }
             }

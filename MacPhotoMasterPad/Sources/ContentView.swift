@@ -26,6 +26,22 @@ struct ContentView: View {
         } detail: {
             PreviewPanelView(viewModel: browser)
                 .toolbar {
+                    // The Title the previewed file would be renamed to, not its current filename —
+                    // the same live `RenameService` preview the metadata sheet shows, batch label
+                    // included, so it answers "which file is this" in the vocabulary the library
+                    // will actually use. Tracks `previewAsset`, so it follows the filmstrip rather
+                    // than the grid selection. Truncating in the middle keeps both ends visible:
+                    // the leading sequence number separates frames in a burst, the tail carries the
+                    // extension that tells a JPEG from its RAW.
+                    ToolbarItem(placement: .principal) {
+                        if !browser.renamePreviewFilename.isEmpty {
+                            Text(browser.renamePreviewFilename)
+                                .font(.callout.monospaced())
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         Button {
                             activeSheet = .metadata

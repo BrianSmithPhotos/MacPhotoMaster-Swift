@@ -48,6 +48,9 @@ deterministically, and copy files into local storage.
   large; cmd-clicking toggles a finer-grained "ring-selection" within that row (e.g. exclude the RAW
   file from a set before processing). This ring-selection is a second, narrower level of multi-select
   than the grid's — see §5 for how it feeds process/move.
+- iPad shows the previewed file's **Title** — the live rename preview (§4), batch label included,
+  not the current filename — above the preview. A set's JPEG and RAW look identical at preview size,
+  and the filmstrip is otherwise guesswork.
 - **Preview zoom** (the reference app had this as a slider; here it's pointer/touch-driven):
   - Mac: scroll wheel over the large preview zooms, anchored at the pointer — the image point under
     the cursor stays under the cursor. Trackpad pinch does the same thing.

@@ -15,3 +15,7 @@ xcuserdata/
 Timeline*.json
 *.sqlite
 *.sqlite3
+
+# Real camera files kept for hand-testing the RAW pipeline against each decoder branch.
+# Hundreds of MB, and this repo is public — tests that touch them skip when they're absent.
+samples/

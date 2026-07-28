@@ -17,6 +17,11 @@ struct ZoomableImageView: NSViewRepresentable {
     /// scroll view writes the user's zoom back out for `PreviewPanelView`'s always-visible readout,
     /// and `PreviewPanelView` writes 1.0 in to reset to Fit (the readout button, ⌘0).
     @Binding var fitMultiple: CGFloat
+    /// Visible centre as a fraction of the image (0...1 on each axis), read back out as the user
+    /// zooms and pans. `PreviewPanelView` holds it across selection changes and hands it back here,
+    /// which is what keeps the same part of the frame in view when switching between variants —
+    /// normalized rather than in pixels because the two previews needn't be the same size.
+    @Binding var center: CGPoint
 
     func makeNSView(context: Context) -> ZoomScrollView {
         let scrollView = ZoomScrollView()
@@ -39,9 +44,21 @@ struct ZoomableImageView: NSViewRepresentable {
                 fitMultiple = multiple
             }
         }
+        scrollView.onCenterChange = { point in
+            // Same one-runloop-turn hop, and for the same reason, as the scale binding above.
+            DispatchQueue.main.async {
+                guard abs(center.x - point.x) > ZoomScrollView.scaleComparisonEpsilon
+                    || abs(center.y - point.y) > ZoomScrollView.scaleComparisonEpsilon
+                else { return }
+                center = point
+            }
+        }
         scrollView.onResetRequested = {
             DispatchQueue.main.async { fitMultiple = 1 }
         }
+        // Deferred rather than applied here: Fit can't be computed until there's a laid-out pane to
+        // measure against, so the scroll view applies this on its first real layout pass.
+        scrollView.restoreOnFirstLayout(fitMultiple: fitMultiple, center: center)
         return scrollView
     }
 
@@ -65,11 +82,24 @@ final class ZoomScrollView: NSScrollView {
     static let scaleComparisonEpsilon: CGFloat = 0.001
 
     var onFitMultipleChange: ((CGFloat) -> Void)?
+    var onCenterChange: ((CGPoint) -> Void)?
     var onResetRequested: (() -> Void)?
 
     /// Keeps the preview pinned to Fit across pane resizes until the user actually zooms in — and
     /// through the first layout pass, where there's no pane size yet to compute Fit from.
     private var isPinnedToFit = true
+
+    /// Scale and normalized centre to adopt on the first layout pass that has a pane size, then
+    /// cleared. This is how a zoom survives a selection change: switching photos tears this view
+    /// down and builds a new one, so the state has to be re-applied from the outside rather than
+    /// held here.
+    private var pendingRestore: (fitMultiple: CGFloat, center: CGPoint)?
+
+    func restoreOnFirstLayout(fitMultiple: CGFloat, center: CGPoint) {
+        guard fitMultiple > 1 + Self.scaleComparisonEpsilon else { return }
+        pendingRestore = (fitMultiple, center)
+        isPinnedToFit = false
+    }
 
     /// Magnification at which the whole image is visible. Depends on the pane size, so it's
     /// recomputed on every layout rather than cached.
@@ -93,10 +123,47 @@ final class ZoomScrollView: NSScrollView {
         guard fit > 0 else { return }
         minMagnification = fit
         maxMagnification = fit * Self.maximumFitMultiple
-        if isPinnedToFit {
+        if let restore = pendingRestore {
+            pendingRestore = nil
+            magnification = fit * restore.fitMultiple
+            scroll(toNormalizedCenter: restore.center)
+        } else if isPinnedToFit {
             magnification = fit
         }
         onFitMultipleChange?(currentFitMultiple)
+        onCenterChange?(normalizedCenter)
+    }
+
+    /// Visible centre as a fraction of the image on each axis. `contentView.bounds` is in document
+    /// space (already divided by magnification), so it's directly comparable to the document view's
+    /// unscaled frame — the same relationship `CenteringClipView` relies on.
+    private var normalizedCenter: CGPoint {
+        guard let documentView else { return CGPoint(x: 0.5, y: 0.5) }
+        let size = documentView.frame.size
+        guard size.width > 0, size.height > 0 else { return CGPoint(x: 0.5, y: 0.5) }
+        return CGPoint(x: contentView.bounds.midX / size.width, y: contentView.bounds.midY / size.height)
+    }
+
+    /// The visible size is derived from the clip view's *frame* and the magnification just set,
+    /// rather than read from its bounds: this runs mid-layout, where the bounds haven't caught up
+    /// with a magnification assigned moments earlier.
+    private func scroll(toNormalizedCenter center: CGPoint) {
+        guard let documentView, magnification > 0 else { return }
+        let imageSize = documentView.frame.size
+        let visible = CGSize(
+            width: contentView.frame.width / magnification,
+            height: contentView.frame.height / magnification)
+        let origin = NSPoint(
+            x: center.x * imageSize.width - visible.width / 2,
+            y: center.y * imageSize.height - visible.height / 2)
+        let constrained = contentView.constrainBoundsRect(NSRect(origin: origin, size: visible))
+        contentView.setBoundsOrigin(constrained.origin)
+        reflectScrolledClipView(contentView)
+    }
+
+    /// Called after a pan or zoom so the view's owner can carry the position to the next photo.
+    func reportCenter() {
+        onCenterChange?(normalizedCenter)
     }
 
     /// Applies a scale requested from SwiftUI (the reset-to-Fit paths). Centered on the pane rather
@@ -108,6 +175,7 @@ final class ZoomScrollView: NSScrollView {
         isPinnedToFit = multiple <= 1 + Self.scaleComparisonEpsilon
         setMagnification(fit * multiple, centeredAt: NSPoint(x: contentView.bounds.midX, y: contentView.bounds.midY))
         onFitMultipleChange?(currentFitMultiple)
+        reportCenter()
     }
 
     /// Wheel zooms instead of scrolling — the whole point of the feature (docs/SPEC.md §1); panning
@@ -129,6 +197,7 @@ final class ZoomScrollView: NSScrollView {
         // under the cursor — which is what `centeredAt:` needs to hold still.
         setMagnification(fit * target, centeredAt: contentView.convert(event.locationInWindow, from: nil))
         onFitMultipleChange?(currentFitMultiple)
+        reportCenter()
     }
 
     func requestReset() {
@@ -217,8 +286,12 @@ final class PreviewDocumentView: NSView {
         scrollView.reflectScrolledClipView(clipView)
     }
 
+    /// The pan's new position is published once here rather than on every dragged event: nothing
+    /// reads it until the selection changes, and a per-frame SwiftUI state write would re-render the
+    /// whole preview pane throughout the drag.
     override func mouseUp(with event: NSEvent) {
         panAnchor = nil
+        (enclosingScrollView as? ZoomScrollView)?.reportCenter()
     }
 }
 

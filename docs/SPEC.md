@@ -55,7 +55,11 @@ deterministically, and copy files into local storage.
     source file look identical, and §6's AI suggestions read from a *different file* than the
     preview shows, so an un-signposted zoom state makes a correct AI description look like a
     hallucination. Tapping/clicking the readout returns to Fit, as does ⌘0 (Mac) or a double-click/
-    double-tap; changing the selection resets to Fit.
+    double-tap.
+  - **Zoom and position persist across a selection change** (Mac): switching between a RAW and its
+    developed JPEG, or between frames in a burst, is a comparison, so the next photo opens at the
+    same scale showing the same part of the frame. The position is held as a fraction of the image,
+    not in pixels, so it survives two previews of different sizes.
   - **Disabled while subject-isolation crop mode is on** (§6), on both Mac and iPad. That mode owns
     the drag gesture for drawing the crop rectangle (and, on iPad, tap-to-pick) and maps view
     coordinates to image pixels assuming an unzoomed `.fit` layout; supporting both would mean

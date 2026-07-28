@@ -12,9 +12,13 @@ struct PreviewPanelView: View {
 
     @State private var previewImage: CGImage?
     /// Preview scale as a multiple of Fit — see `ZoomableImageView.fitMultiple`. Held here rather
-    /// than in the view model because it's pure view state (no service or persistence touches it),
-    /// and reset to Fit on every selection change by the `.task` below.
+    /// than in the view model because it's pure view state (no service or persistence touches it).
     @State private var previewFitMultiple: CGFloat = 1
+    /// Visible centre as a fraction of the image. Deliberately survives a selection change along
+    /// with the scale above: switching between a RAW and its developed JPEG while zoomed in is a
+    /// comparison, and starting the next one at Fit (or at its top-left corner) throws away the
+    /// framing that comparison depends on.
+    @State private var previewCenter = CGPoint(x: 0.5, y: 0.5)
 
     private var asset: PhotoAsset? { viewModel.selectedAsset }
 
@@ -28,10 +32,14 @@ struct PreviewPanelView: View {
                 Spacer()
                 if let previewImage {
                     if isZoomEnabled {
-                        ZoomableImageView(image: previewImage, fitMultiple: $previewFitMultiple)
-                            // Rebuilds the scroll view (back at Fit, with the new image) when the
-                            // selection changes, rather than mutating the existing one.
-                            .id(asset?.id)
+                        ZoomableImageView(
+                            image: previewImage, fitMultiple: $previewFitMultiple,
+                            center: $previewCenter
+                        )
+                        // Rebuilds the scroll view with the new image when the selection changes,
+                        // rather than mutating the existing one; the zoom and centre above are
+                        // handed back to the rebuilt view so the position carries over.
+                        .id(asset?.id)
                     } else {
                         GeometryReader { geo in
                             ZStack {
@@ -72,7 +80,6 @@ struct PreviewPanelView: View {
             }
             .task(id: asset?.id) {
                 previewImage = nil
-                previewFitMultiple = 1
                 guard let asset else { return }
                 previewImage = try? await NativeMetadataReader().extractPreviewAsync(at: asset.url, maxPixelSize: 2048)
             }

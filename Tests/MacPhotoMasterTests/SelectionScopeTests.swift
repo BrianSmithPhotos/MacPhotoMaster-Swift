@@ -121,4 +121,21 @@ final class SelectionScopeTests: XCTestCase {
         XCTAssertEqual(
             SelectionScope.rangeBetween(anchor: visible[0], target: hiddenTarget, visible: visible), [hiddenTarget])
     }
+
+    /// Grid order, not pick order — the reason `earliest` exists rather than tracking the last tap.
+    func testEarliestPreviewsGridOrderRegardlessOfPickOrder() {
+        let visible = [path("a.JPG"), path("b.JPG"), path("c.JPG"), path("d.JPG")]
+
+        XCTAssertEqual(
+            SelectionScope.earliest(in: visible, selected: [visible[3], visible[1], visible[2]]),
+            visible[1])
+    }
+
+    /// An empty or off-screen selection leaves the preview where it is rather than blanking it.
+    func testEarliestIsNilWhenNothingSelectedIsVisible() {
+        let visible = [path("a.JPG"), path("b.JPG")]
+
+        XCTAssertNil(SelectionScope.earliest(in: visible, selected: []))
+        XCTAssertNil(SelectionScope.earliest(in: visible, selected: [path("gone.JPG")]))
+    }
 }

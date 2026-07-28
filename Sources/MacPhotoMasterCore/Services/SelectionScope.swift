@@ -49,4 +49,15 @@ public enum SelectionScope {
         }
         return Set(visible[min(start, end)...max(start, end)])
     }
+
+    /// The first of `visible` that is in `selected` — which photo a multi-selection should preview.
+    /// Grid order, deliberately, rather than the most recently picked tile: picking the same tiles in
+    /// any order previews the same photo, and extending a selection doesn't yank the preview away
+    /// from what you were already looking at. `nil` when nothing selected is on screen, meaning the
+    /// caller should leave the preview alone.
+    public static func earliest(
+        in visible: [PhotoAsset.ID], selected: Set<PhotoAsset.ID>
+    ) -> PhotoAsset.ID? {
+        visible.first { selected.contains($0) }
+    }
 }

@@ -228,7 +228,16 @@ final class PhotoBrowserViewModel: ObservableObject {
     }
     /// The grid's batch-action selection set (Select mode only) — the touch equivalent of the Mac
     /// app's cmd/shift-click `multiSelectedIDs`.
-    @Published private(set) var multiSelectedIDs: Set<PhotoAsset.ID> = []
+    ///
+    /// `didSet` keeps the big preview pointed at the selection, which is the one thing the touch
+    /// path doesn't get for free: the Mac's `selectTile(_:modifiers:)` sets `selectedAssetID` on
+    /// every click including a modifier-click, so its preview always follows. Doing it here rather
+    /// than in each mutating method covers every path in one place — tap-toggle, shift-range, and
+    /// the clear that `isSelecting = false` performs (a no-op, since an empty selection leaves the
+    /// preview where it is).
+    @Published private(set) var multiSelectedIDs: Set<PhotoAsset.ID> = [] {
+        didSet { previewEarliestMultiSelection() }
+    }
 
     /// The last tile clicked with a modifier key held — the anchor a subsequent shift-click ranges
     /// from, mirroring the Mac app's `rangeAnchorID`.
@@ -398,6 +407,22 @@ final class PhotoBrowserViewModel: ObservableObject {
 
     func setActivePreview(_ assetID: PhotoAsset.ID) {
         previewAssetID = assetID
+    }
+
+    /// Moves the preview to the earliest selected tile in grid order — not the most recently tapped
+    /// one. Picking tiles in any order shows the same photo, and adding a later tile to a selection
+    /// doesn't yank the preview away from what you were looking at.
+    ///
+    /// `previewAssetID` is reset so the preview shows that set's representative rather than a
+    /// filmstrip pick left over from the previous selection, matching `select(_:)`.
+    private func previewEarliestMultiSelection() {
+        let visibleIDs = displayedCaptureSets.compactMap { $0.representative?.id }
+        guard
+            let earliestID = SelectionScope.earliest(in: visibleIDs, selected: multiSelectedIDs),
+            earliestID != selectedAssetID
+        else { return }
+        selectedAssetID = earliestID
+        previewAssetID = nil
     }
 
     /// Tapping a tile while `isSelecting` is on.

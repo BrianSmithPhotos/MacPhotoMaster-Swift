@@ -38,6 +38,11 @@ deterministically, and copy files into local storage.
 - Manual multi-select (cmd-click to toggle, shift-click for range) should act on the *full capture-group
   membership* of whatever's selected, not just the visibly selected representative tiles — otherwise
   bulk actions silently skip hidden group members (e.g. the RAW file behind a stacked JPEG).
+- The large preview always follows the multi-selection. On Mac it shows the tile just clicked, since
+  a modifier-click is still a click on a specific photo. On iPad, where Select mode makes a tap a
+  toggle rather than a pick, it shows the selection's **earliest member in grid order**: picking the
+  same tiles in any order previews the same photo, and extending a selection doesn't yank the preview
+  away from what you were already looking at.
 - A row of every member of the currently active selection (a capture set's members, or a single
   image) shows under the large preview. Clicking a thumbnail there swaps which member is shown
   large; cmd-clicking toggles a finer-grained "ring-selection" within that row (e.g. exclude the RAW

@@ -201,6 +201,11 @@ struct MetadataPanelView: View {
                             }
                             .disabled(viewModel.captureSets.isEmpty || viewModel.isProcessing)
 
+                            if viewModel.isProcessing {
+                                ProgressView(
+                                    value: Double(viewModel.processedFileCount),
+                                    total: Double(max(viewModel.processTotalCount, 1)))
+                            }
                             if let processStatusMessage = viewModel.processStatusMessage {
                                 Text(processStatusMessage)
                                     .font(.caption)

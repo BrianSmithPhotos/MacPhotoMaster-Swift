@@ -80,12 +80,23 @@ final class SourceBrowserViewModel: ObservableObject {
     @Published private(set) var libraryRootURL: URL?
     @Published private(set) var isProcessing = false
     @Published var processStatusMessage: String?
+    /// Files finished (successfully or not) and the scope's total, driving the determinate progress
+    /// bar shown while `isProcessing`. Per-file granularity is as fine as this can get without
+    /// `ProcessMoveService` reporting from inside a single copy — see `process(scope:libraryRoot:)`.
+    @Published private(set) var processedFileCount = 0
+    @Published private(set) var processTotalCount = 0
 
     /// State for `importIPadExport(from:)`, kept separate from `isProcessing`/`processStatusMessage`
     /// because the two run against different files entirely — the import reads a pulled folder, not
     /// the browsing session — and the import sheet is where its progress belongs.
     @Published private(set) var isImportingIPadExport = false
     @Published private(set) var iPadImportStatusMessage: String?
+    /// Files imported so far and the pulled folder's total, driving the import sheet's determinate
+    /// progress bar. Both stay 0 through the scan and the batched maker-note read, which run before
+    /// `IPadImportService.importAll`'s per-file loop knows a total — the sheet shows an
+    /// indeterminate spinner until the first callback arrives.
+    @Published private(set) var iPadImportedFileCount = 0
+    @Published private(set) var iPadImportTotalCount = 0
     /// Set once an import finishes, so the sheet can list what was skipped. `nil` while one is
     /// running or before the first run.
     @Published private(set) var iPadImportSummary: IPadImportSummary?
@@ -1336,7 +1347,11 @@ final class SourceBrowserViewModel: ObservableObject {
         let folderPath = breadcrumb.last?.path
 
         isProcessing = true
-        processStatusMessage = "Processing \(assets.count) file(s)…"
+        processedFileCount = 0
+        processTotalCount = assets.count
+        // The art-filter read is one batched exiftool call ahead of the per-file loop, so it gets
+        // its own message rather than sitting at "1 of N" while nothing is being copied yet.
+        processStatusMessage = "Reading metadata for \(assets.count) file(s)…"
         Task {
             defer { isProcessing = false }
             await loadArtFilterTokens(for: assets)
@@ -1347,6 +1362,8 @@ final class SourceBrowserViewModel: ObservableObject {
             var developedOriginals: [URL] = []
             for asset in assets {
                 let asset = assetByID[asset.id] ?? asset
+                processStatusMessage =
+                    "Processing \(processedFileCount + 1) of \(assets.count): \(asset.url.lastPathComponent)"
                 let context = Self.renameContext(for: asset, batch: sessionBatch)
                 do {
                     _ = try await processMoveService.processAndCopy(
@@ -1358,6 +1375,7 @@ final class SourceBrowserViewModel: ObservableObject {
                 } catch {
                     failures.append("\(asset.url.lastPathComponent): \(error.localizedDescription)")
                 }
+                processedFileCount += 1
             }
             // The derivative existed only to reach the library; now that it's verified in, the
             // staging copy is dropped so app storage doesn't accumulate a second copy of every
@@ -1394,6 +1412,8 @@ final class SourceBrowserViewModel: ObservableObject {
 
         isImportingIPadExport = true
         iPadImportSummary = nil
+        iPadImportedFileCount = 0
+        iPadImportTotalCount = 0
         iPadImportStatusMessage = "Scanning \(exportRoot.lastPathComponent)…"
         Task {
             defer { isImportingIPadExport = false }
@@ -1402,6 +1422,8 @@ final class SourceBrowserViewModel: ObservableObject {
                     from: exportRoot, into: libraryRoot,
                     onProgress: { [weak self] completed, total, outcome in
                         Task { @MainActor in
+                            self?.iPadImportedFileCount = completed
+                            self?.iPadImportTotalCount = total
                             self?.iPadImportStatusMessage = "\(completed) of \(total): \(outcome.sourceName)"
                         }
                     })

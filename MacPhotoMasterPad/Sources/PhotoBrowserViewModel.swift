@@ -115,6 +115,11 @@ final class PhotoBrowserViewModel: ObservableObject {
 
     @Published private(set) var isProcessing = false
     @Published var processStatusMessage: String?
+    /// Files finished (successfully or not) and the scope's total, driving the determinate progress
+    /// bar shown while `isProcessing`. Per-file granularity is as fine as this can get without
+    /// `ProcessMoveService` reporting from inside a single copy — see `process(scope:)`.
+    @Published private(set) var processedFileCount = 0
+    @Published private(set) var processTotalCount = 0
 
     /// Status text for the Timeline-derived GPS suggestion (docs/SPEC.md §7), shown under the
     /// read-only lat/long fields — e.g. "Nearest GPS 3m 20s away (GPS, accuracy 12m)". Set by
@@ -748,6 +753,8 @@ final class PhotoBrowserViewModel: ObservableObject {
         let folderPath = breadcrumb.last?.path
 
         isProcessing = true
+        processedFileCount = 0
+        processTotalCount = assets.count
         processStatusMessage = "Processing \(assets.count) file(s)…"
         Task {
             defer { isProcessing = false }
@@ -756,6 +763,8 @@ final class PhotoBrowserViewModel: ObservableObject {
             var processedPaths: [String] = []
             for asset in assets {
                 var asset = asset
+                processStatusMessage =
+                    "Processing \(processedFileCount + 1) of \(assets.count): \(asset.url.lastPathComponent)"
                 if let draft = try? stagingStore.stagedDraft(for: asset.url) {
                     asset.descriptionText = draft.description
                     asset.keywords = draft.keywords
@@ -781,6 +790,7 @@ final class PhotoBrowserViewModel: ObservableObject {
                 } catch {
                     failures.append("\(asset.url.lastPathComponent): \(error.localizedDescription)")
                 }
+                processedFileCount += 1
             }
             if let folderPath, !processedPaths.isEmpty {
                 await markAssetsProcessed(processedPaths, inFolder: folderPath)

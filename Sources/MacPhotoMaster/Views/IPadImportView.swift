@@ -22,7 +22,7 @@ struct IPadImportView: View {
                 .font(.headline)
 
             Text(
-                "Finishes files the iPad processed but could not complete: reads the in-camera effect from the maker notes, folds each XMP sidecar into its image, and moves everything into the library."
+                "Finishes files the iPad processed but could not complete: reads the in-camera effect from the maker notes, folds each XMP sidecar into its image, develops a JPEG from every RAW marked for develop on the iPad, and moves everything into the library."
             )
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -49,13 +49,22 @@ struct IPadImportView: View {
             .formStyle(.grouped)
 
             if let message = viewModel.iPadImportStatusMessage {
-                HStack(spacing: 8) {
-                    if viewModel.isImportingIPadExport {
-                        ProgressView().controlSize(.small)
+                VStack(alignment: .leading, spacing: 8) {
+                    // The bar only appears once a total is known; until then the scan and the
+                    // batched maker-note read have no countable unit, so the spinner stands in.
+                    if viewModel.isImportingIPadExport, viewModel.iPadImportTotalCount > 0 {
+                        ProgressView(
+                            value: Double(viewModel.iPadImportedFileCount),
+                            total: Double(viewModel.iPadImportTotalCount))
                     }
-                    Text(message)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        if viewModel.isImportingIPadExport, viewModel.iPadImportTotalCount == 0 {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(message)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 

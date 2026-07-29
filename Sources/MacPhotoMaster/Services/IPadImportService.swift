@@ -1,5 +1,6 @@
 import Foundation
 import MacPhotoMasterCore
+import os
 
 /// One file's outcome, whether it made it into the library or not.
 struct IPadImportOutcome: Equatable {
@@ -66,16 +67,44 @@ struct IPadImportService {
 
         let makerNotes = await makerNoteFields(for: assets)
 
+        Self.log.notice("Import started: \(assets.count) file(s) under \(exportRoot.path, privacy: .public)")
         var summary = IPadImportSummary()
         for asset in assets {
             let outcome = await importOne(
                 asset, makerNotes: makerNotes[asset.url] ?? MakerNoteFields(), libraryRoot: libraryRoot)
+            Self.log(outcome)
             summary.outcomes.append(outcome)
             onProgress(summary.outcomes.count, assets.count, outcome)
         }
+        Self.log.notice(
+            """
+            Import finished: \(summary.importedCount)/\(summary.outcomes.count) imported, \
+            \(summary.developedCount) developed, \(summary.failures.count) skipped, \
+            \(summary.developFailures.count) develop failure(s)
+            """)
 
         pruneEmptyDirectories(under: exportRoot)
         return summary
+    }
+
+    /// Filenames and reasons are logged `.public` deliberately: this is a local desktop app whose log
+    /// is only useful if it names the file that failed, and the sheet's own list is gone the moment
+    /// it closes. Read it back with
+    /// `log show --predicate 'subsystem == "photos.briansmith.macphotomaster"' --last 1h`.
+    private static let log = Logger(
+        subsystem: "photos.briansmith.macphotomaster", category: "iPadImport")
+
+    private static func log(_ outcome: IPadImportOutcome) {
+        if let reason = outcome.reason {
+            log.error("Skipped \(outcome.sourceName, privacy: .public): \(reason, privacy: .public)")
+        }
+        // Logged separately from `reason` because the file still imported — only its derivative
+        // didn't, which is exactly the failure that used to leave no trace at all.
+        if let developReason = outcome.developFailureReason {
+            log.error(
+                "RAW develop failed for \(outcome.sourceName, privacy: .public): \(developReason, privacy: .public)"
+            )
+        }
     }
 
     /// The two maker-note fields only `exiftool` can recover on the Mac — the iPad's ImageIO reader

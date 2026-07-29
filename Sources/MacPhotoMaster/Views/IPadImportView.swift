@@ -68,8 +68,24 @@ struct IPadImportView: View {
                 }
             }
 
-            if let summary = viewModel.iPadImportSummary, !summary.failures.isEmpty {
-                SkippedFileList(failures: summary.failures)
+            if let summary = viewModel.iPadImportSummary {
+                if !summary.failures.isEmpty {
+                    FileReasonList(
+                        title: "Skipped \(summary.failures.count) file(s)",
+                        entries: summary.failures.map {
+                            ($0.sourceName, $0.reason ?? "Unknown reason")
+                        })
+                }
+                // Its own list rather than folded into the one above: these files *did* import,
+                // only their RAW develop failed, so they are not waiting in the pulled folder to
+                // be retried the way a skipped file is.
+                if !summary.developFailures.isEmpty {
+                    FileReasonList(
+                        title: "RAW develop failed on \(summary.developFailures.count) file(s)",
+                        entries: summary.developFailures.map {
+                            ($0.sourceName, $0.developFailureReason ?? "Unknown reason")
+                        })
+                }
             }
 
             Spacer(minLength: 0)
@@ -97,25 +113,27 @@ struct IPadImportView: View {
     }
 }
 
-/// The files that stayed behind, with the reason each one did. Left in the pulled folder rather than
-/// imported, so this list doubles as a to-do: fix the cause, run the import again, and only these
-/// are retried (see `IPadImportService.discardImportedSource`).
-private struct SkippedFileList: View {
-    let failures: [IPadImportOutcome]
+/// Per-file failures with the reason each one carries. Used for the files that stayed behind — that
+/// list doubles as a to-do: fix the cause, run the import again, and only those are retried (see
+/// `IPadImportService.discardImportedSource`) — and for files whose RAW develop failed.
+private struct FileReasonList: View {
+    let title: String
+    let entries: [(name: String, reason: String)]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Skipped \(failures.count) file(s)")
+            Text(title)
                 .font(.subheadline.weight(.semibold))
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(failures, id: \.sourceName) { failure in
+                    ForEach(entries, id: \.name) { entry in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(failure.sourceName)
+                            Text(entry.name)
                                 .font(.callout.monospaced())
-                            Text(failure.reason ?? "Unknown reason")
+                            Text(entry.reason)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }

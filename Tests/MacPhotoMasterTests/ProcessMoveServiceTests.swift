@@ -90,6 +90,13 @@ final class ProcessMoveServiceTests: XCTestCase {
         XCTAssertEqual(
             metadata["IPTC:Keywords"] as? [String], ["mountain", "sunrise", "OM-1", "12-40mm F2.8", "sooc"])
         XCTAssertEqual(metadata["GPS:GPSLatitudeRef"] as? String, "North")
+
+        // Staging renames the file after exiftool has written it, so exiftool's automatic
+        // `<path>_original` backup is created against the staging name. Nothing may survive under
+        // it — a hidden orphan would be invisible in Finder and quietly double the library's size.
+        let leftovers = try FileManager.default.contentsOfDirectory(
+            atPath: result.destinationURL.deletingLastPathComponent().path)
+        XCTAssertEqual(leftovers, [result.destinationURL.lastPathComponent])
     }
 
     /// A RAW-developed JPEG going through the same path as any other file. Three things have to hold
@@ -206,6 +213,68 @@ final class ProcessMoveServiceTests: XCTestCase {
         XCTAssertEqual(
             ProcessMoveService.destinationDirectory(for: rawAsset, libraryRoot: libraryRoot).path,
             "/library/3 March/09")
+    }
+
+    /// Records the state of the destination folder at the moment metadata is written, so the test
+    /// can assert on ordering rather than just the end result.
+    private final class OrderSpyWriter: MetadataWriter, @unchecked Sendable {
+        var urlWrittenTo: URL?
+        var namesVisibleDuringWrite: [String] = []
+
+        func write(
+            title: String?, description: String, keywords: [String], gps: GPSCoordinate?,
+            subjectDistance: Double?, instructions: String?, to url: URL
+        ) async throws {
+            urlWrittenTo = url
+            let directory = url.deletingLastPathComponent()
+            namesVisibleDuringWrite =
+                (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        }
+
+        func write(description: String, keywords: [String], gps: GPSCoordinate?, to urls: [URL])
+            async throws -> [URL: Result<Void, Error>]
+        {
+            [:]
+        }
+    }
+
+    /// The bug this pins: the file used to be copied straight to its final name and annotated in
+    /// place, so anything watching the library folder could index it while Title and Instructions
+    /// were still missing and cache that. DxO PhotoLab was observed doing exactly this. Nothing may
+    /// exist at the final name until the metadata write has finished.
+    func testFinalNameOnlyAppearsAfterMetadataIsWritten() async throws {
+        let sourceDirectory = try makeTempDirectory()
+        let libraryRoot = try makeTempDirectory()
+        let sourceURL = try makeSourceJPEG(in: sourceDirectory)
+
+        var asset = PhotoAsset(id: sourceURL)
+        asset.cameraModel = "OM-3"
+        asset.capturedAt = DateComponents(
+            calendar: Calendar(identifier: .gregorian), timeZone: .current,
+            year: 2026, month: 8, day: 8, hour: 15, minute: 39
+        ).date
+
+        let spy = OrderSpyWriter()
+        let service = ProcessMoveService(metadataWriter: spy)
+        let result = try await service.processAndCopy(
+            asset: asset, renameContext: renameContext(for: asset), libraryRoot: libraryRoot)
+
+        let finalName = result.destinationURL.lastPathComponent
+        XCTAssertNotEqual(
+            spy.urlWrittenTo, result.destinationURL,
+            "metadata was written to the final path, so the file was already visible under its real name")
+        XCTAssertFalse(
+            spy.namesVisibleDuringWrite.contains(finalName),
+            "the final name existed in the destination folder during the metadata write")
+        XCTAssertTrue(
+            spy.namesVisibleDuringWrite.allSatisfy { $0.hasPrefix(".") },
+            "the staging file must be hidden while it is being annotated, saw \(spy.namesVisibleDuringWrite)")
+
+        // And it does land under the real name once the write is done.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.destinationURL.path))
+        let leftovers = try FileManager.default.contentsOfDirectory(
+            atPath: result.destinationURL.deletingLastPathComponent().path)
+        XCTAssertEqual(leftovers, [finalName], "staging file was left behind")
     }
 
     func testDestinationDirectoryFallsBackToFileModificationDateWhenCapturedAtIsMissing() throws {

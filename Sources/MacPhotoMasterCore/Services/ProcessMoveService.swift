@@ -55,7 +55,17 @@ public struct ProcessMoveService {
         let finalName = renameService.ensureUniqueName(proposedName, existingNames: existingNames)
         let destinationURL = destinationDirectory.appendingPathComponent(finalName)
 
-        try FileManager.default.copyItem(at: asset.url, to: destinationURL)
+        // Copied to a hidden staging name and renamed into place only once the metadata is written,
+        // rather than landing at the final name and being annotated in place. A file at its real
+        // name is immediately visible to anything watching the library folder, and DxO PhotoLab was
+        // observed indexing one in that window and caching it with Title and Instructions still
+        // empty (they are the only two fields not already present on the source), then continuing to
+        // show that stale copy after the write landed. The rename is within one directory, so it is
+        // atomic and no watcher ever sees a half-annotated file.
+        let stagingURL = destinationDirectory.appendingPathComponent(
+            ".mpm-staging-\(UUID().uuidString).\(asset.url.pathExtension)")
+
+        try FileManager.default.copyItem(at: asset.url, to: stagingURL)
 
         let title = (proposedName as NSString).deletingPathExtension
 
@@ -68,7 +78,7 @@ public struct ProcessMoveService {
         let subjectDistance = MetadataWriteFieldRules.subjectDistanceMeters(from: asset.focusDistance)
 
         do {
-            try Self.verifyCopy(source: asset.url, destination: destinationURL)
+            try Self.verifyCopy(source: asset.url, destination: stagingURL)
             try await metadataWriter.write(
                 title: title,
                 description: description,
@@ -76,9 +86,12 @@ public struct ProcessMoveService {
                 gps: Self.gpsCoordinate(for: asset),
                 subjectDistance: subjectDistance,
                 instructions: asset.cameraLook.isEmpty ? nil : asset.cameraLook,
-                to: destinationURL)
+                to: stagingURL)
+            try FileManager.default.moveItem(at: stagingURL, to: destinationURL)
+            Self.moveSidecarIfPresent(from: stagingURL, to: destinationURL)
         } catch {
-            Self.discardIncompleteCopy(at: destinationURL)
+            Self.discardIncompleteCopy(at: stagingURL)
+            Self.discardIncompleteCopy(at: NativeMetadataWriter.sidecarURL(for: stagingURL))
             throw error
         }
 
@@ -139,6 +152,18 @@ public struct ProcessMoveService {
     private static func fileSize(at url: URL) throws -> Int {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return (attributes[.size] as? Int) ?? 0
+    }
+
+    /// On iPad there's no exiftool, so `NativeMetadataWriter` puts the metadata in a `.xmp` sidecar
+    /// named after the file it belongs to (see its `sidecarURL(for:)`). Staging renames that file,
+    /// so the sidecar has to follow — otherwise it keeps the staging basename and
+    /// `ExifToolClient.foldInSidecarIfPresent(for:)` would never find it Mac-side. No-op on the Mac
+    /// path, which writes into the file itself and produces no sidecar.
+    private static func moveSidecarIfPresent(from stagingURL: URL, to destinationURL: URL) {
+        let stagedSidecar = NativeMetadataWriter.sidecarURL(for: stagingURL)
+        guard FileManager.default.fileExists(atPath: stagedSidecar.path) else { return }
+        try? FileManager.default.moveItem(
+            at: stagedSidecar, to: NativeMetadataWriter.sidecarURL(for: destinationURL))
     }
 
     /// Per docs/CLAUDE.md "File Safety": deletion always goes through the trash, even for a

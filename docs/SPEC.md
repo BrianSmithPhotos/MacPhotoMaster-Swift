@@ -166,6 +166,12 @@ deterministically, and copy files into local storage.
   - RAW → `<library>/<Month>/<DD>/`
   - JPEG → `<library>/<Month>/<DD>/jpg/`
 - Verify copy (size + SHA-256) before marking source-safe.
+- The copy lands under a hidden staging name and is renamed to its real name only after the metadata
+  write succeeds, so the file never exists at its final name in a half-annotated state. Without this,
+  anything watching the library folder can index it in the gap and cache it: DxO PhotoLab was
+  observed doing so and then showing empty Title and Instructions (the only two fields not already
+  present on the source) long after the correct values were on disk. Any XMP sidecar produced by the
+  write is renamed alongside it, since `foldInSidecarIfPresent` matches on basename.
 - Successfully processed files auto-skip from the current session view.
 - **iPad divergence:** the destination library is a fixed local folder inside the app's own sandbox
   (`Documents/ProcessedLibrary`), not user-picked — a Google-Drive-mounted destination was considered

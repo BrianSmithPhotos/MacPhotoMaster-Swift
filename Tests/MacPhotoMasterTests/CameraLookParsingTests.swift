@@ -52,6 +52,28 @@ final class CameraLookParsingTests: XCTestCase {
         XCTAssertEqual(CameraLookParsing.look(from: metadata), "Monochrome Profile 3")
     }
 
+    /// H1071766.JPG — a filter selected but left at strength 0 applies nothing, so it isn't
+    /// recorded. Verified against pixels, not assumed: No Filter, Blue and Yellow all at strength 0
+    /// produce the same colour-to-grey mapping to within 0.4%.
+    func testFilterAtZeroStrengthIsSuppressed() {
+        var metadata = monoProfile3
+        metadata["Olympus:MonochromeProfileSettings"] = "Blue Filter; 0; 8; Strength 0; 0; 3"
+
+        XCTAssertEqual(
+            CameraLookParsing.look(from: metadata),
+            "Monochrome Profile 3 | grain Low | shading +5")
+    }
+
+    /// H1071767.JPG — one step of strength is a real change and is kept.
+    func testFilterAtStrengthOneIsReported() {
+        var metadata = monoProfile3
+        metadata["Olympus:MonochromeProfileSettings"] = "Blue Filter; 0; 8; Strength 1; 0; 3"
+
+        XCTAssertEqual(
+            CameraLookParsing.look(from: metadata),
+            "Monochrome Profile 3 | blue filter str1 | grain Low | shading +5")
+    }
+
     func testSepiaTintIsReported() {
         var metadata = monoProfile3
         metadata["Olympus:MonochromeColor"] = "Sepia"

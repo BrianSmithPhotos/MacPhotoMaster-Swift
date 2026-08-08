@@ -67,13 +67,20 @@ public enum CameraLookParsing {
     /// shape as `ColorCreatorEffect`. `MonochromeVignetting` is the Shading Effect wheel and has no
     /// PrintConv at all, so it arrives as a bare number (-5...+5, positive white / negative black).
     /// `MonochromeColor` treats both `"(none)"` and `"Normal"` as untoned.
+    ///
+    /// Filter choice and strength are stored independently, so a selected filter at strength 0 is
+    /// inert and is suppressed. Measured, not assumed: on a fixed-exposure test set the colour-to-
+    /// grey weights for No Filter, Blue and Yellow all at strength 0 agree to within 0.4%, while one
+    /// strength step moves them by 10% or more (Blue str3 takes the blue weight from 0.12 to 0.76).
+    /// The camera also leaves a stale strength behind when the filter is set to None, which is why
+    /// the strength alone can't be trusted as the "is a filter applied" signal either.
     private static func monochromeSegments(_ metadata: [String: Any]) -> [String] {
         var segments: [String] = []
 
         let profile = fields(metadata, "Olympus:MonochromeProfileSettings")
         if profile.count >= 4, profile[0] != "No Filter",
             let filter = profile[0].components(separatedBy: " Filter").first, !filter.isEmpty,
-            let strength = trailingInt(profile[3])
+            let strength = trailingInt(profile[3]), strength != 0
         {
             segments.append("\(filter.lowercased()) filter str\(strength)")
         }

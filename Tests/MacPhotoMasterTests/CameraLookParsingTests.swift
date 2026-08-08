@@ -87,23 +87,77 @@ final class CameraLookParsingTests: XCTestCase {
         XCTAssertEqual(CameraLookParsing.look(from: metadata), "Color Profile 1")
     }
 
-    /// Strength is field 3, not field 1 — field 1 is the colour slider's minimum.
+    /// Strength is field 3, not field 1 — field 1 is the colour slider's minimum. H1071754.JPG.
     func testColorCreatorReadsColorAndStrength() {
         let metadata: [String: Any] = [
             "Olympus:PictureMode": "Color Creator; 2",
-            "Olympus:ColorCreatorEffect": "Color 12; 0; 29; Strength 2; -4; 3",
+            "Olympus:ColorCreatorEffect": "Color 10; 0; 29; Strength 2; -4; 3",
         ]
 
-        XCTAssertEqual(CameraLookParsing.look(from: metadata), "Color Creator | color 12 | strength +2")
+        XCTAssertEqual(CameraLookParsing.look(from: metadata), "Color Creator | color 10 | strength +2")
     }
 
-    func testColorCreatorAtCentreReportsModeOnly() {
+    /// H1071755.JPG — colour channel 0 with strength applied. Colour Creator adjusts one of 30
+    /// channels, so 0 is a real channel index, not an unset default; suppressing it the way a
+    /// zeroed hue slider is suppressed would lose which channel was actually adjusted.
+    func testColorCreatorChannelZeroIsNotSuppressed() {
         let metadata: [String: Any] = [
             "Olympus:PictureMode": "Color Creator; 2",
-            "Olympus:ColorCreatorEffect": "Color 0; 0; 29; Strength 0; -4; 3",
+            "Olympus:ColorCreatorEffect": "Color 0; 0; 29; Strength -1; -4; 3",
+        ]
+
+        XCTAssertEqual(CameraLookParsing.look(from: metadata), "Color Creator | color 0 | strength -1")
+    }
+
+    /// Strength 0 applies nothing whatever the channel, so both drop out. This is the state every
+    /// non-Colour-Creator frame carries.
+    func testColorCreatorAtZeroStrengthReportsModeOnly() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Color Creator; 2",
+            "Olympus:ColorCreatorEffect": "Color 28; 0; 29; Strength 0; -4; 3",
         ]
 
         XCTAssertEqual(CameraLookParsing.look(from: metadata), "Color Creator")
+    }
+
+    /// H1071761.JPG — contrast dialled down within Monochrome Profile 4, which the same profile
+    /// shot at 0 a few frames earlier. Per-profile, not a fixed per-mode default.
+    func testProfileContrastIsReported() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Monochrome Profile 4; 2",
+            "Olympus:PictureModeContrast": "-2 (min -2, max 2)",
+            "Olympus:PictureModeSharpness": "0 (min -2, max 2)",
+            "Olympus:PictureModeSaturation": "0 (min -2, max 2)",
+            "Olympus:ToneLevel":
+                "Highlights; -5; -7; 7; Shadows; -5; -7; 7; Midtones; -6; -7; 7; 0; 0; 0; 0",
+        ]
+
+        XCTAssertEqual(
+            CameraLookParsing.look(from: metadata),
+            "Monochrome Profile 4 | contrast -2 | HL-5 SH-5 Mid-6")
+    }
+
+    /// H1071764.JPG — sharpness dialled up within Colour Profile 4.
+    func testProfileSharpnessIsReported() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Art Mode; 2",
+            "Olympus:PictureModeContrast": "0 (min -2, max 2)",
+            "Olympus:PictureModeSharpness": "1 (min -2, max 2)",
+            "Olympus:PictureModeSaturation": "0 (min -2, max 2)",
+        ]
+
+        XCTAssertEqual(CameraLookParsing.look(from: metadata), "Color Profile 4 | sharp +1")
+    }
+
+    func testProfileContrastSharpnessSaturationAtZeroAreSuppressed() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Color Profile 1; 2",
+            "Olympus:PictureModeContrast": "0 (min -2, max 2)",
+            "Olympus:PictureModeSharpness": "0 (min -2, max 2)",
+            "Olympus:PictureModeSaturation": "0 (min -2, max 2)",
+        ]
+
+        XCTAssertEqual(CameraLookParsing.look(from: metadata), "Color Profile 1")
     }
 
     /// The unused padding after the three real tone channels must not be read as more channels.

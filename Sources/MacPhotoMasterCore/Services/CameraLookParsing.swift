@@ -39,6 +39,7 @@ public enum CameraLookParsing {
         segments.append(contentsOf: colorCreatorSegments(metadata))
         segments.append(contentsOf: monochromeSegments(metadata))
         segments.append(contentsOf: colorProfileSegments(metadata))
+        segments.append(contentsOf: contrastSharpnessSaturationSegments(metadata))
         segments.append(contentsOf: toneSegments(metadata))
 
         return segments.joined(separator: " | ")
@@ -46,16 +47,20 @@ public enum CameraLookParsing {
 
     /// `"Color 0; 0; 29; Strength 0; -4; 3"` — colour position on the wheel, its min and max, then
     /// strength with its own min and max. Only fields 0 and 3 are readings.
+    ///
+    /// Colour Creator adjusts *one* of 30 colour channels rather than all of them the way a colour
+    /// profile's wheel does, so `color` is a channel index, not an amount: `0` is a real position
+    /// (the first channel) and must not be suppressed as a default the way a zeroed hue slider is.
+    /// Strength is the amount, and its `0` is the true no-op — at strength 0 nothing is applied
+    /// whatever the channel, so both drop out together.
     private static func colorCreatorSegments(_ metadata: [String: Any]) -> [String] {
         let fields = self.fields(metadata, "Olympus:ColorCreatorEffect")
-        guard fields.count >= 4 else { return [] }
+        guard fields.count >= 4,
+            let strength = trailingInt(fields[3]), strength != 0,
+            let color = trailingInt(fields[0])
+        else { return [] }
 
-        var segments: [String] = []
-        if let color = trailingInt(fields[0]), color != 0 { segments.append("color \(color)") }
-        if let strength = trailingInt(fields[3]), strength != 0 {
-            segments.append("strength \(signed(strength))")
-        }
-        return segments
+        return ["color \(color)", "strength \(signed(strength))"]
     }
 
     /// `MonochromeProfileSettings` is `"Red Filter; 0; 8; Strength 3; 0; 3"` — same min/max-padded
@@ -103,6 +108,26 @@ public enum CameraLookParsing {
         return dialled.isEmpty ? [] : [dialled.joined(separator: " ")]
     }
 
+    /// The profile's own contrast/sharpness/saturation, as `"-2 (min -2, max 2)"` — a leading value
+    /// with the camera's range in parentheses, not a semicolon list like the tags above.
+    ///
+    /// These are genuinely dialled per profile, not fixed per mode: the sample set has Monochrome
+    /// Profile 4 shot at contrast 0 and again at -2, and Colour Profile 4 at sharpness 0 and again
+    /// at +1. `Olympus:ContrastSetting`/`SharpnessSetting`/`CustomSaturation` carry the same numbers
+    /// on a wider ±5 scale; the `PictureMode*` tags are read instead because they're scoped to the
+    /// picture mode being described.
+    private static func contrastSharpnessSaturationSegments(_ metadata: [String: Any]) -> [String] {
+        let readings = [
+            ("contrast", "Olympus:PictureModeContrast"),
+            ("sharp", "Olympus:PictureModeSharpness"),
+            ("sat", "Olympus:PictureModeSaturation"),
+        ]
+        return readings.compactMap { label, key in
+            guard let value = leadingInt(text(metadata, key)), value != 0 else { return nil }
+            return "\(label) \(signed(value))"
+        }
+    }
+
     /// `"Highlights; 0; -7; 7; Shadows; 0; -7; 7; Midtones; 0; -7; 7; 0; 0; ..."` — four fields per
     /// channel (name, value, min, max), then a run of unused padding this stops before.
     private static func toneSegments(_ metadata: [String: Any]) -> [String] {
@@ -125,6 +150,12 @@ public enum CameraLookParsing {
     /// bare `"3"`, so a labelled field and an unlabelled one read the same way.
     private static func trailingInt(_ field: String) -> Int? {
         field.split(separator: " ").last.flatMap { Int($0) }
+    }
+
+    /// The first whitespace-separated token as an `Int` — pulls `-2` out of `"-2 (min -2, max 2)"`,
+    /// where `trailingInt` would trip over the trailing `"2)"`.
+    private static func leadingInt(_ field: String) -> Int? {
+        field.split(separator: " ").first.flatMap { Int($0) }
     }
 
     private static func fields(_ metadata: [String: Any], _ key: String) -> [String] {

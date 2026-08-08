@@ -118,7 +118,8 @@ deterministically, and copy files into local storage.
     usable finite positive distance — a blank field, an "inf" reading, or `0` writes nothing.
   - Camera look → `IPTC:SpecialInstructions` + `XMP-photoshop:Instructions`. The in-camera
     creative-dial settings (profile hue sliders, Colour Creator colour/strength, mono filter, grain,
-    shading, tone curve) as one readable string built by `CameraLookParsing`, with every value left
+    shading, tone curve, and the profile's own contrast/sharpness/saturation) as one readable string
+    built by `CameraLookParsing`, with every value left
     at its default suppressed so ordinary frames get no write at all. Instructions is the
     destination because a probe of six candidate fields found it one of only four DxO PhotoLab
     surfaces, and the only one of those not already used. Legacy IPTC IIM caps SpecialInstructions

@@ -22,8 +22,8 @@ public enum ArtFilterTokenParsing {
 
         let pictureMode = firstText(metadata, keys: ["Olympus:PictureMode", "EXIF:PictureMode"])
         let pictureFirst = firstSemicolonText(pictureMode)
-        if pictureFirst.lowercased().contains("profile") {
-            return pictureFirst
+        if let creativeDial = Self.creativeDialToken(pictureFirst) {
+            return creativeDial
         }
 
         let stacked = firstText(
@@ -41,6 +41,25 @@ public enum ArtFilterTokenParsing {
         }
 
         return ""
+    }
+
+    /// The creative-dial looks worth naming in a filename, from `PictureMode`'s PrintConv text.
+    /// `nil` for the plain mode-dial looks (Natural, Vivid, Portrait...) — those aren't a chosen
+    /// look and don't earn a filename segment.
+    ///
+    /// Two names need special handling beyond the `"profile"` match:
+    ///
+    /// - `"Color Creator"` (`PictureMode` 7) is a creative-dial position like the profiles, but its
+    ///   name doesn't contain "profile".
+    /// - `"Art Mode"` (`PictureMode` 17) is an exiftool mislabel on the OM-3, where 17 is actually
+    ///   Colour Profile 4 — `Olympus.pm`'s table predates the body. Safe to remap here because a
+    ///   real art filter would have returned from the `ArtFilterEffect` branch above before ever
+    ///   reaching this one.
+    private static func creativeDialToken(_ pictureMode: String) -> String? {
+        if pictureMode.lowercased().contains("profile") { return pictureMode }
+        if pictureMode.caseInsensitiveCompare("Color Creator") == .orderedSame { return "Color Creator" }
+        if pictureMode.caseInsensitiveCompare("Art Mode") == .orderedSame { return "Color Profile 4" }
+        return nil
     }
 
     private static func firstText(_ metadata: [String: Any], keys: [String]) -> String {

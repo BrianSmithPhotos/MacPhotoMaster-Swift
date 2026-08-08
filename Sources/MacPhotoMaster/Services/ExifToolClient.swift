@@ -85,12 +85,12 @@ struct ExifToolClient: MetadataWriter {
     /// half-written) file so the write is all-or-nothing from the caller's perspective.
     func write(
         title: String?, description: String, keywords: [String], gps: GPSCoordinate?,
-        subjectDistance: Double? = nil, to url: URL
+        subjectDistance: Double? = nil, instructions: String? = nil, to url: URL
     ) async throws {
         try MetadataWriteFieldRules.validate(gps: gps)
         let arguments = Self.writeArguments(
             title: title, description: description, keywords: keywords, gps: gps,
-            subjectDistance: subjectDistance) + [url.path]
+            subjectDistance: subjectDistance, instructions: instructions) + [url.path]
         do {
             _ = try await run(arguments: arguments, timeoutSeconds: Self.singleFileTimeout)
             cleanupBackup(for: url)
@@ -115,7 +115,8 @@ struct ExifToolClient: MetadataWriter {
         guard !urls.isEmpty else { return [:] }
 
         let arguments = Self.writeArguments(
-            title: nil, description: description, keywords: keywords, gps: gps, subjectDistance: nil)
+            title: nil, description: description, keywords: keywords, gps: gps, subjectDistance: nil,
+            instructions: nil)
             + urls.map(\.path)
         do {
             _ = try await run(arguments: arguments, timeoutSeconds: Self.batchTimeoutPerFile * Double(urls.count))
@@ -147,7 +148,7 @@ struct ExifToolClient: MetadataWriter {
     /// append operator would duplicate keywords on every re-save.
     private static func writeArguments(
         title: String?, description: String, keywords: [String], gps: GPSCoordinate?,
-        subjectDistance: Double?
+        subjectDistance: Double?, instructions: String?
     ) -> [String] {
         var arguments: [String] = []
         if let title {
@@ -194,6 +195,17 @@ struct ExifToolClient: MetadataWriter {
         if let subjectDistance {
             arguments.append("-EXIF:SubjectDistance=\(subjectDistance)")
             arguments.append("-XMP-exif:SubjectDistance=\(subjectDistance)")
+        }
+
+        // The in-camera creative-dial look (see `CameraLookParsing`), which no standard tag carries.
+        // Instructions is the destination because a probe of six candidate fields found it's one of
+        // only four DxO PhotoLab surfaces at all, and the only one of those not already spoken for.
+        // Legacy IPTC IIM caps SpecialInstructions at 256 characters where XMP has no limit, so the
+        // IIM half is truncated rather than letting exiftool reject the whole write; the XMP half
+        // always carries the full string.
+        if let instructions, !instructions.isEmpty {
+            arguments.append("-IPTC:SpecialInstructions=\(String(instructions.prefix(256)))")
+            arguments.append("-XMP-photoshop:Instructions=\(instructions)")
         }
         return arguments
     }

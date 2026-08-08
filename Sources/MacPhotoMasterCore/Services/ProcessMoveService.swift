@@ -75,6 +75,7 @@ public struct ProcessMoveService {
                 keywords: keywords,
                 gps: Self.gpsCoordinate(for: asset),
                 subjectDistance: subjectDistance,
+                instructions: asset.cameraLook.isEmpty ? nil : asset.cameraLook,
                 to: destinationURL)
         } catch {
             Self.discardIncompleteCopy(at: destinationURL)

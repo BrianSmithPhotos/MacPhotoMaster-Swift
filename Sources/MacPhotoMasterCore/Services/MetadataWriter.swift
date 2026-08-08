@@ -26,13 +26,14 @@ public enum MetadataWriteError: Error, Equatable {
 /// instead (see its doc comment for why a direct write isn't safe on every platform/format).
 /// Callers that only need to save edited fields can depend on this instead of a concrete writer.
 public protocol MetadataWriter {
-    /// `title` and `subjectDistance` are per-file-unique (a rename-derived title; a focus distance
-    /// read per frame), so they're only exposed here, never in the batched overload below — see
-    /// docs/SPEC.md §3. `subjectDistance` is metres, written to the standard `EXIF:SubjectDistance`
-    /// so other apps can read it; `nil` leaves the tag untouched.
+    /// `title`, `subjectDistance` and `instructions` are per-file-unique (a rename-derived title; a
+    /// focus distance and a creative-dial look read per frame), so they're only exposed here, never
+    /// in the batched overload below — see docs/SPEC.md §3. `subjectDistance` is metres, written to
+    /// the standard `EXIF:SubjectDistance` so other apps can read it; `instructions` goes to
+    /// IPTC/XMP Instructions. `nil` or empty leaves either tag untouched.
     func write(
         title: String?, description: String, keywords: [String], gps: GPSCoordinate?,
-        subjectDistance: Double?, to url: URL) async throws
+        subjectDistance: Double?, instructions: String?, to url: URL) async throws
 
     /// Writes the same description/keywords/GPS to every file in `urls`.
     func write(description: String, keywords: [String], gps: GPSCoordinate?, to urls: [URL]) async throws

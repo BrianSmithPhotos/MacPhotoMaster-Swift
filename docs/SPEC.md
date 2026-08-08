@@ -116,6 +116,18 @@ deterministically, and copy files into local storage.
     on write makes it visible downstream. Per-file-unique like Title, so it rides the single-file
     write path only (never the batched overload), and is written only when the MakerNote yields a
     usable finite positive distance — a blank field, an "inf" reading, or `0` writes nothing.
+  - Camera look → `IPTC:SpecialInstructions` + `XMP-photoshop:Instructions`. The in-camera
+    creative-dial settings (profile hue sliders, Colour Creator colour/strength, mono filter, grain,
+    shading, tone curve) as one readable string built by `CameraLookParsing`, with every value left
+    at its default suppressed so ordinary frames get no write at all. Instructions is the
+    destination because a probe of six candidate fields found it one of only four DxO PhotoLab
+    surfaces, and the only one of those not already used. Legacy IPTC IIM caps SpecialInstructions
+    at 256 characters where XMP has none, so the IIM half is truncated and the XMP half always
+    carries the full string. Per-file-unique like Title, so single-file write path only.
+    Read from the JPEG, which is where the applied look lives — the ORF deliberately stays at the
+    neutral mode-dial value so a later RAW edit isn't pre-committed to the in-camera rendering.
+    The camera's `*` "profile has been edited" indicator is not recoverable: it compares against the
+    slot's saved baseline, and the file only carries current values. The values make it redundant.
 - **iPad divergence:** no `exiftool`, so there's no in-place write at all — `NativeMetadataWriter`
   always writes a `.xmp` sidecar instead (see its doc comment), and on iPad that sidecar is staged in
   local app storage, never on the camera/card itself, keyed by original filename + size rather than
@@ -124,11 +136,17 @@ deterministically, and copy files into local storage.
   a Mac. See docs/ARCHITECTURE.md "iPad file access & sidecar staging" for the reasoning.
   Focus distance is a further casualty of the missing MakerNote reader: the iPad can't read it at
   all, so nothing lands in `SubjectDistance` there — it's recovered and written during the Mac-side
-  import (`IPadImportService`), which reads the Olympus MakerNote via exiftool.
+  import (`IPadImportService`), which reads the Olympus MakerNote via exiftool. The camera look is a
+  casualty of the same gap and is recovered the same way.
 
 ## 4. Rename
 
 - Deterministic pattern: `sequence_batch_YYYYMMDD_HHMM_[artfilter]_camera_lens.ext`.
+- The `[artfilter]` segment covers every deliberately-chosen look, not just Art Filters: an active
+  Art Filter effect wins, else a creative-dial `PictureMode` (`Color Profile 1-4`, `Monochrome
+  Profile 1-4`, `Color Creator`), else a stacked-image state, else multiple exposure. Plain
+  mode-dial looks (Natural, Vivid, Portrait...) get no segment — they aren't a chosen look.
+  Note `PictureMode` 17 prints as "Art Mode" but is Colour Profile 4 on the OM-3, and is remapped.
 - Sanitize for filesystem-safe characters; resolve collisions deterministically (never silently
   overwrite).
 - `Batch` is a manual per-session label, not GPS-derived — GPS enrichment and renaming are
@@ -303,6 +321,16 @@ default settings, the point being Apple's engine applied to the file as the came
 - Any Timeline export JSON and any local location-cache database must be gitignored — never commit
   real location history.
 - No API keys or secrets committed; read from process environment.
+
+## Ideas, not started
+
+- **Camera-style visualisation of the in-camera look.** `CameraLookParsing` (§3) already recovers
+  the full creative-dial state, but renders it as a text string. The camera itself shows this
+  graphically: a tone curve for the highlight/shadow/midtone levels, and a colour wheel with the
+  per-hue saturation values around it. Reproducing that as a preview-pane view would make the look
+  readable at a glance instead of parsed from a sentence. Needs real example frames covering the
+  interesting cases (dialled hues, non-flat tone curve, Colour Creator positions) before designing —
+  the sample set gathered so far is mostly defaults.
 
 ## Deliberately out of scope (for now)
 

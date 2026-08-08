@@ -32,12 +32,12 @@ public struct NativeMetadataWriter: MetadataWriter {
 
     public func write(
         title: String?, description: String, keywords: [String], gps: GPSCoordinate?,
-        subjectDistance: Double? = nil, to url: URL
+        subjectDistance: Double? = nil, instructions: String? = nil, to url: URL
     ) async throws {
         try MetadataWriteFieldRules.validate(gps: gps)
         let data = try Self.xmpData(
             title: title, description: description, keywords: keywords, gps: gps,
-            subjectDistance: subjectDistance)
+            subjectDistance: subjectDistance, instructions: instructions)
         try data.write(to: Self.sidecarURL(for: url), options: .atomic)
     }
 
@@ -65,7 +65,7 @@ public struct NativeMetadataWriter: MetadataWriter {
 
     private static func xmpData(
         title: String?, description: String, keywords: [String], gps: GPSCoordinate?,
-        subjectDistance: Double?
+        subjectDistance: Double?, instructions: String?
     ) throws -> Data {
         let metadata = CGImageMetadataCreateMutable()
 
@@ -107,6 +107,16 @@ public struct NativeMetadataWriter: MetadataWriter {
             CGImageMetadataSetValueMatchingImageProperty(
                 metadata, kCGImagePropertyExifDictionary, kCGImagePropertyExifSubjectDistance,
                 String(subjectDistance) as CFString)
+        }
+
+        // Like `subjectDistance` above, this is nil on the iPad — the creative-dial look comes from
+        // Olympus MakerNotes, which only `exiftool` reads, so it's populated on the Mac side only
+        // (including when the Mac finishes off an iPad import). Written here anyway so a sidecar
+        // never silently drops a value it was handed.
+        if let instructions, !instructions.isEmpty {
+            CGImageMetadataSetValueMatchingImageProperty(
+                metadata, kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCSpecialInstructions,
+                instructions as CFString)
         }
 
         guard let xmpData = CGImageMetadataCreateXMPData(metadata, nil) else {

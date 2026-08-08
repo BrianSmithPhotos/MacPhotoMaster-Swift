@@ -22,6 +22,10 @@ public struct PhotoAsset: Identifiable, Hashable {
 
     public var capturedAt: Date?
     public var artFilterToken: String?
+    /// The in-camera creative-dial settings as one readable string (see `CameraLookParsing`),
+    /// written to IPTC/XMP Instructions on process/move. Read from the same lazy `exiftool` pass as
+    /// `artFilterToken`, and empty for anything that wasn't shot with the dial engaged.
+    public var cameraLook: String = ""
 
     public var gpsLatitude: Double?
     public var gpsLongitude: Double?

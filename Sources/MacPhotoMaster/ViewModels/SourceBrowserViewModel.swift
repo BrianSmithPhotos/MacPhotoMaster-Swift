@@ -1567,6 +1567,7 @@ final class SourceBrowserViewModel: ObservableObject {
         guard selectedAssetID == id else { return }
         updateAsset(id) { current in
             current.artFilterToken = ArtFilterTokenParsing.token(from: metadata)
+            current.cameraLook = CameraLookParsing.look(from: metadata)
             current.focusDistance = (metadata["Olympus:FocusDistance"] as? String) ?? ""
             if let correctedDescription = metadata["IPTC:Caption-Abstract"] as? String,
                 !correctedDescription.isEmpty, correctedDescription != current.descriptionText {
@@ -1597,6 +1598,7 @@ final class SourceBrowserViewModel: ObservableObject {
             guard case .success(let metadata) = results[asset.url] else { continue }
             updateAsset(asset.id) { current in
                 current.artFilterToken = ArtFilterTokenParsing.token(from: metadata)
+                current.cameraLook = CameraLookParsing.look(from: metadata)
                 current.focusDistance = (metadata["Olympus:FocusDistance"] as? String) ?? ""
                 if let correctedDescription = metadata["IPTC:Caption-Abstract"] as? String,
                     !correctedDescription.isEmpty, correctedDescription != current.descriptionText {

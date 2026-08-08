@@ -107,13 +107,15 @@ struct IPadImportService {
         }
     }
 
-    /// The two maker-note fields only `exiftool` can recover on the Mac — the iPad's ImageIO reader
-    /// sees neither. `artFilterToken` drives the filename/keywords/description; `focusDistance` is the
-    /// raw `Olympus:FocusDistance` display string (e.g. `"16.03 m"`), later parsed into the standard
-    /// `EXIF:SubjectDistance` on write.
+    /// The maker-note fields only `exiftool` can recover on the Mac — the iPad's ImageIO reader
+    /// sees none of them. `artFilterToken` drives the filename/keywords/description; `focusDistance`
+    /// is the raw `Olympus:FocusDistance` display string (e.g. `"16.03 m"`), later parsed into the
+    /// standard `EXIF:SubjectDistance` on write; `cameraLook` is the creative-dial settings string
+    /// written to IPTC/XMP Instructions.
     private struct MakerNoteFields {
         var artFilterToken: String = ""
         var focusDistance: String = ""
+        var cameraLook: String = ""
     }
 
     /// One batched `exiftool` invocation for the whole tree rather than one launch per file — the
@@ -125,7 +127,8 @@ struct IPadImportService {
             guard case .success(let metadata) = result else { return nil }
             return MakerNoteFields(
                 artFilterToken: ArtFilterTokenParsing.token(from: metadata),
-                focusDistance: (metadata["Olympus:FocusDistance"] as? String) ?? "")
+                focusDistance: (metadata["Olympus:FocusDistance"] as? String) ?? "",
+                cameraLook: CameraLookParsing.look(from: metadata))
         }
     }
 
@@ -164,6 +167,7 @@ struct IPadImportService {
         asset.descriptionText = draft.description
         asset.keywords = RawDevelopService.removingDevelopMarker(from: draft.keywords)
         asset.artFilterToken = makerNotes.artFilterToken
+        asset.cameraLook = makerNotes.cameraLook
         // Only readable here (exiftool sees the Olympus MakerNote the iPad's ImageIO reader can't);
         // ProcessMoveService parses it into the standard EXIF:SubjectDistance on the destination copy.
         asset.focusDistance = makerNotes.focusDistance

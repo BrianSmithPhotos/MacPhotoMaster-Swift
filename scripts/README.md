@@ -139,6 +139,28 @@ hues rather than removing them. Turn off Night Shift and True Tone first;
 a hue-shifted display is the one screen setting that genuinely biases the
 result.
 
+### OM Workspace confirms the Partial Color geometry, not its colours
+
+Workspace's art-filter panel draws the ring as an 18-stop wheel numbered 1-18
+(exiftool numbers the same stops 0-17, so Workspace's "4" is our index 3), with
+stop 1 at 12 o'clock and the index running clockwise. That independently
+confirms the measured geometry: 18 stops, anchored at yellow, hue stepping down
+about 20 degrees per stop. It is the second confirmation of the anchor after the
+camera's own yellow selector at top.
+
+Its *rendered* colours are decorative, though, exactly like the Colour Creator
+ring in the same app. Sampling the annulus against the measured table gives a
+mean offset of only -4.8 degrees but sd 19.1 and a worst case of 48 degrees:
+stops 0-4 and 10-13 land within 8 degrees, while pink/magenta and
+emerald/green/lime are 20-48 degrees out. Read geometry off this UI; never read
+hue off it.
+
+Workspace also offers controls the camera does not - a +/-7 saturation range
+against the camera's +/-5, plus luminance and tint axes with no camera
+equivalent, and a Color Filter list far longer than the five values the camera
+writes to the `0x8060` record. None of that is in the files, so none of it
+belongs in the look string or the visualiser.
+
 ### Where the measured frames ended up
 
 The metadata itself is in the repo, not just the conclusions drawn from it:

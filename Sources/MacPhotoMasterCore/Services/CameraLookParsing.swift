@@ -311,8 +311,16 @@ public enum CameraLookParsing {
 
     /// `MonochromeProfileSettings` is `"Red Filter; 0; 8; Strength 3; 0; 3"` — same min/max-padded
     /// shape as `ColorCreatorEffect`. `MonochromeVignetting` is the Shading Effect wheel and has no
-    /// PrintConv at all, so it arrives as a bare number (-5...+5, positive white / negative black).
-    /// `MonochromeColor` treats both `"(none)"` and `"Normal"` as untoned.
+    /// PrintConv at all, so it arrives as a bare number (-5...+5, positive white / negative black,
+    /// 0 unshaded). `MonochromeColor` treats both `"(none)"` and `"Normal"` as untoned.
+    ///
+    /// `MonochromeVignetting`'s name is Olympus's and is narrower than the setting: the colour
+    /// profiles carry the same -5...+5 shading slider, and the camera stores it in this same tag.
+    /// So `shading` is emitted whatever the picture mode — H1071920 is a Colour Profile 4 frame
+    /// reading `shading +1`, which is correct, not a stale monochrome value leaking. (The value is
+    /// held per picture mode, not globally: H1071919 reads 0 immediately after a monochrome frame
+    /// set it to -2.) That is also why the shading read lives here despite the function's name —
+    /// splitting it out would move code without changing a single rendered string.
     ///
     /// Filter choice and strength are stored independently, so a selected filter at strength 0 is
     /// inert and is suppressed. Measured, not assumed: on a fixed-exposure test set the colour-to-

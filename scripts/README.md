@@ -148,6 +148,18 @@ exact `exiftool -j -G1 -a -s` text and the strings the parsers rendered from it.
 That is the corpus to re-check against when the parsers change; the cards
 themselves are not a durable record.
 
+### Shading Effect is not monochrome-only
+
+`Olympus:MonochromeVignetting` carries the Shading Effect slider, -5 to +5
+through an unshaded 0 — a vignette running dark at the negative end to light at
+the positive one. The tag name is Olympus's and it is narrower than the setting:
+the *colour* profiles have the same slider, stored in the same tag. Confirmed at
+the camera, and consistent with the files — H1071920 is a Colour Profile frame
+reading +1, while H1071919, shot straight after a monochrome frame that set -2,
+reads 0. So the value is held per picture mode rather than in one global
+register, and `shading` appearing on a colour frame is correct rather than a
+leak.
+
 ### The Shade Effect codes, 0x80a0 and 0x80a1
 
 exiftool has no table for either, so both were read off the pixels

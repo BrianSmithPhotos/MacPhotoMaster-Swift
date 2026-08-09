@@ -293,7 +293,36 @@ final class CameraLookParsingTests: XCTestCase {
         ]
 
         XCTAssertEqual(
-            CameraLookParsing.look(from: metadata), "Partial Color | partial 3 | fx Star Light")
+            CameraLookParsing.look(from: metadata), "Partial Color | partial red | fx Star Light")
+    }
+
+    /// H1071792 and H1071801: two of the eighteen hue-wheel frames the ring mapping was measured
+    /// from, at opposite ends of the ring. Stop 3 is red and stop 12 is its opposite, cyan.
+    func testPartialColorStopsAreNamedFromTheMeasuredRing() {
+        func look(stop: Int) -> String {
+            CameraLookParsing.look(from: [
+                "Olympus:PictureMode": "Natural; 2",
+                "Olympus:ArtFilterEffect":
+                    "Partial Color II; 4352; 0; Partial Color \(stop); No Effect; 0; No Color Filter; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0",
+            ])
+        }
+
+        XCTAssertEqual(look(stop: 0), "Partial Color II | partial yellow")
+        XCTAssertEqual(look(stop: 3), "Partial Color II | partial red")
+        XCTAssertEqual(look(stop: 12), "Partial Color II | partial cyan")
+        XCTAssertEqual(look(stop: 17), "Partial Color II | partial chartreuse")
+    }
+
+    /// The ring has eighteen stops on every body seen so far, but the index is read straight from
+    /// the file — an unexpected one falls back to the bare number rather than naming the wrong hue.
+    func testPartialColorStopOutsideTheRingKeepsItsNumber() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Natural; 2",
+            "Olympus:ArtFilterEffect":
+                "Partial Color; 4352; 0; Partial Color 23; No Effect; 0; No Color Filter; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0",
+        ]
+
+        XCTAssertEqual(CameraLookParsing.look(from: metadata), "Partial Color | partial 23")
     }
 
     /// The same stale-slot trap as the monochrome profile's leftover strength: H1071773 records

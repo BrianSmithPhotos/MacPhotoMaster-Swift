@@ -105,3 +105,36 @@ files are modified in place. Only run against a card/folder you have secure
 copies of elsewhere (per docs/CLAUDE.md "Secrets & Privacy" — this script
 itself never touches real Timeline exports or committed test fixtures, only
 whatever directory you point it at).
+
+## make-hue-wheel.py
+
+Generates the hue wheel that `CameraLookParsing.partialColorNames` was measured
+from. Kept so that table is reproducible rather than a set of magic strings.
+
+```
+scripts/make-hue-wheel.py hue-wheel.png
+```
+
+Why it exists: exiftool has no name table for the art filter's Partial Color
+ring — its PrintConv is literally `"Partial Color $val"` — so the eighteen
+stops had to be measured. Displaying this wheel and shooting it once at every
+stop makes each frame's surviving sector readable *by its position on the
+wheel* rather than by its colour, which is what makes photographing a monitor
+acceptable: the display's gamut and the camera's white balance shift the hue
+but not the geometry.
+
+The measurement (2026-08-08, OM-3, frames H1071790-H1071807) came out at
+20.0 degrees per stop with stop 0 at 64.1 +/- 2.3 degrees — pure yellow is 60,
+and the camera's own ring UI shows a yellow selector at top, which
+independently fixes the anchor. Hence stop 0 = yellow, each further stop
+stepping 20 degrees down in hue.
+
+To redo it: display the wheel, shoot Partial Color at all eighteen stops with
+consistent framing, then register each frame off the white and black hub
+patches (their offsets from the wheel centre are fixed by the geometry at the
+top of the script) and find the kept sector by normalising each angular bin
+against the brightest that bin gets across all eighteen frames — an absolute
+saturation threshold does not work, because the filter attenuates the rejected
+hues rather than removing them. Turn off Night Shift and True Tone first;
+a hue-shifted display is the one screen setting that genuinely biases the
+result.

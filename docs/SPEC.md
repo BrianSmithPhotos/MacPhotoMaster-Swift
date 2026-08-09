@@ -126,7 +126,10 @@ deterministically, and copy files into local storage.
     dialled is silent — Muted, Monotone, Underwater and i-Enhance are distinct renderings and are
     recorded even when untouched. B&W filter and tint can arrive by three mutually exclusive routes
     (monochrome profile, Monotone picture mode, art filter), each with its own tag and its own value
-    numbering, so they are never read through a shared table. Instructions is the
+    numbering, so they are never read through a shared table. The Partial Color filter's ring
+    position is reported as a colour name rather than the bare index exiftool gives, from a table
+    measured by shooting a hue wheel at all eighteen stops: stop 0 is yellow and each stop steps
+    20 degrees down in hue. Instructions is the
     destination because a probe of six candidate fields found it one of only four DxO PhotoLab
     surfaces, and the only one of those not already used. Legacy IPTC IIM caps SpecialInstructions
     at 256 characters where XMP has none, so the IIM half is truncated and the XMP half always

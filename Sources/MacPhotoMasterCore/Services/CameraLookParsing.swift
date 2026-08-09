@@ -93,6 +93,23 @@ public enum CameraLookParsing {
         "Red Color Filter": 3, "Green Color Filter": 4,
     ]
 
+    /// The Partial Color ring's 18 stops. exiftool has no table for these — its PrintConv is
+    /// literally `"Partial Color $val"` — so the mapping was measured: a hue wheel was shot once at
+    /// every stop and the surviving sector's position on the wheel read off geometrically. Stop 0 is
+    /// yellow and each further stop moves 20 degrees *down* in hue, so the ring runs
+    /// yellow, orange, red, magenta, blue, cyan, green and back. The camera's own ring UI puts a
+    /// yellow selector at the top, which independently fixes stop 0 against the measured anchor of
+    /// 64 degrees (pure yellow is 60).
+    private static let partialColorNames = [
+        "yellow", "amber", "orange", "red", "crimson", "pink",
+        "magenta", "purple", "violet", "blue", "azure", "sky",
+        "cyan", "turquoise", "emerald", "green", "lime", "chartreuse",
+    ]
+
+    private static func partialColorName(_ index: Int) -> String {
+        partialColorNames.indices.contains(index) ? partialColorNames[index] : "\(index)"
+    }
+
     /// `ArtFilterEffect` is 20 int16u values: the filter itself in fields 0-3, then up to four
     /// stacked-option records of `(code, marker, value, unused)` packed from field 4 in ascending
     /// code order and zero-padded. The markers are the camera's usual min/max padding and carry no
@@ -115,7 +132,7 @@ public enum CameraLookParsing {
         // frames carry "Partial Color 0" despite the filter having no such setting — so this is
         // gated on the filter's name rather than on the value being non-zero.
         if fields[0].hasPrefix("Partial Color"), let index = trailingInt(fields[3]) {
-            segments.append("partial \(index)")
+            segments.append("partial \(partialColorName(index))")
         }
 
         for start in stride(from: 4, to: fields.count - 2, by: 4) {

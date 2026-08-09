@@ -110,6 +110,36 @@ public enum CameraLookParsing {
         partialColorNames.indices.contains(index) ? partialColorNames[index] : "\(index)"
     }
 
+    /// The Colour Creator ring's 30 positions. Like Partial Color, exiftool has no table for these,
+    /// so they were measured (2026-08-09, OM-3, frames H1071885-H1071915): every position shot at
+    /// Vivid -1 against a flat neutral wall at locked exposure, reading the cast off the mean patch
+    /// with position 0 as the reference white.
+    ///
+    /// Position 0 is *neutral* — it applies no hue at all (0.36% saturation, and its recorded JPEG
+    /// white balance equals the ORF's exactly). It still runs as a pure saturation control, which is
+    /// why it is reported rather than suppressed. Positions 1-29 then run yellow-green, orange, red,
+    /// magenta, blue, cyan, green and back, hue decreasing with the index — the same direction as
+    /// the Partial Color ring.
+    ///
+    /// Names repeat where the measurement says they should. The ring's detents are 12 degrees apart
+    /// geometrically (confirmed from OM Workspace, which labels the ring 0/5/10/15/20/25 clockwise
+    /// from 12 o'clock, and whose cursor for position 11 sits at 131 degrees against 132 predicted),
+    /// but the rendered output is not evenly spaced in hue: positions 16-18 all land within 4
+    /// degrees of each other, while 1-2 are 42 degrees apart. Inventing 29 distinct names would
+    /// claim a precision the camera does not deliver.
+    private static let colorCreatorNames = [
+        "neutral", "yellow-green", "orange", "vermilion", "vermilion", "vermilion",
+        "red", "crimson", "rose", "magenta", "purple",
+        "violet", "indigo", "indigo", "blue", "blue",
+        "azure", "azure", "azure", "sky", "sky",
+        "cyan", "cyan", "turquoise", "jade", "emerald",
+        "green", "lime", "lime", "lime",
+    ]
+
+    private static func colorCreatorName(_ index: Int) -> String {
+        colorCreatorNames.indices.contains(index) ? colorCreatorNames[index] : "\(index)"
+    }
+
     /// `ArtFilterEffect` is 20 int16u values: the filter itself in fields 0-3, then up to four
     /// stacked-option records of `(code, marker, value, unused)` packed from field 4 in ascending
     /// code order and zero-padded. The markers are the camera's usual min/max padding and carry no
@@ -233,14 +263,27 @@ public enum CameraLookParsing {
         return segments
     }
 
-    /// `"Color 0; 0; 29; Strength 0; -4; 3"` — colour position on the wheel, its min and max, then
+    /// `"Color 0; 0; 29; Strength 0; -4; 3"` — colour position on the ring, its min and max, then
     /// strength with its own min and max. Only fields 0 and 3 are readings.
     ///
-    /// Colour Creator adjusts *one* of 30 colour channels rather than all of them the way a colour
-    /// profile's wheel does, so `color` is a channel index, not an amount: `0` is a real position
-    /// (the first channel) and must not be suppressed as a default the way a zeroed hue slider is.
-    /// Strength is the amount, and its `0` is the true no-op — at strength 0 nothing is applied
-    /// whatever the channel, so both drop out together.
+    /// `color` is a ring position, not an amount, so `0` must not be suppressed as a default the way
+    /// a zeroed hue slider is — see `colorCreatorNames`. Strength is the amount, and its `0` is the
+    /// true no-op: at strength 0 nothing is applied whatever the position, so both drop out
+    /// together. It is reported as `vivid` because that is what the camera and OM Workspace both
+    /// call it on screen; only exiftool's PrintConv says "Strength".
+    ///
+    /// Strength is bipolar rather than an intensity: -4 is exact monochrome (R=G=B, verified across
+    /// five positions and all 36 sectors of the hue wheel), 0 sits at the untouched reference, and
+    /// +3 boosts. Negative values behave like Partial Color, keeping hues near the cast and
+    /// collapsing the rest toward it.
+    ///
+    /// `-4` is annotated as mono because the file otherwise gives no hint that the frame is black
+    /// and white — the picture mode still reads "Color Creator". The ring position is *not*
+    /// suppressed alongside it, even though the output carries no colour: the cast is applied before
+    /// the desaturation, so the position still decides which hues render light or dark, the way a
+    /// B&W contrast filter does. Measured across the five mono frames, the per-sector luminance
+    /// profile moves by up to a third between positions. (Direction only — those frames had
+    /// uncontrolled exposure, so the size of the effect is not pinned down.)
     private static func colorCreatorSegments(_ metadata: [String: Any]) -> [String] {
         let fields = self.fields(metadata, "Olympus:ColorCreatorEffect")
         guard fields.count >= 4,
@@ -248,8 +291,12 @@ public enum CameraLookParsing {
             let color = trailingInt(fields[0])
         else { return [] }
 
-        return ["color \(color)", "strength \(signed(strength))"]
+        let vivid = strength == monoStrength ? "vivid -4 (mono)" : "vivid \(signed(strength))"
+        return ["color \(color) (\(colorCreatorName(color)))", vivid]
     }
+
+    /// The bottom of the Vivid range, where the render is fully desaturated whatever the position.
+    private static let monoStrength = -4
 
     /// `MonochromeProfileSettings` is `"Red Filter; 0; 8; Strength 3; 0; 3"` — same min/max-padded
     /// shape as `ColorCreatorEffect`. `MonochromeVignetting` is the Shading Effect wheel and has no

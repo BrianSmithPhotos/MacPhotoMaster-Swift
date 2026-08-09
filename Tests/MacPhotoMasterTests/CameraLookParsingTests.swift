@@ -116,19 +116,88 @@ final class CameraLookParsingTests: XCTestCase {
             "Olympus:ColorCreatorEffect": "Color 10; 0; 29; Strength 2; -4; 3",
         ]
 
-        XCTAssertEqual(CameraLookParsing.look(from: metadata), "Color Creator | color 10 | strength +2")
+        XCTAssertEqual(
+            CameraLookParsing.look(from: metadata), "Color Creator | color 10 (purple) | vivid +2")
     }
 
-    /// H1071755.JPG — colour channel 0 with strength applied. Colour Creator adjusts one of 30
-    /// channels, so 0 is a real channel index, not an unset default; suppressing it the way a
-    /// zeroed hue slider is suppressed would lose which channel was actually adjusted.
-    func testColorCreatorChannelZeroIsNotSuppressed() {
+    /// H1071755.JPG — ring position 0 with strength applied. Position 0 applies no hue but still
+    /// runs as a pure saturation control, so it is a real setting rather than an unset default;
+    /// suppressing it the way a zeroed hue slider is suppressed would lose that it was in use.
+    func testColorCreatorPositionZeroIsNotSuppressed() {
         let metadata: [String: Any] = [
             "Olympus:PictureMode": "Color Creator; 2",
             "Olympus:ColorCreatorEffect": "Color 0; 0; 29; Strength -1; -4; 3",
         ]
 
-        XCTAssertEqual(CameraLookParsing.look(from: metadata), "Color Creator | color 0 | strength -1")
+        XCTAssertEqual(
+            CameraLookParsing.look(from: metadata), "Color Creator | color 0 (neutral) | vivid -1")
+    }
+
+    /// The measured ring table (2026-08-09, H1071885-H1071915). Position 26 is the anchor the
+    /// camera itself corroborates: its on-screen header swatch for that position is green.
+    func testColorCreatorNamesTheRingPosition() {
+        func look(_ position: Int) -> String {
+            CameraLookParsing.look(from: [
+                "Olympus:PictureMode": "Color Creator; 2",
+                "Olympus:ColorCreatorEffect": "Color \(position); 0; 29; Strength -1; -4; 3",
+            ])
+        }
+
+        XCTAssertEqual(look(26), "Color Creator | color 26 (green) | vivid -1")
+        XCTAssertEqual(look(6), "Color Creator | color 6 (red) | vivid -1")
+        XCTAssertEqual(look(15), "Color Creator | color 15 (blue) | vivid -1")
+        XCTAssertEqual(look(29), "Color Creator | color 29 (lime) | vivid -1")
+    }
+
+    /// Vivid -4 renders fully desaturated whatever the ring position, and nothing else in the file
+    /// says the frame is black and white — the picture mode still reads "Color Creator".
+    func testColorCreatorAtLowestVividIsMarkedMono() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Color Creator; 2",
+            "Olympus:ColorCreatorEffect": "Color 26; 0; 29; Strength -4; -4; 3",
+        ]
+
+        XCTAssertEqual(
+            CameraLookParsing.look(from: metadata),
+            "Color Creator | color 26 (green) | vivid -4 (mono)")
+    }
+
+    /// The position survives the mono annotation: the cast is applied before the desaturation, so it
+    /// still decides which hues render light or dark the way a B&W contrast filter does. Dropping it
+    /// would lose that.
+    func testColorCreatorKeepsThePositionWhenMono() {
+        func position(_ n: Int) -> String {
+            CameraLookParsing.look(from: [
+                "Olympus:PictureMode": "Color Creator; 2",
+                "Olympus:ColorCreatorEffect": "Color \(n); 0; 29; Strength -4; -4; 3",
+            ])
+        }
+
+        XCTAssertNotEqual(position(6), position(26))
+        XCTAssertTrue(position(6).contains("color 6 (red)"))
+        XCTAssertTrue(position(6).hasSuffix("vivid -4 (mono)"))
+    }
+
+    /// One step up from the bottom is not mono, so it keeps the plain signed form.
+    func testColorCreatorJustAboveMonoIsNotMarked() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Color Creator; 2",
+            "Olympus:ColorCreatorEffect": "Color 26; 0; 29; Strength -3; -4; 3",
+        ]
+
+        XCTAssertEqual(
+            CameraLookParsing.look(from: metadata), "Color Creator | color 26 (green) | vivid -3")
+    }
+
+    /// The ring only runs to 29, but an out-of-range position falls back to the bare number rather
+    /// than trapping on the table — same contract as `partialColorName`.
+    func testColorCreatorPositionBeyondTheRingFallsBackToTheNumber() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Color Creator; 2",
+            "Olympus:ColorCreatorEffect": "Color 30; 0; 29; Strength -1; -4; 3",
+        ]
+
+        XCTAssertEqual(CameraLookParsing.look(from: metadata), "Color Creator | color 30 (30) | vivid -1")
     }
 
     /// Strength 0 applies nothing whatever the channel, so both drop out. This is the state every

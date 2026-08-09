@@ -340,13 +340,59 @@ default settings, the point being Apple's engine applied to the file as the came
 
 ## Ideas, not started
 
+In priority order — the visualiser first.
+
 - **Camera-style visualisation of the in-camera look.** `CameraLookParsing` (§3) already recovers
   the full creative-dial state, but renders it as a text string. The camera itself shows this
   graphically: a tone curve for the highlight/shadow/midtone levels, and a colour wheel with the
   per-hue saturation values around it. Reproducing that as a preview-pane view would make the look
-  readable at a glance instead of parsed from a sentence. Needs real example frames covering the
-  interesting cases (dialled hues, non-flat tone curve, Colour Creator positions) before designing —
-  the sample set gathered so far is mostly defaults.
+  readable at a glance instead of parsed from a sentence.
+
+  No longer blocked on examples: roughly 90 frames shot 2026-08-08 give 50 distinct look strings,
+  with every branch of the parser represented by at least one real frame.
+
+  **Prerequisite.** `look(from:)` parses and formats in a single pass, so the typed values exist
+  only as locals inside the segment builders — a view would have to re-parse this app's own output
+  to draw a wheel. Split it into a `CameraLook` value type and render the string from that. The 50
+  known strings make the refactor provable: old and new must agree byte-for-byte on every one.
+
+  Element groups, by what varies together rather than by which tag supplied it:
+  1. **Identity** — mode/profile name. Exactly one, always present, and it selects group 2.
+  2. **Colour rendering** — the hero graphic, and the only *mutually exclusive* group: 12-spoke
+     profile wheel, 30-stop Colour Creator ring, 18-stop Partial Color ring, monochrome filter and
+     tint, or nothing at all. That exclusivity is what makes one large graphic viable rather than a
+     stack of widgets.
+  3. **Tonal response** — `ToneLevel`, `Gradation` and `PictureModeEffect` all bend the same curve.
+  4. **Sliders** — contrast, sharpness, saturation.
+  5. **Finish** — grain, vignetting, the stacked art-filter `fx` records.
+  6. **Provenance** — which B&W route supplied filter/tint, and the ORF/JPEG divergence.
+     Diagnostic; collapsed by default.
+
+  Two things fall out of the groups. B&W filter and tint reach group 2 by three mutually exclusive
+  routes with three different numberings, and the parser must keep those strictly apart — but they
+  mean the same thing to the eye, so the view should merge them: the separation is a file-format
+  concern, not a display concern. And the three rings differ only in stop count (12, 18, 30), so one
+  component parameterised by N covers all of them.
+
+  Partial Color and Colour Creator are both measured; the 12 Colour Profile spokes are not — see
+  `scripts/README.md` under `make-hue-wheel.py`.
+
+- **Applying a camera look through Apple's RAW engine.** After the visualiser, not before.
+  `RawDevelopService` renders at `CIRAWFilter`'s defaults deliberately (Apple's engine on the file
+  as the camera recorded it), but the filter also exposes `boostAmount` — how much of Apple's own
+  tone rendering to apply, where 0 gives a flat linear render — along with `contrastAmount`,
+  `sharpnessAmount`, the neutral/white-balance controls, and `linearSpaceFilter`, which injects an
+  arbitrary `CIFilter` chain in linear space before the output colour-space conversion. That last
+  one is where a grade would belong.
+
+  Apple's pipeline does not read Olympus maker notes, which is exactly why an ORF renders as
+  Natural, so none of this is automatic: the look would have to be implemented, and a faithful
+  reproduction of an art filter is not realistic. Monochrome is the one cheap case — a contrast
+  filter plus toning is ordinary darkroom physics rather than a proprietary curve, and both values
+  are already parsed for all three routes.
+
+  If built, it must be an opt-in second path. The existing develop route's value is that it is
+  Apple's rendering and nothing else.
 
 ## Deliberately out of scope (for now)
 

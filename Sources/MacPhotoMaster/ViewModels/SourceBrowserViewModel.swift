@@ -231,6 +231,14 @@ final class SourceBrowserViewModel: ObservableObject {
     private let rawDerivedStore: RawDerivedStore? = try? RawDerivedStore.makeDefault()
     private static let ebirdLogger = Logger(subsystem: "MacPhotoMaster", category: "EBirdSpecies")
 
+    /// Shares `IPadImportService`'s subsystem so one predicate catches both write paths:
+    /// `log show --predicate 'subsystem == "photos.briansmith.macphotomaster"' --last 1h`.
+    /// Filenames and reasons are logged `.public` for the same reason they are there — default
+    /// redaction renders them `<private>`, which makes a local desktop app's log useless for the one
+    /// question it needs to answer.
+    private static let saveLog = Logger(
+        subsystem: "photos.briansmith.macphotomaster", category: "MetadataSave")
+
     /// Reverse-geocode context text (docs/SPEC.md §6/§7), keyed by capture-set representative id so
     /// `suggestAI()` can pass along location context for whichever set it's sourcing the AI image
     /// from. Populated by `lookupLocationKeywordsIfNeeded()`.
@@ -1684,11 +1692,13 @@ final class SourceBrowserViewModel: ObservableObject {
         let finalStatus: String
         do {
             var failureCount = 0
+            var firstFailureReason: String?
             for (key, entries) in groupedTargets {
                 let results = try await exifTool.write(
                     description: key.description, keywords: key.keywords, gps: gps,
                     to: entries.map(\.url))
                 for entry in entries {
+                    let name = entry.url.lastPathComponent
                     switch results[entry.url] {
                     case .success:
                         updateAsset(entry.id) { asset in
@@ -1699,17 +1709,35 @@ final class SourceBrowserViewModel: ObservableObject {
                                 asset.gpsLongitude = gps.longitude
                             }
                         }
-                    default:
+                    case .failure(let error):
                         failureCount += 1
+                        let reason = error.localizedDescription
+                        if firstFailureReason == nil { firstFailureReason = reason }
+                        Self.saveLog.error(
+                            "Save failed for \(name, privacy: .public): \(reason, privacy: .public)")
+                    case nil:
+                        // Can't happen — `write` returns an entry per URL it was given — but counting
+                        // it silently is exactly the bug being fixed here.
+                        failureCount += 1
+                        if firstFailureReason == nil { firstFailureReason = "no result returned" }
+                        Self.saveLog.error("Save returned no result for \(name, privacy: .public)")
                     }
                 }
             }
-            finalStatus =
-                failureCount == 0
-                ? "Saved to \(targets.count) file(s)."
-                : "Saved \(targets.count - failureCount)/\(targets.count) file(s); \(failureCount) failed."
+            if failureCount == 0 {
+                finalStatus = "Saved to \(targets.count) file(s)."
+            } else {
+                let reason = firstFailureReason.map { ": \($0)" } ?? "."
+                finalStatus =
+                    "Saved \(targets.count - failureCount)/\(targets.count) file(s); "
+                    + "\(failureCount) failed\(reason)"
+                Self.saveLog.error(
+                    "Save finished: \(failureCount)/\(targets.count) failed\(reason, privacy: .public)"
+                )
+            }
         } catch {
             finalStatus = "Save failed: \(error.localizedDescription)"
+            Self.saveLog.error("Save failed outright: \(error.localizedDescription, privacy: .public)")
         }
         saveStatusMessage = finalStatus
         return finalStatus

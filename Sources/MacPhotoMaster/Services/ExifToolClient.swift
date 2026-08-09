@@ -1,10 +1,33 @@
 import Foundation
 import MacPhotoMasterCore
 
-enum ExifToolError: Error {
+enum ExifToolError: Error, LocalizedError {
     case processFailed(status: Int32, stderr: String)
     case invalidOutput
     case timedOut
+
+    /// Without this, `localizedDescription` on a plain `Error` renders as Foundation's
+    /// "The operation couldn't be completed. (MacPhotoMaster.ExifToolError error 0.)" — which is
+    /// what every caller that reports a save failure was showing, throwing away a `stderr` that
+    /// already said exactly what was wrong.
+    ///
+    /// exiftool puts its `Error:`/`Warning:` lines on stderr and its "N image files updated" tally
+    /// on stdout, so stderr is the diagnosis. Only the first line is used: a batch write reports one
+    /// error per file, and they are near-always the same cause repeated.
+    var errorDescription: String? {
+        switch self {
+        case .processFailed(let status, let stderr):
+            let firstLine = stderr
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .first { !$0.isEmpty }
+            return firstLine ?? "exiftool exited with status \(status)"
+        case .invalidOutput:
+            return "exiftool returned output that could not be read"
+        case .timedOut:
+            return "exiftool timed out"
+        }
+    }
 }
 
 /// Thin wrapper around the `exiftool` binary. All EXIF/IPTC/XMP read/write goes through here —

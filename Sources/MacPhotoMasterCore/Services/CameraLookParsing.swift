@@ -31,18 +31,189 @@ public enum CameraLookParsing {
 
     /// Returns `""` when nothing non-default was dialled in, so the caller can skip the write
     /// entirely rather than stamping an empty Instructions field.
+    ///
+    /// The mode is `ArtFilterTokenParsing`'s chosen-look token when there is one (art filter,
+    /// colour/monochrome profile, Colour Creator), and otherwise the plain `PictureMode` name.
+    /// Plain modes are reported because they are not all neutral — Muted, Monotone, Underwater and
+    /// i-Enhance are distinct renderings, and they carry their own contrast/sharpness/saturation,
+    /// `PictureModeEffect` and `Gradation`, none of which was recorded before. Only Natural with
+    /// nothing dialled stays silent, which is what keeps Instructions off an ordinary frame.
+    ///
+    /// The camera's Custom picture mode is deliberately not looked for: it is a container that
+    /// holds one of the base renderings, and the file records only the base it resolved to. A full
+    /// maker-note scan of a Custom/i-Enhance frame shows no slot index or flag anywhere — the same
+    /// "records what you dialled, not which slot you dialled it in" behaviour as the profiles.
     public static func look(from metadata: [String: Any]) -> String {
-        let mode = ArtFilterTokenParsing.token(from: metadata)
+        let chosenLook = ArtFilterTokenParsing.token(from: metadata)
+        let pictureMode = fields(metadata, "Olympus:PictureMode").first ?? ""
+        let mode = chosenLook.isEmpty ? pictureMode : chosenLook
         guard !mode.isEmpty else { return "" }
 
-        var segments = [mode]
+        var segments: [String] = []
+        segments.append(contentsOf: artFilterSegments(metadata))
         segments.append(contentsOf: colorCreatorSegments(metadata))
         segments.append(contentsOf: monochromeSegments(metadata))
+        segments.append(contentsOf: monotoneSegments(metadata))
         segments.append(contentsOf: colorProfileSegments(metadata))
         segments.append(contentsOf: contrastSharpnessSaturationSegments(metadata))
+        segments.append(contentsOf: pictureModeEffectSegments(metadata))
+        segments.append(contentsOf: gradationSegments(metadata))
         segments.append(contentsOf: toneSegments(metadata))
 
-        return segments.joined(separator: " | ")
+        if segments.isEmpty, chosenLook.isEmpty, pictureMode == "Natural" { return "" }
+        return ([mode] + segments).joined(separator: " | ")
+    }
+
+    /// The stacked-option record codes. `0x8060` is the B&W contrast filter (which colours render
+    /// light or dark) and `0x8070` the toning colour applied to the finished monochrome — two
+    /// separate darkroom stages, and the camera stores them independently. Proven on a controlled
+    /// set: holding the filter at green while moving the tint sepia→green changes only the `0x8070`
+    /// record, and holding the tint at green while moving the filter green→yellow changes only the
+    /// `0x8060` record.
+    private static let bwFilterRecord = 0x8060
+    private static let tintRecord = 0x8070
+
+    /// exiftool names neither record's values, so both tables live here. Note these are *not* the
+    /// same numbering as `PictureModeBWFilter`/`PictureModeTone`, which cover the identical two
+    /// option lists offset by one — see `monotoneSegments`.
+    private static let artBWFilters = ["none", "yellow", "orange", "red", "green"]
+    private static let artTints = ["normal", "sepia", "blue", "purple", "green"]
+
+    private static let artEffectCodes: [String: Int] = [
+        "No Effect": 0x0000, "Star Light": 0x8010, "Pin Hole": 0x8020, "Frame": 0x8030,
+        "Soft Focus": 0x8040, "White Edge": 0x8050, "B&W": 0x8060,
+        "Blur Top and Bottom": 0x8080, "Blur Left and Right": 0x8081,
+    ]
+
+    /// exiftool's colour-filter PrintConv, inverted. Field 6 always arrives as this text whatever
+    /// the record's code actually means, so it has to be turned back into a number before the code
+    /// can say how to read it.
+    private static let colorFilterTexts: [String: Int] = [
+        "No Color Filter": 0, "Yellow Color Filter": 1, "Orange Color Filter": 2,
+        "Red Color Filter": 3, "Green Color Filter": 4,
+    ]
+
+    /// `ArtFilterEffect` is 20 int16u values: the filter itself in fields 0-3, then up to four
+    /// stacked-option records of `(code, marker, value, unused)` packed from field 4 in ascending
+    /// code order and zero-padded. The markers are the camera's usual min/max padding and carry no
+    /// reading.
+    ///
+    /// exiftool applies a PrintConv only to fields 0, 3, 4 and 6, which makes 4 and 6 look like
+    /// fixed "effect" and "colour filter" slots. They are not — they are the *first stacked
+    /// record's* code and value, and what field 6 means depends entirely on the code in field 4.
+    /// On a tint-only frame the `0x8070` record lands at field 4 and exiftool renders its value
+    /// through the colour-filter table anyway: value 3 is a purple tint but prints as
+    /// `"Red Color Filter"`. Confirmed by writing that array to a scratch copy and reading it back,
+    /// which is why the code is dispatched on and the position never is.
+    private static func artFilterSegments(_ metadata: [String: Any]) -> [String] {
+        let fields = self.fields(metadata, "Olympus:ArtFilterEffect")
+        guard fields.count >= 8, !fields[0].isEmpty, fields[0] != "Off" else { return [] }
+
+        var segments: [String] = []
+
+        // Partial colour is a stale leftover on anything but a Partial Color variant — Grainy Film
+        // frames carry "Partial Color 0" despite the filter having no such setting — so this is
+        // gated on the filter's name rather than on the value being non-zero.
+        if fields[0].hasPrefix("Partial Color"), let index = trailingInt(fields[3]) {
+            segments.append("partial \(index)")
+        }
+
+        for start in stride(from: 4, to: fields.count - 2, by: 4) {
+            guard let record = stackedRecord(fields, at: start), record.code != 0 else { continue }
+            switch record.code {
+            case bwFilterRecord:
+                if record.value != 0 {
+                    segments.append("bw filter \(optionName(artBWFilters, record.value))")
+                }
+            case tintRecord:
+                if record.value != 0 {
+                    segments.append("tint \(optionName(artTints, record.value))")
+                }
+            default:
+                segments.append("fx \(artEffectName(record.code))")
+            }
+        }
+
+        return segments
+    }
+
+    /// The record at field 4 arrives PrintConv'd — its code as a name and its value through the
+    /// colour-filter table — while every later record is plain numbers. Both are normalised here so
+    /// the caller only ever sees `(code, value)`.
+    private static func stackedRecord(_ fields: [String], at start: Int) -> (code: Int, value: Int)? {
+        guard start > 4 else {
+            guard let code = artEffectCode(fields[4]), let value = colorFilterTexts[fields[6]]
+            else { return nil }
+            return (code, value)
+        }
+        guard let code = Int(fields[start]), let value = Int(fields[start + 2]) else { return nil }
+        return (code, value)
+    }
+
+    /// A code exiftool has no name for prints as `"Unknown (0x8070)"` — the tint record is exactly
+    /// that case, so the hex is recovered rather than the record being dropped.
+    private static func artFilterCodeHex(_ field: String) -> Int? {
+        guard field.hasPrefix("Unknown (0x"), let tail = field.split(separator: "x").last
+        else { return nil }
+        return Int(tail.dropLast(), radix: 16)
+    }
+
+    private static func artEffectCode(_ field: String) -> Int? {
+        artEffectCodes[field] ?? artFilterCodeHex(field)
+    }
+
+    private static func artEffectName(_ code: Int) -> String {
+        artEffectCodes.first { $0.value == code }?.key ?? String(format: "0x%04x", code)
+    }
+
+    private static func optionName(_ names: [String], _ value: Int) -> String {
+        names.indices.contains(value) ? names[value] : "\(value)"
+    }
+
+    /// `PictureModeBWFilter` and `PictureModeTone` are the *Monotone picture mode's* own filter and
+    /// tint — a third place the same pair of settings can live, alongside the monochrome profiles'
+    /// `MonochromeProfileSettings`/`MonochromeColor` and the art filters' stacked records. Only one
+    /// route is ever live: these two read `"n/a"` outside Monotone, so no mode gate is needed.
+    ///
+    /// Read as text rather than through `artBWFilters`/`artTints`, because these cover the same two
+    /// option lists offset by one — art-filter yellow is 1 where here it is 2 — and sharing a table
+    /// would silently turn orange into red and purple into blue.
+    private static func monotoneSegments(_ metadata: [String: Any]) -> [String] {
+        var segments: [String] = []
+
+        let filter = text(metadata, "Olympus:PictureModeBWFilter")
+        if !filter.isEmpty, filter != "n/a", filter != "Neutral" {
+            segments.append("bw filter \(filter.lowercased())")
+        }
+
+        let tone = text(metadata, "Olympus:PictureModeTone")
+        if !tone.isEmpty, tone != "n/a", tone != "Neutral" {
+            segments.append("tint \(tone.lowercased())")
+        }
+
+        return segments
+    }
+
+    /// The i-Enhance strength, `"Low"`/`"Standard"`/`"High"`. Standard is the default. Only one
+    /// frame in the 126 sampled is anything else, so this would never have surfaced without a shot
+    /// taken deliberately to exercise it.
+    private static func pictureModeEffectSegments(_ metadata: [String: Any]) -> [String] {
+        let effect = text(metadata, "Olympus:PictureModeEffect")
+        guard !effect.isEmpty, effect != "Standard", effect != "n/a" else { return [] }
+        return ["effect \(effect)"]
+    }
+
+    /// `"High Key; User-Selected"` — two independent components: the tone curve, and whether the
+    /// camera overrode it itself. Both defaults drop out, so an auto-gradation frame in an
+    /// otherwise untouched mode still reports `"grad auto"`.
+    private static func gradationSegments(_ metadata: [String: Any]) -> [String] {
+        let fields = self.fields(metadata, "Olympus:Gradation")
+        guard let curve = fields.first, !curve.isEmpty else { return [] }
+
+        var segments: [String] = []
+        if curve != "Normal", curve != "n/a" { segments.append("grad \(curve.lowercased())") }
+        if fields.count >= 2, fields[1] == "Auto-Override" { segments.append("grad auto") }
+        return segments
     }
 
     /// `"Color 0; 0; 29; Strength 0; -4; 3"` — colour position on the wheel, its min and max, then

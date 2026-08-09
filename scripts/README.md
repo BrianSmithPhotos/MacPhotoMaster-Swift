@@ -204,10 +204,65 @@ look visualiser (docs/SPEC.md "Ideas, not started").
 - ~~**Colour Creator.**~~ Done, 2026-08-09 — the table shipped in
   `CameraLookParsing.colorCreatorNames`. See "Colour Creator: what is known"
   below for the measurement and its caveats.
-- **The twelve Colour Profile spokes.** `hueCodes` names them Y, O, Or, R, M, V,
-  B, Bc, C, Gc, G, Yg — four names between yellow and red but only one between
-  cyan and green, which suggests the spokes are not evenly spaced in hue.
-  Nothing depends on the spacing today; drawing the wheel would.
+- ~~**The twelve Colour Profile spokes.**~~ Done, 2026-08-09. The guess below was
+  right: they are not evenly spaced. See "The Colour Profile spokes" for the
+  measured centres. Still nothing depends on the spacing today; drawing the
+  wheel would.
+
+### The Colour Profile spokes, and why saturation was the wrong thing to measure
+
+Measured 2026-08-09 from H1071933-H1071945: a reference with all twelve spokes
+at 0, then one frame per spoke at +5, in camera order. Exposure manual and
+identical throughout, WB manual 5300K, `WB_RBLevels` byte-identical `564 434 256
+256` across all thirteen — so nothing but the spoke moved.
+
+The obvious measurement fails. A spoke sets *saturation*, so the intuitive
+approach is to difference saturation against the reference — but the hue wheel
+is drawn at HSV S=1 and the camera renders it essentially clipped: 41 of 72
+five-degree bins sit above S 0.99, with headroom only around 55-65 and 135-145
+degrees. Every spoke's apparent peak then landed in one of those two dips
+regardless of which spoke had moved, putting Red at 152 degrees and Blue-cyan at
+62. That result measures the target, not the camera.
+
+Value carries the signal instead. Where saturation cannot rise it is pushed out
+of gamut, and the clip shows up as a luminance shift, so differencing V against
+the reference gives one clean contiguous lobe per spoke, peaking +0.045 to
++0.239. Centres are the circular centroid of the above-half-max bins:
+
+| # | Spoke | Centre | Gap to next |
+|--:|-------|-------:|------------:|
+| 1 | Yellow | 42.6 | 18.4 |
+| 2 | Orange | 24.3 | 34.5 |
+| 3 | Orange-red | 349.8 | 19.0 |
+| 4 | Red | 330.7 | 11.7 |
+| 5 | Magenta | 319.0 | 29.5 |
+| 6 | Violet | 289.5 | 44.1 |
+| 7 | Blue | 245.4 | 35.2 |
+| 8 | Blue-cyan | 210.2 | 14.7 |
+| 9 | Cyan | 195.5 | 38.1 |
+| 10 | Green-cyan | 157.3 | 35.3 |
+| 11 | Green | 122.0 | 43.7 |
+| 12 | Yellow-green | 78.3 | 35.7 |
+
+Degrees are `make-hue-wheel.py` wheel angle, which equals displayed hue by
+construction. The twelve are strictly ordered, they run anticlockwise in
+increasing camera index, and the gaps close to exactly 360.
+
+The spacing is genuinely uneven, from 11.7 to 44.1 degrees, and it is uneven the
+way the *names* are: yellow through red is four spokes across 72 degrees, while
+the single Green-cyan spans the 73 degrees from cyan to green. That is what
+perceptual hue naming looks like — we discriminate warm hues far more finely
+than greens — so the camera's twelve bands are perceptually spaced, not
+geometrically.
+
+Caveat worth carrying: these centres come from an out-of-gamut side effect
+rather than from the saturation change itself. The clip is strongest where the
+boost is strongest, so the lobe centre should be the band centre, but it is an
+indirect estimator. It is a stable one — re-running against the inner half of
+the ring, the outer half, and a different threshold moves no centre by more than
+1.7 degrees, and eight of the twelve by under a degree. If a future measurement
+ever needs the band *widths* rather than their centres, shoot a wheel drawn at
+about S 0.5 so a saturation boost has room to register directly.
 
 ### Colour Creator: what is known
 

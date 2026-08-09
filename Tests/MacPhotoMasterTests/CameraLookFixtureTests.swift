@@ -23,7 +23,7 @@ import XCTest
 ///     MPM_RECORD_CAMERA_LOOK_FIXTURE=Tests/MacPhotoMasterTests/Fixtures/CameraLookFixture.json \
 ///         swift test --filter CameraLookFixtureTests
 ///
-/// Provenance: OM-3, frames H1071630-H1071915, shot 2026-08-07 to 2026-08-09 to exercise the art
+/// Provenance: OM-3, frames H1071741-H1071932, shot 2026-08-07 to 2026-08-09 to exercise the art
 /// filters, the colour and monochrome profiles, the Partial Color and Colour Creator rings, and the
 /// plain picture modes. The frame names are kept only so a row can be traced back to the card.
 final class CameraLookFixtureTests: XCTestCase {
@@ -39,7 +39,7 @@ final class CameraLookFixtureTests: XCTestCase {
 
         // Guards the fixture itself: a resource that silently failed to copy would otherwise let an
         // empty corpus pass as a green test.
-        XCTAssertEqual(frames.count, 137, "fixture lost frames")
+        XCTAssertEqual(frames.count, 154, "fixture lost frames")
 
         if let path = ProcessInfo.processInfo.environment["MPM_RECORD_CAMERA_LOOK_FIXTURE"] {
             try record(frames, to: path)
@@ -62,11 +62,8 @@ final class CameraLookFixtureTests: XCTestCase {
     func testTheCorpusSpansTheParsersRules() throws {
         let looks = try loadFixture().map(\.look)
 
-        // "shading " is deliberately absent: the Shading Effect A/B was shot as H1071739/H1071740,
-        // two frames before this corpus starts, and those files were never dumped in full. That
-        // rule is covered by `CameraLookParsingTests`' hand-written `monoProfile3` pair instead.
         for fragment in [
-            "Color Creator", "partial ", "bw filter ", "tint ", "grain ",
+            "Color Creator", "partial ", "bw filter ", "tint ", "grain ", "shading ",
             "grad ", "contrast ", "sharp ", "sat ", "effect ", "filter str", "fx ",
             "HL", "SH", "Mid", "vivid ",
         ] {

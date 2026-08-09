@@ -79,10 +79,21 @@ public enum CameraLookParsing {
     private static let artBWFilters = ["none", "yellow", "orange", "red", "green"]
     private static let artTints = ["normal", "sepia", "blue", "purple", "green"]
 
+    /// The names exiftool does supply are its own; `0x80a0`/`0x80a1` it has no table for at all, so
+    /// those two were measured (2026-08-09, H1071930/H1071931). Shading darkens two opposite edges,
+    /// which reads straight off the pixels: `0x80a1` takes the top and bottom bands to 67% of centre
+    /// luminance while leaving left and right at 110%, and `0x80a0` does the reverse (64% / 117%).
+    /// The known Blur Left and Right frame darkens nothing (128-134%), which is what separates the
+    /// two effects — Blur removes detail, Shade removes light.
+    ///
+    /// Note the pairing is the opposite way round from Blur's: `0x8080` is top/bottom and `0x8081`
+    /// left/right, but `0x80a0` is left/right and `0x80a1` top/bottom. Extrapolating the Blur order
+    /// would have named both backwards, which is why this was measured rather than inferred.
     private static let artEffectCodes: [String: Int] = [
         "No Effect": 0x0000, "Star Light": 0x8010, "Pin Hole": 0x8020, "Frame": 0x8030,
         "Soft Focus": 0x8040, "White Edge": 0x8050, "B&W": 0x8060,
         "Blur Top and Bottom": 0x8080, "Blur Left and Right": 0x8081,
+        "Shade Left and Right": 0x80A0, "Shade Top and Bottom": 0x80A1,
     ]
 
     /// exiftool's colour-filter PrintConv, inverted. Field 6 always arrives as this text whatever

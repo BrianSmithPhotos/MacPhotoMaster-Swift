@@ -421,6 +421,25 @@ final class CameraLookParsingTests: XCTestCase {
             CameraLookParsing.look(from: metadata), "Grainy Film | fx 0x80e8 | bw filter green")
     }
 
+    /// H1071931/H1071930: the Shade Effect pair, which exiftool has no names for. Identified from
+    /// the pixels rather than by extrapolating Blur's numbering — and the numbering does *not*
+    /// extrapolate: Blur is top/bottom then left/right, Shade is left/right then top/bottom. See
+    /// `CameraLookParsing.artEffectCodes` for the edge-luminance measurement.
+    func testShadeEffectCodesAreNamedNotLeftAsHex() {
+        var metadata: [String: Any] = [
+            "Olympus:PictureMode": "Natural; 2",
+            "Olympus:ArtFilterEffect":
+                "Vintage II; 4352; 0; Partial Color 0; Unknown (0x80a0); 4352; No Color Filter; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0",
+        ]
+        XCTAssertEqual(
+            CameraLookParsing.look(from: metadata), "Vintage II | fx Shade Left and Right")
+
+        metadata["Olympus:ArtFilterEffect"] =
+            "Vintage II; 4352; 0; Partial Color 0; Unknown (0x80a1); 4352; No Color Filter; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0"
+        XCTAssertEqual(
+            CameraLookParsing.look(from: metadata), "Vintage II | fx Shade Top and Bottom")
+    }
+
     /// H1071787: "Art 16" on the camera is filter ID 44, the last entry in exiftool's table, and it
     /// carries no options — so the filter name alone is the whole look.
     func testArtFilterWithNoOptionsReportsTheNameAlone() {

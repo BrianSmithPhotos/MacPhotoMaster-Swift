@@ -349,15 +349,15 @@ In priority order — the visualiser first.
   readable at a glance instead of parsed from a sentence.
 
   No longer blocked on examples: `Tests/MacPhotoMasterTests/Fixtures/CameraLookFixture.json` holds
-  137 frames shot 2026-08-07 to 2026-08-09, one per distinct maker-note signature, giving 129
-  distinct look strings with every branch of the parser represented by at least one real frame
-  (the one exception, Shading Effect, is noted in `CameraLookFixtureTests`).
+  154 frames shot 2026-08-07 to 2026-08-09, one per distinct maker-note signature, giving 146
+  distinct look strings with every branch of the parser represented by at least one real frame.
+  The longest is 111 characters, comfortably inside the 256-character IPTC IIM cap.
 
   **Prerequisite.** `look(from:)` parses and formats in a single pass, so the typed values exist
   only as locals inside the segment builders — a view would have to re-parse this app's own output
   to draw a wheel. Split it into a `CameraLook` value type and render the string from that. That
   fixture is what makes the refactor provable: `CameraLookFixtureTests` asserts old and new agree
-  byte-for-byte on every one of the 137.
+  byte-for-byte on every one of the 154.
 
   Element groups, by what varies together rather than by which tag supplied it:
   1. **Identity** — mode/profile name. Exactly one, always present, and it selects group 2.

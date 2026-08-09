@@ -143,10 +143,24 @@ result.
 
 The metadata itself is in the repo, not just the conclusions drawn from it:
 `Tests/MacPhotoMasterTests/Fixtures/CameraLookFixture.json` keeps one frame per
-distinct maker-note signature — 137 of them, H1071741 to H1071915 — with the
+distinct maker-note signature — 154 of them, H1071741 to H1071932 — with the
 exact `exiftool -j -G1 -a -s` text and the strings the parsers rendered from it.
 That is the corpus to re-check against when the parsers change; the cards
 themselves are not a durable record.
+
+### The Shade Effect codes, 0x80a0 and 0x80a1
+
+exiftool has no table for either, so both were read off the pixels
+(H1071930/H1071931). Shading darkens two opposite edges, which is directly
+measurable: `0x80a1` takes the top and bottom bands to 67% of centre luminance
+while left and right stay at 110%; `0x80a0` is the reverse, 64% against 117%.
+A known Blur Left and Right frame darkens nothing at all (128-134%), which is
+what tells the two effects apart — Blur removes detail, Shade removes light.
+
+Worth knowing: the pairing runs the *opposite* way to Blur's. `0x8080` is top
+and bottom and `0x8081` left and right, but `0x80a0` is left and right and
+`0x80a1` top and bottom. Extrapolating from Blur would have named both
+backwards.
 
 ### Still to measure
 

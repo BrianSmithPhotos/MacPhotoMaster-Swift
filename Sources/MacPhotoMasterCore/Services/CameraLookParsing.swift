@@ -29,8 +29,16 @@ public enum CameraLookParsing {
 
     private static let toneCodes = ["Highlights": "HL", "Shadows": "SH", "Midtones": "Mid"]
 
-    /// Returns `""` when nothing non-default was dialled in, so the caller can skip the write
-    /// entirely rather than stamping an empty Instructions field.
+    /// The rendered line for IPTC/XMP Instructions. Returns `""` when nothing non-default was
+    /// dialled in, so the caller can skip the write entirely rather than stamping an empty field.
+    ///
+    /// This is `parse(from:)` rendered — reach for that instead when the individual readings are
+    /// wanted rather than the line.
+    public static func look(from metadata: [String: Any]) -> String {
+        parse(from: metadata)?.summary ?? ""
+    }
+
+    /// Reads the dial settings into typed values, or `nil` when there is nothing to report.
     ///
     /// The mode is `ArtFilterTokenParsing`'s chosen-look token when there is one (art filter,
     /// colour/monochrome profile, Colour Creator), and otherwise the plain `PictureMode` name.
@@ -43,25 +51,26 @@ public enum CameraLookParsing {
     /// holds one of the base renderings, and the file records only the base it resolved to. A full
     /// maker-note scan of a Custom/i-Enhance frame shows no slot index or flag anywhere — the same
     /// "records what you dialled, not which slot you dialled it in" behaviour as the profiles.
-    public static func look(from metadata: [String: Any]) -> String {
+    public static func parse(from metadata: [String: Any]) -> CameraLook? {
         let chosenLook = ArtFilterTokenParsing.token(from: metadata)
         let pictureMode = fields(metadata, "Olympus:PictureMode").first ?? ""
         let mode = chosenLook.isEmpty ? pictureMode : chosenLook
-        guard !mode.isEmpty else { return "" }
+        guard !mode.isEmpty else { return nil }
 
-        var segments: [String] = []
-        segments.append(contentsOf: artFilterSegments(metadata))
-        segments.append(contentsOf: colorCreatorSegments(metadata))
-        segments.append(contentsOf: monochromeSegments(metadata))
-        segments.append(contentsOf: monotoneSegments(metadata))
-        segments.append(contentsOf: colorProfileSegments(metadata))
-        segments.append(contentsOf: contrastSharpnessSaturationSegments(metadata))
-        segments.append(contentsOf: pictureModeEffectSegments(metadata))
-        segments.append(contentsOf: gradationSegments(metadata))
-        segments.append(contentsOf: toneSegments(metadata))
+        var look = CameraLook()
+        look.mode = mode
+        artFilter(metadata, into: &look)
+        colorCreator(metadata, into: &look)
+        monochrome(metadata, into: &look)
+        monotone(metadata, into: &look)
+        colorProfile(metadata, into: &look)
+        contrastSharpnessSaturation(metadata, into: &look)
+        pictureModeEffect(metadata, into: &look)
+        gradation(metadata, into: &look)
+        tone(metadata, into: &look)
 
-        if segments.isEmpty, chosenLook.isEmpty, pictureMode == "Natural" { return "" }
-        return ([mode] + segments).joined(separator: " | ")
+        if look.isModeOnly, chosenLook.isEmpty, pictureMode == "Natural" { return nil }
+        return look
     }
 
     /// The stacked-option record codes. `0x8060` is the B&W contrast filter (which colours render
@@ -75,7 +84,7 @@ public enum CameraLookParsing {
 
     /// exiftool names neither record's values, so both tables live here. Note these are *not* the
     /// same numbering as `PictureModeBWFilter`/`PictureModeTone`, which cover the identical two
-    /// option lists offset by one — see `monotoneSegments`.
+    /// option lists offset by one — see `monotone(_:into:)`.
     private static let artBWFilters = ["none", "yellow", "orange", "red", "green"]
     private static let artTints = ["normal", "sepia", "blue", "purple", "green"]
 
@@ -163,17 +172,16 @@ public enum CameraLookParsing {
     /// through the colour-filter table anyway: value 3 is a purple tint but prints as
     /// `"Red Color Filter"`. Confirmed by writing that array to a scratch copy and reading it back,
     /// which is why the code is dispatched on and the position never is.
-    private static func artFilterSegments(_ metadata: [String: Any]) -> [String] {
+    private static func artFilter(_ metadata: [String: Any], into look: inout CameraLook) {
         let fields = self.fields(metadata, "Olympus:ArtFilterEffect")
-        guard fields.count >= 8, !fields[0].isEmpty, fields[0] != "Off" else { return [] }
-
-        var segments: [String] = []
+        guard fields.count >= 8, !fields[0].isEmpty, fields[0] != "Off" else { return }
 
         // Partial colour is a stale leftover on anything but a Partial Color variant — Grainy Film
         // frames carry "Partial Color 0" despite the filter having no such setting — so this is
         // gated on the filter's name rather than on the value being non-zero.
         if fields[0].hasPrefix("Partial Color"), let index = trailingInt(fields[3]) {
-            segments.append("partial \(partialColorName(index))")
+            look.partialColor = CameraLook.PartialColor(
+                index: index, name: partialColorName(index))
         }
 
         for start in stride(from: 4, to: fields.count - 2, by: 4) {
@@ -181,18 +189,16 @@ public enum CameraLookParsing {
             switch record.code {
             case bwFilterRecord:
                 if record.value != 0 {
-                    segments.append("bw filter \(optionName(artBWFilters, record.value))")
+                    look.artEffects.append(.bwFilter(optionName(artBWFilters, record.value)))
                 }
             case tintRecord:
                 if record.value != 0 {
-                    segments.append("tint \(optionName(artTints, record.value))")
+                    look.artEffects.append(.tint(optionName(artTints, record.value)))
                 }
             default:
-                segments.append("fx \(artEffectName(record.code))")
+                look.artEffects.append(.effect(artEffectName(record.code)))
             }
         }
-
-        return segments
     }
 
     /// The record at field 4 arrives PrintConv'd — its code as a name and its value through the
@@ -236,42 +242,36 @@ public enum CameraLookParsing {
     /// Read as text rather than through `artBWFilters`/`artTints`, because these cover the same two
     /// option lists offset by one — art-filter yellow is 1 where here it is 2 — and sharing a table
     /// would silently turn orange into red and purple into blue.
-    private static func monotoneSegments(_ metadata: [String: Any]) -> [String] {
-        var segments: [String] = []
-
+    private static func monotone(_ metadata: [String: Any], into look: inout CameraLook) {
         let filter = text(metadata, "Olympus:PictureModeBWFilter")
         if !filter.isEmpty, filter != "n/a", filter != "Neutral" {
-            segments.append("bw filter \(filter.lowercased())")
+            look.monotoneFilter = filter.lowercased()
         }
 
         let tone = text(metadata, "Olympus:PictureModeTone")
         if !tone.isEmpty, tone != "n/a", tone != "Neutral" {
-            segments.append("tint \(tone.lowercased())")
+            look.monotoneTint = tone.lowercased()
         }
-
-        return segments
     }
 
     /// The i-Enhance strength, `"Low"`/`"Standard"`/`"High"`. Standard is the default. Only one
     /// frame in the 126 sampled is anything else, so this would never have surfaced without a shot
     /// taken deliberately to exercise it.
-    private static func pictureModeEffectSegments(_ metadata: [String: Any]) -> [String] {
+    private static func pictureModeEffect(_ metadata: [String: Any], into look: inout CameraLook) {
         let effect = text(metadata, "Olympus:PictureModeEffect")
-        guard !effect.isEmpty, effect != "Standard", effect != "n/a" else { return [] }
-        return ["effect \(effect)"]
+        guard !effect.isEmpty, effect != "Standard", effect != "n/a" else { return }
+        look.pictureModeEffect = effect
     }
 
     /// `"High Key; User-Selected"` — two independent components: the tone curve, and whether the
     /// camera overrode it itself. Both defaults drop out, so an auto-gradation frame in an
     /// otherwise untouched mode still reports `"grad auto"`.
-    private static func gradationSegments(_ metadata: [String: Any]) -> [String] {
+    private static func gradation(_ metadata: [String: Any], into look: inout CameraLook) {
         let fields = self.fields(metadata, "Olympus:Gradation")
-        guard let curve = fields.first, !curve.isEmpty else { return [] }
+        guard let curve = fields.first, !curve.isEmpty else { return }
 
-        var segments: [String] = []
-        if curve != "Normal", curve != "n/a" { segments.append("grad \(curve.lowercased())") }
-        if fields.count >= 2, fields[1] == "Auto-Override" { segments.append("grad auto") }
-        return segments
+        if curve != "Normal", curve != "n/a" { look.gradation = curve.lowercased() }
+        if fields.count >= 2, fields[1] == "Auto-Override" { look.gradationIsAuto = true }
     }
 
     /// `"Color 0; 0; 29; Strength 0; -4; 3"` — colour position on the ring, its min and max, then
@@ -295,19 +295,16 @@ public enum CameraLookParsing {
     /// B&W contrast filter does. Measured across the five mono frames, the per-sector luminance
     /// profile moves by up to a third between positions. (Direction only — those frames had
     /// uncontrolled exposure, so the size of the effect is not pinned down.)
-    private static func colorCreatorSegments(_ metadata: [String: Any]) -> [String] {
+    private static func colorCreator(_ metadata: [String: Any], into look: inout CameraLook) {
         let fields = self.fields(metadata, "Olympus:ColorCreatorEffect")
         guard fields.count >= 4,
             let strength = trailingInt(fields[3]), strength != 0,
             let color = trailingInt(fields[0])
-        else { return [] }
+        else { return }
 
-        let vivid = strength == monoStrength ? "vivid -4 (mono)" : "vivid \(signed(strength))"
-        return ["color \(color) (\(colorCreatorName(color)))", vivid]
+        look.colorCreator = CameraLook.ColorCreator(
+            position: color, name: colorCreatorName(color), strength: strength)
     }
-
-    /// The bottom of the Vivid range, where the render is fully desaturated whatever the position.
-    private static let monoStrength = -4
 
     /// `MonochromeProfileSettings` is `"Red Filter; 0; 8; Strength 3; 0; 3"` — same min/max-padded
     /// shape as `ColorCreatorEffect`. `MonochromeVignetting` is the Shading Effect wheel and has no
@@ -328,45 +325,41 @@ public enum CameraLookParsing {
     /// strength step moves them by 10% or more (Blue str3 takes the blue weight from 0.12 to 0.76).
     /// The camera also leaves a stale strength behind when the filter is set to None, which is why
     /// the strength alone can't be trusted as the "is a filter applied" signal either.
-    private static func monochromeSegments(_ metadata: [String: Any]) -> [String] {
-        var segments: [String] = []
-
+    private static func monochrome(_ metadata: [String: Any], into look: inout CameraLook) {
         let profile = fields(metadata, "Olympus:MonochromeProfileSettings")
         if profile.count >= 4, profile[0] != "No Filter",
             let filter = profile[0].components(separatedBy: " Filter").first, !filter.isEmpty,
             let strength = trailingInt(profile[3]), strength != 0
         {
-            segments.append("\(filter.lowercased()) filter str\(strength)")
+            look.monochromeFilter = CameraLook.MonochromeFilter(
+                name: filter.lowercased(), strength: strength)
         }
 
         let grain = text(metadata, "Olympus:FilmGrainEffect")
-        if !grain.isEmpty, grain != "Off" { segments.append("grain \(grain)") }
+        if !grain.isEmpty, grain != "Off" { look.grain = grain }
 
         if let shading = trailingInt(text(metadata, "Olympus:MonochromeVignetting")), shading != 0 {
-            segments.append("shading \(signed(shading))")
+            look.shading = shading
         }
 
         let tint = text(metadata, "Olympus:MonochromeColor")
         if !tint.isEmpty, tint != "Normal", tint != "(none)" {
-            segments.append("tint \(tint.lowercased())")
+            look.monochromeTint = tint.lowercased()
         }
-
-        return segments
     }
 
     /// `"Min -5; Max 5; Yellow 0; Orange 0; ..."` — the leading Min/Max pair is the camera's slider
     /// range, not data, so the 12 hues start at field 2. Named positionally via `hueCodes` rather
     /// than by matching exiftool's hue names, since only the order is being relied on.
-    private static func colorProfileSegments(_ metadata: [String: Any]) -> [String] {
+    private static func colorProfile(_ metadata: [String: Any], into look: inout CameraLook) {
         let fields = self.fields(metadata, "Olympus:ColorProfileSettings")
-        guard fields.count >= 14 else { return [] }
+        guard fields.count >= 14 else { return }
 
-        let dialled = zip(hueCodes, fields[2..<14])
-            .compactMap { code, field -> String? in
+        look.hueSliders = zip(hueCodes, fields[2..<14])
+            .compactMap { code, field in
                 guard let value = trailingInt(field), value != 0 else { return nil }
-                return "\(code)\(signed(value))"
+                return CameraLook.Slider(code: code, value: value)
             }
-        return dialled.isEmpty ? [] : [dialled.joined(separator: " ")]
     }
 
     /// The profile's own contrast/sharpness/saturation, as `"-2 (min -2, max 2)"` — a leading value
@@ -377,34 +370,28 @@ public enum CameraLookParsing {
     /// at +1. `Olympus:ContrastSetting`/`SharpnessSetting`/`CustomSaturation` carry the same numbers
     /// on a wider ±5 scale; the `PictureMode*` tags are read instead because they're scoped to the
     /// picture mode being described.
-    private static func contrastSharpnessSaturationSegments(_ metadata: [String: Any]) -> [String] {
-        let readings = [
-            ("contrast", "Olympus:PictureModeContrast"),
-            ("sharp", "Olympus:PictureModeSharpness"),
-            ("sat", "Olympus:PictureModeSaturation"),
-        ]
-        return readings.compactMap { label, key in
+    private static func contrastSharpnessSaturation(
+        _ metadata: [String: Any], into look: inout CameraLook
+    ) {
+        func reading(_ key: String) -> Int? {
             guard let value = leadingInt(text(metadata, key)), value != 0 else { return nil }
-            return "\(label) \(signed(value))"
+            return value
         }
+        look.contrast = reading("Olympus:PictureModeContrast")
+        look.sharpness = reading("Olympus:PictureModeSharpness")
+        look.saturation = reading("Olympus:PictureModeSaturation")
     }
 
     /// `"Highlights; 0; -7; 7; Shadows; 0; -7; 7; Midtones; 0; -7; 7; 0; 0; ..."` — four fields per
     /// channel (name, value, min, max), then a run of unused padding this stops before.
-    private static func toneSegments(_ metadata: [String: Any]) -> [String] {
+    private static func tone(_ metadata: [String: Any], into look: inout CameraLook) {
         let fields = self.fields(metadata, "Olympus:ToneLevel")
 
-        var dialled: [String] = []
         for start in stride(from: 0, to: fields.count - 1, by: 4) {
             guard let code = toneCodes[fields[start]] else { continue }
             guard let value = trailingInt(fields[start + 1]), value != 0 else { continue }
-            dialled.append("\(code)\(signed(value))")
+            look.toneLevels.append(CameraLook.Slider(code: code, value: value))
         }
-        return dialled.isEmpty ? [] : [dialled.joined(separator: " ")]
-    }
-
-    private static func signed(_ value: Int) -> String {
-        value > 0 ? "+\(value)" : "\(value)"
     }
 
     /// The last whitespace-separated token as an `Int` — pulls `3` out of both `"Strength 3"` and a

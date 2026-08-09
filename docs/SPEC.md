@@ -353,11 +353,13 @@ In priority order — the visualiser first.
   distinct look strings with every branch of the parser represented by at least one real frame.
   The longest is 111 characters, comfortably inside the 256-character IPTC IIM cap.
 
-  **Prerequisite.** `look(from:)` parses and formats in a single pass, so the typed values exist
-  only as locals inside the segment builders — a view would have to re-parse this app's own output
-  to draw a wheel. Split it into a `CameraLook` value type and render the string from that. That
-  fixture is what makes the refactor provable: `CameraLookFixtureTests` asserts old and new agree
-  byte-for-byte on every one of the 154.
+  **Prerequisite: done, 2026-08-09.** `look(from:)` used to parse and format in a single pass, so
+  the typed values existed only as locals inside the segment builders and a view would have had to
+  re-parse this app's own output to draw a wheel. `CameraLookParsing.parse(from:)` now returns a
+  `CameraLook` value type and `look(from:)` is `parse(from:)?.summary ?? ""`. The fixture is what
+  made the refactor provable: `CameraLookFixtureTests` agreed byte-for-byte on all 154 frames
+  across the change. A view can now read `hueSliders`, `toneLevels`, `colorCreator` and the rest as
+  values, and `isModeOnly` distinguishes a bare mode name from a look carrying readings.
 
   Element groups, by what varies together rather than by which tag supplied it:
   1. **Identity** — mode/profile name. Exactly one, always present, and it selects group 2.

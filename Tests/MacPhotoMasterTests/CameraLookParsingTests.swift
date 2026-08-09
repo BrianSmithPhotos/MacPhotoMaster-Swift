@@ -597,4 +597,92 @@ final class CameraLookParsingTests: XCTestCase {
         XCTAssertTrue(look.hasPrefix("Color Profile 4 |"), look)
         XCTAssertLessThan(look.count, 256)
     }
+
+    // MARK: - The typed reading
+
+    /// The readings a visualiser needs are values, not substrings — a `-5` spoke has to arrive as
+    /// `-5` rather than as the text `"Y-5"` for a wheel to be able to draw it.
+    func testParseReturnsTypedValuesNotJustText() throws {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Art Mode; 2",
+            "Olympus:ColorProfileSettings":
+                "Min -5; Max 5; Yellow -5; Orange 0; Orange-red 0; Red 3; Magenta 0; Violet 0; Blue 0; Blue-cyan 0; Cyan 0; Green-cyan 0; Green 0; Yellow-green 0",
+            "Olympus:ToneLevel": "Highlights; 7; -7; 7; Shadows; -2; -7; 7; Midtones; 0; -7; 7",
+            "Olympus:PictureModeContrast": "-2 (min -2, max 2)",
+            "Olympus:MonochromeVignetting": 1,
+        ]
+
+        let look = try XCTUnwrap(CameraLookParsing.parse(from: metadata))
+
+        XCTAssertEqual(look.mode, "Color Profile 4")
+        // Only the dialled spokes, in the camera's own order, and zeroes dropped.
+        XCTAssertEqual(look.hueSliders.map(\.code), ["Y", "R"])
+        XCTAssertEqual(look.hueSliders.map(\.value), [-5, 3])
+        XCTAssertEqual(look.toneLevels.map(\.code), ["HL", "SH"])
+        XCTAssertEqual(look.toneLevels.map(\.value), [7, -2])
+        XCTAssertEqual(look.contrast, -2)
+        XCTAssertNil(look.sharpness)
+        XCTAssertEqual(look.shading, 1)
+    }
+
+    /// The stacked art-filter records are packed in field order rather than sorted, so the typed
+    /// list has to keep that order — see `testUnmappedStackedCodeIsReportedAsHex` for the frame
+    /// where `fx` genuinely precedes the filter.
+    func testParseKeepsStackedRecordsInFieldOrder() throws {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Art Mode; 2",
+            "Olympus:ArtFilterEffect":
+                "Grainy Film; 4352; 0; Partial Color 0; Unknown (0x80e8); 4352; No Color Filter; 0; 32864; 4352; 4; 0; 0; 0; 0; 0; 0; 0; 0; 0",
+        ]
+
+        let look = try XCTUnwrap(CameraLookParsing.parse(from: metadata))
+
+        XCTAssertEqual(look.artEffects, [.effect("0x80e8"), .bwFilter("green")])
+        XCTAssertEqual(look.summary, "Grainy Film | fx 0x80e8 | bw filter green")
+    }
+
+    /// Colour Creator's -4 is the desaturated end of the range rather than an ordinary strength,
+    /// and callers should be able to ask that directly instead of matching on the rendered text.
+    func testParseFlagsTheMonochromeEndOfTheVividRange() throws {
+        var metadata: [String: Any] = monoProfile3
+        metadata["Olympus:PictureMode"] = "Color Creator; 2"
+        metadata["Olympus:ColorCreatorEffect"] = "Color 10; 0; 29; Strength -4; -4; 3"
+
+        let creator = try XCTUnwrap(CameraLookParsing.parse(from: metadata)?.colorCreator)
+
+        XCTAssertEqual(creator.position, 10)
+        XCTAssertEqual(creator.name, "purple")
+        XCTAssertEqual(creator.strength, -4)
+        XCTAssertTrue(creator.isMonochrome)
+    }
+
+    /// `parse` must go silent in exactly the cases `look` returns `""`, or a visualiser would draw
+    /// a panel for an ordinary frame that had nothing dialled.
+    func testParseIsNilExactlyWhereLookIsEmpty() {
+        let untouched: [String: Any] = [
+            "Olympus:PictureMode": "Natural; 2",
+            "Olympus:ColorProfileSettings":
+                "Min -5; Max 5; Yellow 0; Orange 0; Orange-red 0; Red 0; Magenta 0; Violet 0; Blue 0; Blue-cyan 0; Cyan 0; Green-cyan 0; Green 0; Yellow-green 0",
+        ]
+
+        XCTAssertNil(CameraLookParsing.parse(from: untouched))
+        XCTAssertNil(CameraLookParsing.parse(from: [:]))
+
+        // Natural is only silent while nothing is dialled — one reading and it reports again.
+        var dialled = untouched
+        dialled["Olympus:PictureModeSaturation"] = "2 (min -2, max 2)"
+        XCTAssertEqual(CameraLookParsing.parse(from: dialled)?.summary, "Natural | sat +2")
+    }
+
+    /// The mode-only case is what `look` reports as a bare name, and a visualiser needs to tell it
+    /// apart from a look carrying readings.
+    func testModeOnlyLookIsDistinguishable() throws {
+        let metadata: [String: Any] = ["Olympus:PictureMode": "Muted; 2"]
+
+        let look = try XCTUnwrap(CameraLookParsing.parse(from: metadata))
+
+        XCTAssertTrue(look.isModeOnly)
+        XCTAssertTrue(look.segments.isEmpty)
+        XCTAssertEqual(look.summary, "Muted")
+    }
 }

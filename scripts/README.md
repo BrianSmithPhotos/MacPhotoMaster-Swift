@@ -139,6 +139,15 @@ hues rather than removing them. Turn off Night Shift and True Tone first;
 a hue-shifted display is the one screen setting that genuinely biases the
 result.
 
+### Where the measured frames ended up
+
+The metadata itself is in the repo, not just the conclusions drawn from it:
+`Tests/MacPhotoMasterTests/Fixtures/CameraLookFixture.json` keeps one frame per
+distinct maker-note signature — 137 of them, H1071741 to H1071915 — with the
+exact `exiftool -j -G1 -a -s` text and the strings the parsers rendered from it.
+That is the corpus to re-check against when the parsers change; the cards
+themselves are not a durable record.
+
 ### Still to measure
 
 One ring left. It blocks nothing today, but would remove a fudge from a future

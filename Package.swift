@@ -53,7 +53,10 @@ let package = Package(
         .testTarget(
             name: "MacPhotoMasterTests",
             dependencies: ["MacPhotoMaster", "MacPhotoMasterCore"],
-            path: "Tests/MacPhotoMasterTests"
+            path: "Tests/MacPhotoMasterTests",
+            resources: [
+                .copy("Fixtures")
+            ]
         )
     ],
     // Manifest format needs 6.1 for mlx-swift-lm's macro target, but the app's own code should stay

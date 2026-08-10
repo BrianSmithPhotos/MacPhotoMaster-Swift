@@ -12,11 +12,21 @@
 
 Recovers the curve by matching cumulative histograms, not by pairing pixels: T(x) is the
 test level whose cumulative histogram equals the reference's at x. Two frames of the same
-scene at the same exposure are all it needs, and it is immune to the small framing shifts a
-tripod still allows - pixel pairing would fold those into the curve as noise, worst exactly
-where the scene has edges. The cost is that it assumes the mapping is a monotonic *global*
-function of level, which is why Gradation Auto cannot be measured this way at all: it is a
-scene-adaptive operator, and there is no single curve there to find.
+scene at the same exposure are all it needs, and a shift that merely moves the same content
+around the frame costs nothing - pixel pairing would fold that into the curve as noise, worst
+exactly where the scene has edges.
+
+Framing is only free while it does not change *which levels are in shot*, and against a
+full-bleed ramp framed inside the display it does: panning slides the frame along the ramp, and
+a uniform level offset is precisely what a gentle brightness change looks like. Measured at
+5120px across for 255 levels, a 60px nudge - 1.2 percent of the frame width - invents a 3-level
+curve, which is the whole independence threshold. Motion blur, by contrast, is nearly free
+here: a linear ramp convolved with a symmetric kernel is the same linear ramp away from its
+edges, so 40px of smear costs 0.0 levels in the midtones.
+
+The other cost is that it assumes the mapping is a monotonic *global* function of level, which
+is why Gradation Auto cannot be measured this way at all: it is a scene-adaptive operator, and
+there is no single curve there to find.
 
 Works in the JPEG's own encoding rather than linearising first. The curve worth drawing is
 the one from stored level to stored level, because that is the one the viewer sees.

@@ -16,9 +16,16 @@ Neutral by construction too (R=G=B at every column), which is what makes the mea
 per-channel spread reading meaningful: any difference between the recovered R, G and B curves
 came from the camera, because there was none in the target.
 
-The ramp runs left to right with no border, markings or registration features. It needs none -
-histogram matching does not care where anything is in the frame, only what levels are present,
-so unlike the hue wheel this target survives being shot freehand and slightly crooked.
+The ramp runs left to right with no border, markings or registration features, because
+histogram matching does not care where anything sits in the frame - only what levels are
+present. Being shot slightly crooked therefore costs nothing, and so does camera shake: blurring
+a linear ramp with a symmetric kernel returns the same linear ramp away from its edges.
+
+What it is *not* tolerant of is the camera moving between frames. The frame sits inside the
+display, so a pan slides it along the ramp and changes which levels are in shot, which reads
+back as a uniform level offset - indistinguishable from the light having changed. At 5120px for
+255 levels that is 0.05 levels per pixel, so a 60px nudge invents a 3-level curve. The tripod
+has to hold position across the whole run; it does not have to hold still during a frame.
 """
 import argparse
 

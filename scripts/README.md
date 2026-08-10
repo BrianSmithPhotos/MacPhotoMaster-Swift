@@ -553,6 +553,40 @@ Focus last, after everything else is in position, and remember that manual focus
 does not follow the camera or the screen when either is moved — autofocus once on
 the ramp, switch back to MF, then leave it alone for the whole run.
 
+**The tripod has to hold position across the whole run; it does not have to hold
+still during a frame.** These are worth separating, because the intuition from
+normal photography points at the wrong one. Camera shake is nearly free against
+this target — 40 pixels of motion smear, enough to ruin an ordinary photograph,
+costs 0.0 levels in the midtones and 1.0 at the extreme top, because a linear
+ramp convolved with a symmetric kernel is the same linear ramp away from its
+edges. A shutter delay is worth taking since it costs nothing, but it is not the
+variable that matters.
+
+Movement *between* frames is the one that matters, because the frame sits inside
+the display: panning slides it along the ramp and changes which levels are in
+shot, which reads back as a uniform level offset and looks exactly like the light
+having changed. Measured on a 5120-pixel-wide ramp carrying 255 levels, that is
+0.05 levels per pixel:
+
+| camera nudged sideways | false curve it invents |
+| --- | --- |
+| 5 px | +0.2 levels |
+| 20 px | +1.0 |
+| 60 px | +3.0, the whole independence threshold |
+| 150 px | +7.5 |
+
+Sixty pixels is 1.2 percent of the frame width. A nudge the other way brings
+bezel into shot, which puts a spike at level 0 and corrupts the shadow end while
+staying under the clipping warning, so both directions cost. This is the real
+argument for a rigid tripod and for turning the camera's dials gently — and it is
+the second reason to interleave the references, since a bump shows up as
+disagreement between the two references bracketing the frame.
+
+A pan is still distinguishable from a light change if both happen: a pan shifts
+both ends of the captured range by the same number of levels, where changing
+light moves the dark end proportionally much more. That is the test that ruled a
+camera move out of the second attempt.
+
 **Then check the dark end for reflections before shooting the set.** A glossy
 display reflects the room, and the reflection is only visible where the ramp is
 dark — which is exactly where the Shadow control does its work, and where a few

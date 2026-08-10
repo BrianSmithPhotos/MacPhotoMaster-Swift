@@ -284,6 +284,32 @@ makes the service fall back to the newest decoder the file itself offers.
   channel (staged sidecar → Process & Move → destination `.xmp` → `IPadImportService`) rather than
   adding a transport, which is the whole reason a keyword was chosen over a marker store.
 
+## Preview overlays and where the photo actually is
+
+Anything anchored to the previewed *photo* rather than to the preview pane — the camera-look strip
+(SPEC §1) is the current example — must take the image's on-screen rectangle from
+`ZoomScrollView.visibleImageFrame`, published through `ZoomableImageView`'s `visibleImageFrame`
+binding. Do not recompute it from the enclosing `GeometryReader`'s size. That was tried, and it is
+wrong twice over:
+
+- `NSScrollView`'s legacy scrollers inset `contentView` by their **full width** (17pt each on this
+  OS, not the 15 or 16 you might assume), and they autohide, so the photo's right edge sits 0, 17 or
+  34pt inside the pane's own edge depending on the current zoom and the image's aspect. Nothing
+  outside the scroll view knows which of those applies, so any constant an overlay picks is a fudge
+  that happens to look right at one zoom.
+- Arithmetic centring lands on fractional points while the image is *drawn* on the backing-store
+  pixel grid, so the published rect goes through
+  `backingAlignedRect(_:options: .alignAllEdgesNearest)`. Half a point of disagreement is a whole
+  device pixel, and which way it rounds relative to an anchor depends on the pane's width — the
+  symptom is an overlay whose gap looks right at one pane size and a pixel tight at the next.
+
+Two things that make the plumbing shorter than it looks: `NSScrollView` is a **flipped** view, so
+`contentView.frame` is already in SwiftUI's top-left space and needs no conversion; and crop mode
+has no scroll view and a fixed zoom, so `SubjectCropGeometry.fitRect` describes it exactly there.
+The frame is reported from `layout()` and from both magnification paths, each hopping one runloop
+turn before writing the binding, for the same "Modifying state during view update" reason as the
+zoom and centre bindings beside it.
+
 ## Concurrency rules
 
 - Never call `exiftool`, hit the network, or touch the filesystem from a SwiftUI `View` body or a

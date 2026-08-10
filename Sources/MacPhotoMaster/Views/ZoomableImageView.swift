@@ -22,6 +22,9 @@ struct ZoomableImageView: NSViewRepresentable {
     /// which is what keeps the same part of the frame in view when switching between variants —
     /// normalized rather than in pixels because the two previews needn't be the same size.
     @Binding var center: CGPoint
+    /// Where the image actually sits on screen, in this view's own coordinates — read out for the
+    /// camera-look strip, which anchors to the photo's corner rather than the pane's.
+    @Binding var visibleImageFrame: CGRect
 
     func makeNSView(context: Context) -> ZoomScrollView {
         let scrollView = ZoomScrollView()
@@ -51,6 +54,13 @@ struct ZoomableImageView: NSViewRepresentable {
                     || abs(center.y - point.y) > ZoomScrollView.scaleComparisonEpsilon
                 else { return }
                 center = point
+            }
+        }
+        scrollView.onVisibleImageFrameChange = { frame in
+            // Same one-runloop-turn hop, and for the same reason, as the two bindings above.
+            DispatchQueue.main.async {
+                guard visibleImageFrame != frame else { return }
+                visibleImageFrame = frame
             }
         }
         scrollView.onResetRequested = {
@@ -83,6 +93,7 @@ final class ZoomScrollView: NSScrollView {
 
     var onFitMultipleChange: ((CGFloat) -> Void)?
     var onCenterChange: ((CGPoint) -> Void)?
+    var onVisibleImageFrameChange: ((CGRect) -> Void)?
     var onResetRequested: (() -> Void)?
 
     /// Keeps the preview pinned to Fit across pane resizes until the user actually zooms in — and
@@ -132,6 +143,38 @@ final class ZoomScrollView: NSScrollView {
         }
         onFitMultipleChange?(currentFitMultiple)
         onCenterChange?(normalizedCenter)
+        onVisibleImageFrameChange?(visibleImageFrame)
+    }
+
+    /// The on-screen rectangle the image occupies, in this view's own coordinates — which are
+    /// top-left, because `NSScrollView` is a flipped view, so the result drops straight into SwiftUI
+    /// without a flip.
+    ///
+    /// Deliberately published rather than recomputed by the caller from the pane's size: legacy
+    /// scrollers inset `contentView` by their full width (17pt each on this OS) and they autohide,
+    /// so the content area is 0, 17 or 34pt smaller than the pane depending on the current zoom.
+    /// Nothing outside this view can know which of those applies.
+    ///
+    /// `CenteringClipView` centres the image on whichever axis has spare room and pins it to the
+    /// content area on whichever doesn't, so intersecting the centred scaled rect with that area is
+    /// exact in both cases and needs no scroll offset.
+    ///
+    /// Snapped to the backing store because the centring above is arithmetic while the image is
+    /// *drawn* on the pixel grid: a half-point of disagreement between the two is a whole device
+    /// pixel, and whether it rounds towards or away from the caller's anchor depends on the pane's
+    /// width — which is what made the look strip's gap look right at one size and a pixel tight at
+    /// the next.
+    private var visibleImageFrame: CGRect {
+        guard let documentView else { return bounds }
+        let area = contentView.frame
+        let scaled = CGSize(
+            width: documentView.frame.width * magnification,
+            height: documentView.frame.height * magnification)
+        let centred = CGRect(
+            x: area.midX - scaled.width / 2, y: area.midY - scaled.height / 2,
+            width: scaled.width, height: scaled.height)
+        let visible = centred.intersection(area)
+        return backingAlignedRect(visible.isNull ? area : visible, options: .alignAllEdgesNearest)
     }
 
     /// Visible centre as a fraction of the image on each axis. `contentView.bounds` is in document
@@ -176,6 +219,7 @@ final class ZoomScrollView: NSScrollView {
         setMagnification(fit * multiple, centeredAt: NSPoint(x: contentView.bounds.midX, y: contentView.bounds.midY))
         onFitMultipleChange?(currentFitMultiple)
         reportCenter()
+        onVisibleImageFrameChange?(visibleImageFrame)
     }
 
     /// Wheel zooms instead of scrolling — the whole point of the feature (docs/SPEC.md §1); panning
@@ -198,6 +242,7 @@ final class ZoomScrollView: NSScrollView {
         setMagnification(fit * target, centeredAt: contentView.convert(event.locationInWindow, from: nil))
         onFitMultipleChange?(currentFitMultiple)
         reportCenter()
+        onVisibleImageFrameChange?(visibleImageFrame)
     }
 
     func requestReset() {

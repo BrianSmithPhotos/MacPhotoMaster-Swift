@@ -75,6 +75,27 @@ deterministically, and copy files into local storage.
     preview to Fit; the zoom control is inert (Mac) or hidden (iPad) until it's turned off again.
   - Zoom reads the same 2048px-cap decode the preview already loads, so past roughly 100% of that
     it is soft rather than more detailed. Re-decoding at a higher cap when zoomed in is deferred.
+- **Camera-look visualiser** (⌘L, off by default). A translucent strip over the preview showing the
+  in-camera creative settings as a graphic rather than as the sentence §3 writes to `Instructions`.
+  Shipped 2026-08-10, covering element groups 1 and 2 of the plan under "Ideas, not started"; groups
+  3 to 6 (tone curve, sliders, finish, provenance) are still outstanding.
+  - One hero graphic per look, which works because the colour-rendering modes are mutually
+    exclusive: a twelve-spoke saturation disc for a Colour Profile, a 30-stop ring for Colour
+    Creator, an 18-stop banded ring for Partial Color, a filter/tint circle for monochrome. A mode
+    carrying no readings shows its name alone.
+  - A RAW file shows "Neutral rendered RAW" rather than the look. The creative settings are the
+    camera's JPEG rendering; the ORF carries the same maker-note bytes but isn't developed through
+    them, so displaying them against it would claim something untrue about the file on screen. Same
+    reasoning gates the `Instructions` write in §3.
+  - The Colour Profile disc carries each spoke's value twice — as a radius from the zero circle and
+    as that hue's saturation — because a hue slider *is* a saturation control for its band. Colour
+    outside the figure is muted rather than dropped, so the shape reads as the balance actually
+    dialled in against the whole wheel. Values interpolate in angle between the measured spoke
+    centres rather than stepping twelve ways, since those centres are unevenly spaced.
+  - Anchored to the **photo's** top-right corner, not the pane's, so it stays on the picture as the
+    side panes are resized instead of drifting into the letterbox margin. See
+    docs/ARCHITECTURE.md "Preview overlays and where the photo actually is" — the rectangle has to
+    come from the scroll view, and cannot be recomputed from the SwiftUI container's size.
 
 ## 2. EXIF read and field mapping
 
@@ -340,15 +361,20 @@ default settings, the point being Apple's engine applied to the file as the came
 
 ## Ideas, not started
 
-In priority order — the visualiser first.
+In priority order — the rest of the visualiser first.
 
-- **Camera-style visualisation of the in-camera look.** `CameraLookParsing` (§3) already recovers
-  the full creative-dial state, but renders it as a text string. The camera itself shows this
-  graphically: a tone curve for the highlight/shadow/midtone levels, and a colour wheel with the
-  per-hue saturation values around it. Reproducing that as a preview-pane view would make the look
-  readable at a glance instead of parsed from a sentence.
+- **Camera-look visualiser, groups 3 to 6.** Groups 1 and 2 shipped 2026-08-10 (§1); what remains is
+  everything below the hero graphic, and the **tone curve is next**. Unlike group 2 this needs
+  design decisions before code: whether `ToneLevel`'s highlight/mid/shadow are one spline or three
+  independent pivots, where each pivot sits on the curve and how far along it each one reaches, and
+  how `Gradation` (Auto / Normal / High Key / Low Key) composes with them — it may be a preset of
+  the same three rather than a fourth axis. Expect that to need measuring off real frames the way
+  the three rings were, rather than being readable off the maker-note alone.
 
-  No longer blocked on examples: `Tests/MacPhotoMasterTests/Fixtures/CameraLookFixture.json` holds
+  The groups below are the original plan. They held up in implementation, so they stand as written
+  for the remaining work.
+
+  `Tests/MacPhotoMasterTests/Fixtures/CameraLookFixture.json` holds
   154 frames shot 2026-08-07 to 2026-08-09, one per distinct maker-note signature, giving 146
   distinct look strings with every branch of the parser represented by at least one real frame.
   The longest is 111 characters, comfortably inside the 256-character IPTC IIM cap.
@@ -362,11 +388,12 @@ In priority order — the visualiser first.
   values, and `isModeOnly` distinguishes a bare mode name from a look carrying readings.
 
   Element groups, by what varies together rather than by which tag supplied it:
-  1. **Identity** — mode/profile name. Exactly one, always present, and it selects group 2.
+  1. **Identity** — mode/profile name. Exactly one, always present, and it selects group 2. *Done.*
   2. **Colour rendering** — the hero graphic, and the only *mutually exclusive* group: 12-spoke
      profile wheel, 30-stop Colour Creator ring, 18-stop Partial Color ring, monochrome filter and
      tint, or nothing at all. That exclusivity is what makes one large graphic viable rather than a
-     stack of widgets.
+     stack of widgets. *Done*, though the profile wheel became a saturation disc rather than a ring
+     — see §1 for why radius and saturation both carry the value.
   3. **Tonal response** — `ToneLevel`, `Gradation` and `PictureModeEffect` all bend the same curve.
   4. **Sliders** — contrast, sharpness, saturation.
   5. **Finish** — grain, vignetting, the stacked art-filter `fx` records.

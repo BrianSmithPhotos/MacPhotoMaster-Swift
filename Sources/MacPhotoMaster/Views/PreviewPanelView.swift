@@ -2,6 +2,48 @@ import AppKit
 import SwiftUI
 import MacPhotoMasterCore
 
+/// The camera-look strip, held against the photo's own top-right corner rather than the pane's, so
+/// it stays on the picture when the side panels are resized instead of drifting out over the
+/// letterbox margin.
+///
+/// Split out of `PreviewPanelView.body` because the two together were slow enough for the type
+/// checker to give up on.
+private struct LookStripOverlay: View {
+    let asset: PhotoAsset
+    let previewImage: CGImage
+    /// Where the photo is, as reported by the scroll view that draws it. Nil in crop mode, which has
+    /// no scroll view and no zoom, so a plain aspect-fit describes it exactly.
+    ///
+    /// Reported rather than recomputed here because the zoomed case cannot be derived from `geo`:
+    /// the scroll view's legacy scrollers inset its content by their full width and autohide, so the
+    /// photo's right edge is 0, 17 or 34pt inside this overlay's own right edge depending on zoom.
+    let reportedImageFrame: CGRect?
+
+    /// A device pixel of disagreement between the two edges reads as an 8% difference at a 6pt gap
+    /// and half that here, so the snapping above does the correcting and this makes what's left of
+    /// it harder to see.
+    private let inset: CGFloat = 10
+
+    var body: some View {
+        GeometryReader { geo in
+            let viewport = CGRect(origin: .zero, size: geo.size)
+            let visible = reportedImageFrame ?? SubjectCropGeometry.fitRect(
+                imageSize: CGSize(width: previewImage.width, height: previewImage.height),
+                containerSize: geo.size)
+
+            CameraLookStripView(
+                look: asset.cameraLook, isRawFile: PhotoAssetLoader.isRaw(asset.url)
+            )
+            // Positioned by insets off a full-size frame rather than by an image-sized one: the
+            // trailing edge then lands at `visible.maxX - inset` arithmetically, instead of
+            // depending on how alignment behaves when the image is narrower than the strip.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(.trailing, viewport.maxX - visible.maxX + inset)
+            .padding(.top, visible.minY + inset)
+        }
+    }
+}
+
 /// Full-size preview + selected-images filmstrip. See docs/SPEC.md §1.
 ///
 /// Takes the view model rather than a single `PhotoAsset` so the filmstrip below the preview can
@@ -19,6 +61,9 @@ struct PreviewPanelView: View {
     /// comparison, and starting the next one at Fit (or at its top-left corner) throws away the
     /// framing that comparison depends on.
     @State private var previewCenter = CGPoint(x: 0.5, y: 0.5)
+    /// Where `ZoomableImageView` says the photo actually landed. Empty until its first layout pass
+    /// reports, and left behind in crop mode, so both of those read it as "no report yet".
+    @State private var previewImageFrame: CGRect = .zero
 
     private var asset: PhotoAsset? { viewModel.selectedAsset }
 
@@ -26,15 +71,29 @@ struct PreviewPanelView: View {
     /// image pixels assuming an unzoomed `.fit` layout, and it owns the drag gesture.
     private var isZoomEnabled: Bool { !viewModel.subjectIsolationEnabled }
 
+    /// Crop mode has no scroll view to report a frame, and the last one reported is stale there, so
+    /// the look strip falls back to a plain aspect-fit — which is exact at crop mode's fixed zoom.
+    private var reportedImageFrame: CGRect? {
+        guard isZoomEnabled, !previewImageFrame.isEmpty else { return nil }
+        return previewImageFrame
+    }
+
     var body: some View {
         VStack(spacing: 8) {
-            VStack {
-                Spacer()
+            // spacing 0 and minLength 0 deliberately, and both are needed: a Spacer reserves the
+            // platform's default length on its own account, on top of the gaps the VStack puts
+            // between its children. The two Spacers only exist to centre the placeholder, but any
+            // length they hold shrinks the image's container and pushes it down, while the look
+            // strip's overlay measures this VStack undiminished. The strip then anchored above the
+            // photo's top edge, and — because the shortfall feeds through an aspect-fit — out past
+            // its right edge whenever the image fitted on height.
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
                 if let previewImage {
                     if isZoomEnabled {
                         ZoomableImageView(
                             image: previewImage, fitMultiple: $previewFitMultiple,
-                            center: $previewCenter
+                            center: $previewCenter, visibleImageFrame: $previewImageFrame
                         )
                         // Rebuilds the scroll view with the new image when the selection changes,
                         // rather than mutating the existing one; the zoom and centre above are
@@ -61,13 +120,16 @@ struct PreviewPanelView: View {
                         }
                     }
                 } else {
-                    Image(systemName: "photo")
-                        .font(.system(size: 64))
-                        .foregroundStyle(.tertiary)
-                    Text(asset == nil ? "Select a photo" : "Loading…")
-                        .foregroundStyle(.secondary)
+                    // Keeps its own spacing, which the VStack above no longer provides.
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 64))
+                            .foregroundStyle(.tertiary)
+                        Text(asset == nil ? "Select a photo" : "Loading…")
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottomTrailing) {
@@ -78,26 +140,12 @@ struct PreviewPanelView: View {
                     .padding(8)
                 }
             }
-            // Anchored to the photo's own top-right corner rather than the pane's, so it stays put
-            // against the picture when the side panels are resized instead of drifting out over the
-            // letterbox margin. `fitRect` is the same letterboxing math SwiftUI applies internally,
-            // already used by the crop overlay. Sits above the zoom readout's own overlay, which
-            // keeps its bottom-trailing corner.
             .overlay {
                 if viewModel.lookVisualiserEnabled, let asset, let previewImage {
-                    GeometryReader { geo in
-                        let fit = SubjectCropGeometry.fitRect(
-                            imageSize: CGSize(
-                                width: previewImage.width, height: previewImage.height),
-                            containerSize: geo.size)
-                        CameraLookStripView(
-                            look: asset.cameraLook,
-                            isRawFile: PhotoAssetLoader.isRaw(asset.url)
-                        )
-                        .padding(10)
-                        .frame(width: fit.width, height: fit.height, alignment: .topTrailing)
-                        .offset(x: fit.minX, y: fit.minY)
-                    }
+                    LookStripOverlay(
+                        asset: asset, previewImage: previewImage,
+                        reportedImageFrame: reportedImageFrame
+                    )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }

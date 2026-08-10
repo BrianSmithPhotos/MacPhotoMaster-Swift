@@ -161,6 +161,66 @@ equivalent, and a Color Filter list far longer than the five values the camera
 writes to the `0x8060` record. None of that is in the files, so none of it
 belongs in the look string or the visualiser.
 
+### Partial Color I, II and III are three different things
+
+Measured 2026-08-09 from H1071970-H1071978: types I, II and III at each of stops
+3, 9 and 15 (red, blue, green), nine frames at a locked 1/50, f/14, ISO 3200,
+WB 5300K. Registration off the hub patches, validated on the unfiltered
+H1071945 — measured hue tracks wheel angle to a median +0.9 degrees, and the
+recovered rotation is within 0.6 degrees of level on all ten frames.
+
+Measure **chroma** (`max-min`), not saturation. Saturation is `(max-min)/max`,
+which inflates wherever `max` is small, and blue is the dimmest hue the display
+renders — in S the blue residual below reads about twice its real size. Same
+family of trap as the Colour Profile spokes above, caught by the fact that the
+unfiltered wheel's own chroma is nearly flat across the sectors (0.60-0.75) with
+blue the *highest*, so a genuine blue excess cannot be a dark-pixel artefact.
+
+Each frame normalised to its own peak; edge is the 90%-to-10% fall, averaged
+over the two sides:
+
+| Type | Stop | Centre | FWHM | Edge 90-10% | Out-of-band floor |
+|------|------|-------:|-----:|------------:|------------------:|
+| I | red | 360.0 | 62 | 21 | 0.000 |
+| I | blue | 248.0 | 70 | 21 | 0.000 |
+| I | green | 122.0 | 62 | 18 | 0.000 |
+| II | red | 360.0 | 62 | 23 | 0.195 |
+| II | blue | 239.0 | 80 | 98 | 0.157 |
+| II | green | 112.0 | 86 | 107 | 0.170 |
+| III | red | 360.0 | 66 | 14 | 0.000 |
+| III | blue | 248.0 | 70 | 11 | 0.000 |
+| III | green | 121.0 | 64 | 4 | 0.000 |
+
+**All three share the same band centres**, so the eighteen names in
+`partialColorNames` are valid across I, II and III. The type changes the band's
+edges and floor, never its position.
+
+**I and III differ only at the shoulders.** Both keep the same 62-70 degree
+band; III's edges are 4-14 degrees against I's 18-21, so III is 1.5x to 4x
+sharper. III is not a narrower band, it is the same band cut harder.
+
+**II is not a wider band, it is an incomplete desaturation.** I and III write
+*exactly* neutral pixels outside the band — the floor is 0.000, not merely
+small. II leaves 16-20% of the original chroma standing across the whole rest of
+the wheel. Its larger FWHM in the table is mostly that floor lifting the
+half-max point rather than real broadening, and its "edge" of 98-107 degrees is
+not an edge at all: the profile never falls to 10% of peak, so there is nothing
+to measure between.
+
+**II's floor is strongly hue-dependent**, varying up to 6x around the wheel:
+
+| Kept stop | Residual peaks at | Bottoms at |
+|-----------|------------------:|-----------:|
+| red (0) | 0.318 at 199 (cyan-blue) | 0.053 at 71 |
+| green (121) | 0.246 at 193 (cyan-blue) | 0.077 at 41 |
+| blue (248) | 0.263 at 37 (orange) | 0.108 at 319 |
+
+Note this is not adjacency leakage — for the red stop the survivors sit on the
+*opposite* side of the wheel. A complement rule would fit red (180 predicted
+against 199 measured) and roughly blue (68 against 37) but not green (301
+against 193), so three stops are not enough to name the mechanism. What is
+solid: wherever blue is not the kept hue, blue is the hue that survives II best.
+
 ### Where the measured frames ended up
 
 The metadata itself is in the repo, not just the conclusions drawn from it:
@@ -198,8 +258,9 @@ backwards.
 
 ### Still to measure
 
-One ring left. It blocks nothing today, but would remove a fudge from a future
-look visualiser (docs/SPEC.md "Ideas, not started").
+Nothing. Every ring the camera writes has now been measured off real frames, so
+the look visualiser (docs/SPEC.md "Ideas, not started") has no fudges left to
+remove.
 
 - ~~**Colour Creator.**~~ Done, 2026-08-09 — the table shipped in
   `CameraLookParsing.colorCreatorNames`. See "Colour Creator: what is known"

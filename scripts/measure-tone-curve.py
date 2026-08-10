@@ -8,6 +8,7 @@
     scripts/measure-tone-curve.py REF.JPG FRAME.JPG [FRAME.JPG ...]
     scripts/measure-tone-curve.py --csv curves.csv REF.JPG FRAME.JPG ...
     scripts/measure-tone-curve.py --compose REF.JPG A.JPG B.JPG AB.JPG
+    scripts/measure-tone-curve.py --paired REF.JPG A.JPG REF.JPG B.JPG REF.JPG ...
 
 Recovers the curve by matching cumulative histograms, not by pairing pixels: T(x) is the
 test level whose cumulative histogram equals the reference's at x. Two frames of the same
@@ -25,6 +26,14 @@ Shadow are three independent pivots on one curve or interact with each other. Sh
 B alone, and the two together, and this reports whether the combined frame matches B applied
 after A. If it does, the visualiser can compose three measured basis curves; if it does not,
 the settings need measuring on a grid.
+
+--paired takes the frames in capture order with the reference re-shot between every setting
+frame, and measures each setting against the two references bracketing it. Attempt 2 at group A
+failed because references at only the two ends of a run can prove that the scene drifted without
+giving any way to undo it - and the drift there turned out to be non-monotonic, so interpolating
+across four minutes would have been wrong in the middle by more than the effect being measured.
+Bracketing seconds instead of minutes makes that interpolation defensible, and the disagreement
+between a frame's two references is reported as its own error bar rather than assumed away.
 """
 import argparse
 
@@ -69,6 +78,21 @@ def transfer(reference, test):
     curve = np.interp(np.cumsum(ref), np.cumsum(tst), np.arange(LEVELS, dtype=np.float64))
     curve[ref < FLOOR] = np.nan
     return curve
+
+
+def bracketed(before, after, test):
+    """Curves for a frame shot between two references, and how far those two disagree.
+
+    Averaging the two transfer curves corrects linearly for whatever drifted while the frame was
+    taken. That correction is only honest because interleaved references bracket seconds rather
+    than minutes: over a long gap the drift need not be monotonic, and a linear fit across it can
+    be wrong in the middle by more than the effect being measured. The luma disagreement comes back
+    as the frame's own error bar - no result smaller than it means anything.
+    """
+    pairs = [(transfer(b, t), transfer(a, t)) for b, a, t in zip(before, after, test)]
+    curves = [(first + second) / 2 for first, second in pairs]
+    gap = np.abs(pairs[3][0] - pairs[3][1])
+    return curves, 0.0 if np.all(np.isnan(gap)) else float(np.nanmax(gap))
 
 
 def compose(first, second):
@@ -123,17 +147,36 @@ def name(path):
     return path.split("/")[-1]
 
 
-def report(paths, curves, spreads):
+def report(paths, curves, spreads, drifts=None):
     header = "".join(f"{level:>6}" for level in REPORT_AT)
-    print(f"\n{'frame':<22}{header}{'max dev':>10}{'chan':>7}{'tones':>12}")
-    for path, curve, spread in zip(paths, curves, spreads):
+    drift_header = f"{'drift':>7}" if drifts is not None else ""
+    print(f"\n{'frame':<22}{header}{'max dev':>10}{'chan':>7}{drift_header}{'tones':>12}")
+    for index, (path, curve, spread) in enumerate(zip(paths, curves, spreads)):
         row = "".join(
             f"{curve[level]:6.1f}" if not np.isnan(curve[level]) else f"{'-':>6}"
             for level in REPORT_AT
         )
         offset, at = deviation(curve)
         lo, hi = measured_range(curve)
-        print(f"{name(path):<22}{row}{offset:+7.1f}@{at:<3}{spread:7.2f}{f'{lo}-{hi}':>12}")
+        drift = f"{drifts[index]:7.2f}" if drifts is not None else ""
+        print(f"{name(path):<22}{row}{offset:+7.1f}@{at:<3}{spread:7.2f}{drift}{f'{lo}-{hi}':>12}")
+
+
+def report_stability(paths, references):
+    """Consecutive references, which are the run's own record of what the room did.
+
+    Reported before any curve, because it sets the scale everything else is read against: a setting
+    whose deviation is no bigger than the drift between the references around it has not been
+    measured, it has been guessed.
+    """
+    print("\nreference stability (consecutive references, identity expected)")
+    worst = 0.0
+    for before, after in zip(range(len(paths) - 1), range(1, len(paths))):
+        offset, at = deviation(transfer(references[before][3], references[after][3]))
+        worst = max(worst, abs(offset))
+        print(f"  {name(paths[before]):<18} -> {name(paths[after]):<18} max dev {offset:+7.1f} @{at}")
+    verdict = "stable" if worst < INDEPENDENT else "DRIFTING - read every result against this"
+    print(f"  worst {worst:.1f} levels: {verdict} (threshold {INDEPENDENT:.0f})")
 
 
 def report_composition(paths, curves):
@@ -201,21 +244,39 @@ def main():
     parser.add_argument(
         "--compose", action="store_true", help="treat the frames as A B AB and test independence"
     )
+    parser.add_argument(
+        "--paired",
+        action="store_true",
+        help="frames are the whole capture sequence, reference re-shot between every setting",
+    )
     args = parser.parse_args()
 
-    if args.compose and len(args.frames) != 3:
+    sequence = [args.reference] + args.frames
+    if args.paired and len(sequence) % 2 == 0:
+        raise SystemExit("--paired needs the sequence to start and end with a reference")
+    measured = sequence[1::2] if args.paired else args.frames
+    if args.compose and len(measured) != 3:
         raise SystemExit("--compose needs exactly three frames: A, B, then the two together")
 
-    reference = histograms(args.reference, args.step)
-    curves, spreads = [], []
-    for path in args.frames:
-        test = histograms(path, args.step)
-        frame = [transfer(r, t) for r, t in zip(reference, test)]
-        curves.append(frame[3])
-        spreads.append(channel_spread(frame))
+    curves, spreads, drifts = [], [], []
+    if args.paired:
+        reference_paths = sequence[0::2]
+        references = [histograms(path, args.step) for path in reference_paths]
+        for index, path in enumerate(measured):
+            frame, drift = bracketed(references[index], references[index + 1],
+                                     histograms(path, args.step))
+            curves.append(frame[3])
+            spreads.append(channel_spread(frame))
+            drifts.append(drift)
+    else:
+        references = [histograms(args.reference, args.step)]
+        for path in measured:
+            frame = [transfer(r, t) for r, t in zip(references[0], histograms(path, args.step))]
+            curves.append(frame[3])
+            spreads.append(channel_spread(frame))
 
     lo, hi = measured_range(curves[0])
-    black, white = clipping(reference[3])
+    black, white = clipping(references[0][3])
     print(f"reference {name(args.reference)}: scene covers levels {lo}-{hi}")
     print(f"  clipped {black * 100:.2f}% at black, {white * 100:.2f}% at white")
     if hi - lo < 180:
@@ -223,11 +284,13 @@ def main():
     if max(black, white) > CLIPPED:
         print("  warning: the reference is clipped - reshoot it, no curve can be recovered there")
 
-    report(args.frames, curves, spreads)
+    if args.paired:
+        report_stability(reference_paths, references)
+    report(measured, curves, spreads, drifts if args.paired else None)
     if args.compose:
-        report_composition(args.frames, curves)
+        report_composition(measured, curves)
     if args.csv:
-        write_csv(args.csv, args.frames, curves)
+        write_csv(args.csv, measured, curves)
 
 
 if __name__ == "__main__":

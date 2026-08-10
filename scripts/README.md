@@ -511,31 +511,85 @@ room for the camera to compress a region and keep it measurable.
 Night Shift and True Tone off, and display brightness fixed for the whole run —
 the same screen settings the hue wheel needed, for the same reason.
 
-**Also disable display sleep and the screen saver, and shoot in a dim room.** The
-ramp fills the frame, so the display is now the only light source in the picture,
-which makes any automatic dimming indistinguishable from a tone curve — the same
-failure that voided the first attempt, only now with a shorter fuse, because a
-sequence of 10 to 20 frames easily outruns the default sleep timer. Generate the
+**Turn off "Automatically adjust brightness" in System Settings > Displays.**
+Fixing the brightness slider is not enough: with auto-brightness on, the display
+re-reads the room and moves the backlight on its own, so the slider stays put
+while the light output does not. This is half of what voided the second attempt.
+
+**Shoot in the dark — lights off — not merely in a dim room.** The ramp fills the
+frame, so the display is the only thing in the picture, and every other photon in
+the room reaches the sensor by reflecting off the glass. That reflection is
+additive light: it is negligible against a white ramp column and overwhelming
+against a black one, so drifting ambient light warps the bottom of the curve
+while leaving the top nearly untouched — which is indistinguishable from a Shadow
+adjustment. Daylight through drawn blinds is not stable enough; cloud cover
+modulates it over minutes, and it does not drift in one direction, so it cannot
+be interpolated out afterwards either. This is the other half of what voided the
+second attempt.
+
+**Pick the time of day from which way the windows face**, which matters more than
+how dim the room looks when you walk into it. The stable window is when the sun
+is not on that side of the building at all, because then only indirect skylight
+gets in and it changes slowly. The room used here faces west, so mornings are
+stable and afternoons are the worst possible choice — the second attempt was shot
+at 15:04 to 15:18 in August, which is exactly when the sun swings round onto that
+glass. After full dark is stable whichever way the windows face.
+
+**Also disable display sleep and the screen saver.** Automatic dimming is the
+same failure with a shorter fuse, because a sequence of 10 to 20 frames easily
+outruns the default sleep timer. Generate the
 ramp at the display's native resolution and matching its aspect ratio (5120x2880
 for a Studio Display) so it fills the screen without letterbox bars; black bars
 would put a spike at level 0 and clip the bottom of every frame.
 
 **Frame so the ramp fills the viewfinder** — no bezel, no wall, no desk. Anything
 else in shot is scene content whose levels are not under control, and on the first
-attempt it was the room, not the target, that carried the drift.
+attempt it was the room, not the target, that carried the drift. Setting the
+camera's aspect ratio to 16:9 rather than its native 4:3 is the tidy way to lose
+the bezels above and below a widescreen display: it is a sensor crop, so it
+changes what is in frame without touching how tones are rendered.
+
+Focus last, after everything else is in position, and remember that manual focus
+does not follow the camera or the screen when either is moved — autofocus once on
+the ramp, switch back to MF, then leave it alone for the whole run.
+
+**Then check the dark end for reflections before shooting the set.** A glossy
+display reflects the room, and the reflection is only visible where the ramp is
+dark — which is exactly where the Shadow control does its work, and where a few
+levels matter most. On the second attempt (H1072021) a window reflected into the
+top-left corner and lifted it 43 levels on average and 171 at its peak, over 2.6
+percent of the frame. Worse, a window is daylight: it drifts over a 10-frame
+sequence, which is the failure that voided the first attempt. Kill the reflection
+rather than hoping it holds still — curtain it, or angle the camera so the bright
+part of the room does not fall in the lens's mirror image. Move the mouse pointer
+off the screen too.
+
+Optional but free: set a custom white balance off the ramp itself. The display's
+white point does not match a 5300K preset, so the capture carries a colour cast
+(H1072021 read R 131, G 146, B 149), and that cast is enough to make the `chan`
+reading below meaningless — it cannot then separate a genuine per-channel curve
+from the cast. The luma curve, which is what gets drawn, is unaffected either way.
 
 - **Full manual exposure, fixed for every frame**, and manual WB. Any exposure
   change is indistinguishable from a tone curve.
-- **Expose with headroom at both ends** — reference black at about level 20 and
-  white at about 235, *not* filling 2-251. The settings being measured are what
-  move tones toward the ends, so an exposure that only just fits the reference
-  guarantees the test frames clip: the first attempt (2026-08-10) filled the
-  range exactly and then crushed 12-15 percent of the frame to black on every
-  darkening setting. Clipping cannot be recovered in software — once tones are
-  flattened onto 0 or 255 the cumulative histogram has a step there and no
-  inverse. The cost of the headroom is that the extreme ends go unmeasured, which
-  is much the lesser loss. The script reports the clipped fraction at both ends of
-  the reference and warns above 0.5 percent.
+- **Expose so nothing clips, and accept that the headroom is lopsided.** The
+  settings being measured are what push tones toward the ends, so an exposure
+  that only just fits the reference guarantees the test frames clip: the first
+  attempt (2026-08-10) filled 2-251 on a room scene and then crushed 12-15
+  percent of the frame to black on every darkening setting. Clipping cannot be
+  recovered in software — once tones are flattened onto 0 or 255 the cumulative
+  histogram has a step there and no inverse. The script reports the clipped
+  fraction at both ends of the reference and warns above 0.5 percent.
+
+  An earlier version of this section asked for black at 20 and white at 235. That
+  is not achievable with a full-range ramp on a good display, and the second
+  attempt showed why: at 1/8 f/5.6 ISO 250 the ramp landed at 12-222 with nothing
+  clipped, and the display's own black-to-white range is wider than the camera's
+  output range, so the bottom cannot be lifted without the top clipping. A third
+  of a stop more would put white at about 246 — no room left for Highlight +7 —
+  while moving black only from 12 to 14. **Leave it there.** Highlight +7 lifts
+  the top by about 20 levels and fits; Shadow -7 will crush the darkest few
+  percent, and losing the curve below input 12 is the cheaper loss.
 - **Autofocus once on the screen, then switch to manual focus and do not touch
   it.** AF left on refocuses per frame, and at f/2.0 that moves the focus plane by
   centimetres — which changes the histogram independently of any tone setting,
@@ -585,6 +639,17 @@ a direct reading, in levels, of everything that drifted while the group was shot
 as the measurement's noise floor. Tens of levels means the group is void: an
 illumination change is indistinguishable from a tone curve, because both are
 "every pixel came out at a different level than before".
+
+**For group A, shoot the reference between every setting frame** — REF, H+7, REF,
+M+7, REF, and so on. Bracketing the group at its two ends detects drift but
+cannot correct it, which is exactly where the second attempt died: the closing
+reference proved 12 levels of drift and there was nothing to be done with the ten
+frames in between. Interleaving makes each setting measurable against a reference
+shot 20 seconds earlier instead of four minutes, and turns consecutive references
+into a continuous record of what the room is doing. It costs 11 extra frames on
+the one group that decides the whole design. If those references come back within
+a level or two of each other, the environment is proven stable and groups B to E
+can go back to bracketing at the ends only.
 
 **Shoot group A first and measure it before shooting anything else.** It decides
 whether the remaining 30-odd frames are the right ones.
@@ -673,6 +738,38 @@ h+7.jpg                 16.2  32.1  64.0  95.8 127.1 156.3 180.2 198.4 210.1  -2
 `--csv` writes the full 256-level curves, which is the form the app will want
 them in.
 
+**`--paired`** takes the whole interleaved sequence in capture order — reference
+first, reference last, a reference between every setting frame — and measures
+each setting against the two references bracketing it rather than against one
+reference at the far end of the run:
+
+```
+scripts/measure-tone-curve.py --paired --compose \
+    ref0.jpg a.jpg ref1.jpg b.jpg ref2.jpg ab.jpg ref3.jpg
+```
+
+It adds two things to the output. A `reference stability` block compares each
+consecutive pair of references and prints the worst, which is the run's own
+record of what the room did while it was shot; read every result against it,
+because a setting whose deviation is no larger has not been measured. And a
+`drift` column gives each frame its own error bar — how far its two bracketing
+references disagree.
+
+Averaging the two transfer curves corrects linearly for drift, which is honest
+only over the seconds an interleaved reference brackets. It is not a way to
+rescue a run whose references sit minutes apart: see the second attempt below,
+where the drift turned out to be a V in time, so a fit across the run would have
+been wrong in the middle by more than the effect being measured.
+
+Validated against synthetic frames built from a known curve and a known drift:
+with no drift it recovers the composition exactly (0.00 rms) and reports
+`independent`; with realistic drift it reports `independent` at 0.14 rms; with a
+deliberately brutal V-shaped drift it cuts the error 4.4-fold (9.11 to 2.06 rms)
+and correctly ranks the true model first, while flagging the references as
+`DRIFTING`. The control that matters most: a genuine interaction with no drift is
+still caught (4.17 rms) and is distinguishable, because its mean error is +0.51 —
+near zero and two-signed — where drift produces the one-signed means seen below.
+
 ### First attempt, 2026-08-10: void, and why
 
 Frames H1072011-H1072020 (OM-3, Color Profile 1, 1/20 f/2.0 ISO 100, WB 5300K)
@@ -716,4 +813,59 @@ Three further defects, listed so the reshoot fixes all of them at once:
 The target was a room interior rather than the ramp. That is legitimate in
 principle — coverage was good — but it is what brought the focus and
 scene-stability variables in, and it is why the flat ramp is worth using.
+
+### Second attempt, 2026-08-10: void, and what it proved
+
+Frames H1072023-H1072033 (OM-3, Color Profile 1, 0.4s f/5.6 ISO 200, manual
+exposure, manual WB, MF, 16:9, the generated ramp full-bleed) covered group A
+correctly: all ten settings dialled exactly as listed, byte-identical exposure
+and white balance across the group, no clipping at either end, and the whole run
+took 4 minutes 29 seconds. The frame checked beforehand (H1072022) passed every
+gate — levels 4-227, 0.000 percent clipped at both ends, identity curve against
+itself, all three tone levels 0.
+
+**The repeat reference did its job and voided the group: `max dev +12.0 @109`,
+one-signed.** That is the control working as designed rather than a new failure —
+attempt 1 had the same drift and no way to see it.
+
+Four measurements identify the drift as scene illumination, not the camera:
+
+- **Not a camera move.** A pan shifts every level-crossing along the ramp by the
+  same number of pixels. The crossings for levels 64, 128 and 192 moved +270,
+  +309 and +451 — progressively more toward the bright end, which is what a
+  brightness change does and a translation cannot.
+- **Not a settings change.** Exposure, ISO, `WB_RBLevels`, focus mode and picture
+  mode are identical across all eleven frames.
+- **Not a white-point shift.** R minus B held between -12.8 and -13.7 throughout,
+  so True Tone and Night Shift were not moving.
+- **Not the camera's processing.** The JPEG pipeline is deterministic: identical
+  settings producing different output means the input changed. EXIF cannot
+  confirm this directly — the OM-3 writes no `MeasuredEV`, and `LightValue` reads
+  a constant 5.3 because it is computed from the exposure settings.
+
+The *shape* of the drift names the mechanism. Between the two references the dark
+end rose by a factor of 1.55 while the bright end rose by only 1.02. Neither a
+pure gain nor pure additive stray light explains both, so it is both at once:
+ambient light reflecting off the glass (dominant where the ramp is black,
+negligible where it is white) plus a small backlight change. Daylight through
+drawn blinds, and a display left on automatic brightness, produce exactly that
+pair. Hence the two setup rules added above.
+
+**The drift could not be interpolated away**, which is worth knowing before
+anyone tries. Three same-settings frames exist — 15:04, 15:14 and 15:18 — and the
+middle one is the *darkest* of the three. The drift is a V, not a slope, so a
+correction fitted between the bracketing references would be wrong in the middle
+by more than the effect being measured. Cloud cover over an afternoon behaves
+this way; this is why the fix is to remove the ambient light rather than to model
+it.
+
+What the run does support, qualitatively, is that the three controls act on
+separable regions — and drift cannot manufacture that, because it moves the whole
+range at once. Highlights +7 reads 16.8 at input 16 (identity, to within noise)
+and +30.3 at 205. Shadows -7 reads -25.2 at 38 and is near-identity at the top.
+Midtones pivots the middle. Encouraging for the composition model, but not a
+measurement of it: three of the four composition tests carry one-signed mean
+errors of +4.2 to +11.8 levels against a 3-level threshold. The fourth, contrast
+against highlights, came in at 2.09 rms under "serial a-then-b" — the closest any
+test has come to independent, and the first thing to re-check on the reshoot.
 

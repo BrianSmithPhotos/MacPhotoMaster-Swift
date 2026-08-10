@@ -22,10 +22,18 @@ public struct PhotoAsset: Identifiable, Hashable {
 
     public var capturedAt: Date?
     public var artFilterToken: String?
-    /// The in-camera creative-dial settings as one readable string (see `CameraLookParsing`),
-    /// written to IPTC/XMP Instructions on process/move. Read from the same lazy `exiftool` pass as
-    /// `artFilterToken`, and empty for anything that wasn't shot with the dial engaged.
-    public var cameraLook: String = ""
+    /// The in-camera creative-dial settings (see `CameraLookParsing`), read from the same lazy
+    /// `exiftool` pass as `artFilterToken` and `nil` for anything that wasn't shot with the dial
+    /// engaged — which includes every ORF, since the RAW deliberately stays at the neutral mode-dial
+    /// value.
+    ///
+    /// Held typed rather than as the rendered string so the look visualiser can draw the individual
+    /// readings; `cameraLookSummary` is the string that goes to Instructions.
+    public var cameraLook: CameraLook?
+
+    /// The look as the one-line string written to IPTC/XMP Instructions on process/move. Empty when
+    /// there is nothing to report, so a caller can skip the write rather than stamp a blank field.
+    public var cameraLookSummary: String { cameraLook?.summary ?? "" }
 
     public var gpsLatitude: Double?
     public var gpsLongitude: Double?

@@ -76,6 +76,7 @@ public struct ProcessMoveService {
             asset.keywords, artFilterToken: asset.artFilterToken, cameraToken: asset.cameraModel,
             lensToken: asset.lensModel, soocToken: soocToken)
         let subjectDistance = MetadataWriteFieldRules.subjectDistanceMeters(from: asset.focusDistance)
+        let cameraLook = AutoMetadataRules.cameraLookInstructions(for: asset)
 
         do {
             try Self.verifyCopy(source: asset.url, destination: stagingURL)
@@ -85,7 +86,7 @@ public struct ProcessMoveService {
                 keywords: keywords,
                 gps: Self.gpsCoordinate(for: asset),
                 subjectDistance: subjectDistance,
-                instructions: asset.cameraLook.isEmpty ? nil : asset.cameraLook,
+                instructions: cameraLook.isEmpty ? nil : cameraLook,
                 to: stagingURL)
             try FileManager.default.moveItem(at: stagingURL, to: destinationURL)
             Self.moveSidecarIfPresent(from: stagingURL, to: destinationURL)

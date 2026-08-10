@@ -34,6 +34,17 @@ struct ContentView: View {
             }
             ToolbarItem {
                 Button {
+                    browser.setLookVisualiserEnabled(!browser.lookVisualiserEnabled)
+                } label: {
+                    Label(
+                        "Show Camera Look", systemImage: "camera.filters")
+                }
+                .keyboardShortcut("l", modifiers: .command)
+                .help("Show the in-camera look over the preview (Cmd-L)")
+                .accessibilityIdentifier("cameraLookToggle")
+            }
+            ToolbarItem {
+                Button {
                     isMetadataPanelPresented.toggle()
                 } label: {
                     Label("Toggle Metadata Panel", systemImage: "sidebar.trailing")

@@ -10,14 +10,14 @@ import Foundation
 /// Only non-default readings are held: every optional being `nil` and every array empty means the
 /// mode was named but nothing was dialled in. `CameraLookParsing.parse(from:)` returns `nil` rather
 /// than an empty look when there is nothing to report at all.
-public struct CameraLook: Equatable {
+public struct CameraLook: Hashable {
     /// The chosen-look token (art filter, colour/monochrome profile, Colour Creator) when there is
     /// one, otherwise the plain `PictureMode` name.
     public var mode: String = ""
 
     /// A named slider reading — the Colour Profile hue spokes and the tone-curve channels share
     /// this shape, a short code and a signed value.
-    public struct Slider: Equatable {
+    public struct Slider: Hashable {
         public let code: String
         public let value: Int
 
@@ -29,7 +29,7 @@ public struct CameraLook: Equatable {
 
     /// A stop on the Partial Color ring. `name` falls back to the index when the stop is outside the
     /// measured table, so it is always renderable.
-    public struct PartialColor: Equatable {
+    public struct PartialColor: Hashable {
         public let index: Int
         public let name: String
 
@@ -42,14 +42,14 @@ public struct CameraLook: Equatable {
     /// One stacked art-filter option record. Kept as an ordered list because the camera packs these
     /// in field order rather than sorted — a frame can carry `fx` ahead of its `bw filter` — and the
     /// rendered string has to preserve that order.
-    public enum ArtEffect: Equatable {
+    public enum ArtEffect: Hashable {
         case bwFilter(String)
         case tint(String)
         case effect(String)
     }
 
     /// The Colour Creator ring: a position (which is a hue, not an amount) and a bipolar strength.
-    public struct ColorCreator: Equatable {
+    public struct ColorCreator: Hashable {
         /// The bottom of the Vivid range, where the render is fully desaturated whatever the
         /// position — see `CameraLookParsing.colorCreatorNames`.
         public static let monochromeStrength = -4
@@ -69,7 +69,7 @@ public struct CameraLook: Equatable {
 
     /// A monochrome profile's contrast filter and its strength. The camera stores the two
     /// independently, so a filter at strength 0 is inert and never reaches here.
-    public struct MonochromeFilter: Equatable {
+    public struct MonochromeFilter: Hashable {
         public let name: String
         public let strength: Int
 

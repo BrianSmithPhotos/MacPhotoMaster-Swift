@@ -22,6 +22,22 @@ public enum AutoMetadataRules {
         asset.derivedFrom == nil ? soocToken(for: asset.url) : ""
     }
 
+    /// The in-camera look string for Instructions, or empty when the file never received that
+    /// rendering.
+    ///
+    /// A RAW carries the look's *readings* but not the look. Measured on a real pair
+    /// (H1071885.JPG/.ORF, 2026-08-09): the files differ in exactly one tag — `PictureMode` reverts
+    /// to `"Natural"` in the ORF — while `ColorCreatorEffect` is byte-for-byte identical in both. So
+    /// the parser legitimately returns a full look for an ORF, and writing it would annotate the
+    /// file with a rendering Apple's engine never applied, since it does not read Olympus maker
+    /// notes. A `RawDevelopService` output is the same story one step on, which is why it shares
+    /// `soocToken(for:)`'s `derivedFrom` test: a JPEG by extension, but Apple's rendering of the
+    /// RAW rather than the camera's.
+    public static func cameraLookInstructions(for asset: PhotoAsset) -> String {
+        guard !PhotoAssetLoader.isRaw(asset.url), asset.derivedFrom == nil else { return "" }
+        return asset.cameraLookSummary
+    }
+
     /// Appends camera/lens/art-filter/SOOC tokens to `keywords`, case-insensitively de-duplicated
     /// against what's already there and against each other. Blank tokens are skipped.
     public static func keywordsWithAutoTokens(

@@ -198,6 +198,11 @@ final class SourceBrowserViewModel: ObservableObject {
     /// rather than waiting for a `suggestAI()` call.
     @Published private(set) var subjectIsolationEnabled: Bool
 
+    /// Whether the camera-look strip is drawn over the preview (docs/SPEC.md "Ideas, not started").
+    /// Off by default and persisted: it covers part of the photo, so it's a thing the user reaches
+    /// for when reading a look rather than something that should be in the way while culling.
+    @Published private(set) var lookVisualiserEnabled: Bool
+
     /// Off-by-default set as of 2026-07-05 — the user's call, not derived from anything measurable;
     /// revisit if the OpenRouter preset list (`AIModelSelection.presets`) changes these model names.
     static let defaultEBirdDisabledModels: Set<String> = [
@@ -286,6 +291,7 @@ final class SourceBrowserViewModel: ObservableObject {
     private static let sourceRootDefaultsKey = "sourceRootPath"
     private static let eBirdDisabledModelsDefaultsKey = "eBirdDisabledModels"
     private static let subjectIsolationEnabledDefaultsKey = "subjectIsolationEnabled"
+    private static let lookVisualiserEnabledDefaultsKey = "lookVisualiserEnabled"
     /// Falls back to the user's SD card mount point when no source folder has ever been opened.
     /// The card is swapped for a new one roughly every 10K images, far less often than the app is
     /// launched, so defaulting to (and, via `openFolder`, persisting) whatever was last opened
@@ -302,6 +308,8 @@ final class SourceBrowserViewModel: ObservableObject {
         }
         subjectIsolationEnabled =
             UserDefaults.standard.bool(forKey: Self.subjectIsolationEnabledDefaultsKey)
+        lookVisualiserEnabled =
+            UserDefaults.standard.bool(forKey: Self.lookVisualiserEnabledDefaultsKey)
         if let path = UserDefaults.standard.string(forKey: Self.libraryRootDefaultsKey) {
             libraryRootURL = URL(fileURLWithPath: path)
         }
@@ -327,6 +335,12 @@ final class SourceBrowserViewModel: ObservableObject {
         }
         UserDefaults.standard.set(
             Array(eBirdDisabledModels), forKey: Self.eBirdDisabledModelsDefaultsKey)
+    }
+
+    /// Called from the preview's look-strip button and its ⌘L shortcut.
+    func setLookVisualiserEnabled(_ enabled: Bool) {
+        lookVisualiserEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.lookVisualiserEnabledDefaultsKey)
     }
 
     /// Called from `MetadataPanelView`'s subject-crop Toggle — see `subjectIsolationEnabled`'s doc
@@ -1575,7 +1589,7 @@ final class SourceBrowserViewModel: ObservableObject {
         guard selectedAssetID == id else { return }
         updateAsset(id) { current in
             current.artFilterToken = ArtFilterTokenParsing.token(from: metadata)
-            current.cameraLook = CameraLookParsing.look(from: metadata)
+            current.cameraLook = CameraLookParsing.parse(from: metadata)
             current.focusDistance = (metadata["Olympus:FocusDistance"] as? String) ?? ""
             if let correctedDescription = metadata["IPTC:Caption-Abstract"] as? String,
                 !correctedDescription.isEmpty, correctedDescription != current.descriptionText {
@@ -1606,7 +1620,7 @@ final class SourceBrowserViewModel: ObservableObject {
             guard case .success(let metadata) = results[asset.url] else { continue }
             updateAsset(asset.id) { current in
                 current.artFilterToken = ArtFilterTokenParsing.token(from: metadata)
-                current.cameraLook = CameraLookParsing.look(from: metadata)
+                current.cameraLook = CameraLookParsing.parse(from: metadata)
                 current.focusDistance = (metadata["Olympus:FocusDistance"] as? String) ?? ""
                 if let correctedDescription = metadata["IPTC:Caption-Abstract"] as? String,
                     !correctedDescription.isEmpty, correctedDescription != current.descriptionText {

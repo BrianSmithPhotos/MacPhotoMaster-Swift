@@ -110,12 +110,12 @@ struct IPadImportService {
     /// The maker-note fields only `exiftool` can recover on the Mac — the iPad's ImageIO reader
     /// sees none of them. `artFilterToken` drives the filename/keywords/description; `focusDistance`
     /// is the raw `Olympus:FocusDistance` display string (e.g. `"16.03 m"`), later parsed into the
-    /// standard `EXIF:SubjectDistance` on write; `cameraLook` is the creative-dial settings string
-    /// written to IPTC/XMP Instructions.
+    /// standard `EXIF:SubjectDistance` on write; `cameraLook` is the creative-dial settings, which
+    /// `ProcessMoveService` renders to IPTC/XMP Instructions.
     private struct MakerNoteFields {
         var artFilterToken: String = ""
         var focusDistance: String = ""
-        var cameraLook: String = ""
+        var cameraLook: CameraLook?
     }
 
     /// One batched `exiftool` invocation for the whole tree rather than one launch per file — the
@@ -128,7 +128,7 @@ struct IPadImportService {
             return MakerNoteFields(
                 artFilterToken: ArtFilterTokenParsing.token(from: metadata),
                 focusDistance: (metadata["Olympus:FocusDistance"] as? String) ?? "",
-                cameraLook: CameraLookParsing.look(from: metadata))
+                cameraLook: CameraLookParsing.parse(from: metadata))
         }
     }
 

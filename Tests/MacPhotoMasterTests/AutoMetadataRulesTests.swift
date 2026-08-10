@@ -24,6 +24,42 @@ final class AutoMetadataRulesTests: XCTestCase {
         XCTAssertEqual(AutoMetadataRules.soocToken(for: PhotoAsset(id: URL(fileURLWithPath: "/tmp/P1010042.JPG"))), "sooc")
     }
 
+    // MARK: - cameraLookInstructions
+
+    /// The look an ORF and its sibling JPEG both parse to. Measured on H1071885 (2026-08-09): the
+    /// pair differs in `PictureMode` alone, so the ORF's readings are the JPEG's readings.
+    private func colorCreatorLook(mode: String) -> CameraLook {
+        var look = CameraLook()
+        look.mode = mode
+        look.colorCreator = CameraLook.ColorCreator(position: 0, name: "neutral", strength: -1)
+        return look
+    }
+
+    func testCameraLookInstructionsForJPEGIsTheSummary() {
+        var asset = PhotoAsset(id: URL(fileURLWithPath: "/tmp/H1071885.JPG"))
+        asset.cameraLook = colorCreatorLook(mode: "Color Creator")
+
+        XCTAssertEqual(AutoMetadataRules.cameraLookInstructions(for: asset), asset.cameraLookSummary)
+        XCTAssertFalse(asset.cameraLookSummary.isEmpty)
+    }
+
+    func testCameraLookInstructionsForRAWIsEmpty() {
+        var asset = PhotoAsset(id: URL(fileURLWithPath: "/tmp/H1071885.ORF"))
+        asset.cameraLook = colorCreatorLook(mode: "Natural")
+
+        // The readings parse, so the guard has to be the file type - not an empty look.
+        XCTAssertFalse(asset.cameraLookSummary.isEmpty)
+        XCTAssertEqual(AutoMetadataRules.cameraLookInstructions(for: asset), "")
+    }
+
+    func testCameraLookInstructionsForARawDevelopedJPEGIsEmpty() {
+        var derived = PhotoAsset(id: URL(fileURLWithPath: "/tmp/derived.jpg"))
+        derived.derivedFrom = URL(fileURLWithPath: "/tmp/H1071885.ORF")
+        derived.cameraLook = colorCreatorLook(mode: "Natural")
+
+        XCTAssertEqual(AutoMetadataRules.cameraLookInstructions(for: derived), "")
+    }
+
     // MARK: - keywordsWithAutoTokens
 
     func testKeywordsWithAutoTokensAppendsAllProvidedTokens() {

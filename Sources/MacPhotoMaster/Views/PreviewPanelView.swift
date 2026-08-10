@@ -78,6 +78,29 @@ struct PreviewPanelView: View {
                     .padding(8)
                 }
             }
+            // Anchored to the photo's own top-right corner rather than the pane's, so it stays put
+            // against the picture when the side panels are resized instead of drifting out over the
+            // letterbox margin. `fitRect` is the same letterboxing math SwiftUI applies internally,
+            // already used by the crop overlay. Sits above the zoom readout's own overlay, which
+            // keeps its bottom-trailing corner.
+            .overlay {
+                if viewModel.lookVisualiserEnabled, let asset, let previewImage {
+                    GeometryReader { geo in
+                        let fit = SubjectCropGeometry.fitRect(
+                            imageSize: CGSize(
+                                width: previewImage.width, height: previewImage.height),
+                            containerSize: geo.size)
+                        CameraLookStripView(
+                            look: asset.cameraLook,
+                            isRawFile: PhotoAssetLoader.isRaw(asset.url)
+                        )
+                        .padding(10)
+                        .frame(width: fit.width, height: fit.height, alignment: .topTrailing)
+                        .offset(x: fit.minX, y: fit.minY)
+                    }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
             .task(id: asset?.id) {
                 previewImage = nil
                 guard let asset else { return }

@@ -445,3 +445,275 @@ eighteen stops. If `ArtFilterEffect` markers are packed ranges throughout, some
 of the above is self-describing and needs no measuring. Grainy Film's `0x0500`
 and Instant Film's `0x1300` do not obviously fit, so this is a hypothesis, not
 a finding.
+
+## make-tone-ramp.py and measure-tone-curve.py
+
+The tone half of the look visualiser (docs/SPEC.md, groups 3-6): Highlight,
+Midtone and Shadow at +/-7 each, Contrast at +/-2, and Gradation. **Not yet
+measured** — this is the shot list and the tooling, written 2026-08-10 before
+the frames exist.
+
+**The camera's own structure does most of the work here.** Gradation and the
+tone curve are mutually exclusive, and not merely as a setting: Gradation belongs
+to the standard picture modes, the Highlight/Midtone/Shadow curve belongs to the
+Color and Monochrome Profile modes, and no frame can carry both. Contrast sits on
+top of either. So the composite the visualiser draws is only ever *one* tonal
+control composed with contrast — never three tone axes plus a gradation preset.
+
+That also fixes the shape of the measurement: **each mode needs its own reference
+frame.** Measuring a Color Profile frame against a Natural reference would fold
+the difference between two picture modes into what is supposed to be one
+setting's curve.
+
+```
+scripts/make-tone-ramp.py ramp.png
+scripts/measure-tone-curve.py REF.JPG FRAME.JPG [FRAME.JPG ...]
+scripts/measure-tone-curve.py --compose REF.JPG A.JPG B.JPG AB.JPG
+scripts/measure-tone-curve.py --csv curves.csv REF.JPG FRAME.JPG ...
+```
+
+Why it exists: the camera and OM Workspace both draw these settings as *two*
+curves — one for Highlight and Shadow, a second for Midtone — which shows what
+was dialled in, not what came out. The visualiser wants the single curve the
+image actually got. That can only be had by measuring, the same way the rings
+were, and Workspace is no help as a reference: it offers a -10 Shadow value the
+camera's own +/-7 range cannot express, so its rendering is its developer's, not
+the camera's.
+
+### How the measurement works, and what it cannot do
+
+`measure-tone-curve.py` recovers T(x) by matching cumulative histograms: the
+output level whose cumulative histogram in the test frame equals the reference's
+at input x. It never pairs pixels, so it does not care about framing — small
+tripod drift between frames would otherwise be folded into the curve as noise,
+worst exactly where the scene has edges.
+
+The price is an assumption: that the setting is a monotonic *global* function of
+level. That holds for the tone sliders and for High/Low Key. It does **not** hold
+for **Gradation Auto**, which is a scene-adaptive local operator — there is no
+single curve to find, and no shot list can produce one. The parser already treats
+Auto as a flag rather than a curve (`gradationIsAuto`), and the visualiser should
+say "Auto" rather than draw anything.
+
+Measurement is in the JPEG's own encoding, not linearised. The curve worth
+drawing maps stored level to stored level, because that is the one the viewer
+sees.
+
+### The target and the setup
+
+Display `ramp.png` full screen. It is a full-bleed linear grey ramp with no
+markings — histogram matching needs no registration features, so unlike the hue
+wheel this target tolerates being shot freehand and slightly crooked. What it
+does need is every level populated: the generated ramp's thinnest level holds
+0.23 percent of the frame against the script's 0.01 percent floor, so there is
+room for the camera to compress a region and keep it measurable.
+
+Night Shift and True Tone off, and display brightness fixed for the whole run —
+the same screen settings the hue wheel needed, for the same reason.
+
+**Also disable display sleep and the screen saver, and shoot in a dim room.** The
+ramp fills the frame, so the display is now the only light source in the picture,
+which makes any automatic dimming indistinguishable from a tone curve — the same
+failure that voided the first attempt, only now with a shorter fuse, because a
+sequence of 10 to 20 frames easily outruns the default sleep timer. Generate the
+ramp at the display's native resolution and matching its aspect ratio (5120x2880
+for a Studio Display) so it fills the screen without letterbox bars; black bars
+would put a spike at level 0 and clip the bottom of every frame.
+
+**Frame so the ramp fills the viewfinder** — no bezel, no wall, no desk. Anything
+else in shot is scene content whose levels are not under control, and on the first
+attempt it was the room, not the target, that carried the drift.
+
+- **Full manual exposure, fixed for every frame**, and manual WB. Any exposure
+  change is indistinguishable from a tone curve.
+- **Expose with headroom at both ends** — reference black at about level 20 and
+  white at about 235, *not* filling 2-251. The settings being measured are what
+  move tones toward the ends, so an exposure that only just fits the reference
+  guarantees the test frames clip: the first attempt (2026-08-10) filled the
+  range exactly and then crushed 12-15 percent of the frame to black on every
+  darkening setting. Clipping cannot be recovered in software — once tones are
+  flattened onto 0 or 255 the cumulative histogram has a step there and no
+  inverse. The cost of the headroom is that the extreme ends go unmeasured, which
+  is much the lesser loss. The script reports the clipped fraction at both ends of
+  the reference and warns above 0.5 percent.
+- **Autofocus once on the screen, then switch to manual focus and do not touch
+  it.** AF left on refocuses per frame, and at f/2.0 that moves the focus plane by
+  centimetres — which changes the histogram independently of any tone setting,
+  because blurring averages neighbouring pixels and averaging then curving is not
+  the same as curving then averaging. The first attempt left AF on and the focus
+  distance wandered 1.895 to 2.245 m.
+
+  Exact focus barely matters here, though *fixed* focus does: the ramp is smooth,
+  so blurring it leaves it almost unchanged, which is a real advantage of this
+  target over a scene with detail. If the display's pixel grid produces moire,
+  defocusing slightly is the cure and costs nothing. Stopping down to f/5.6-f/8
+  is still worth it for evenness across the screen.
+- **Shoot JPEG** (RAW+JPEG is fine for provenance, but measure the JPEG). These
+  settings are a rendering, and the ORF does not carry them — the same thing the
+  Colour Creator measurement above established about white balance.
+- **Picture Mode changes between groups, and only between groups.** It is what
+  decides whether the camera offers Gradation or the tone curve at all, so it
+  cannot be held fixed across the whole run — which is exactly why each group
+  carries its own reference frame. Within a group it never moves.
+- In the Color Profile groups, **set all twelve hue sliders to 0** so the only
+  thing moving is the tone control. Worth confirming the way the spoke
+  measurement did: run exiftool across the group and check nothing but the
+  intended field differs frame to frame.
+- Sharpness and Noise Filter fixed, ISO fixed and low. Sharpening works on edges
+  and a smooth ramp barely gives it any, but there is no reason to let it vary.
+
+### The shot list, about 41 frames
+
+Three references, one per picture mode used: **REF-C** (Color Profile, all tone
+levels 0, all twelve hue sliders 0, contrast 0), **REF-N** (Natural, Gradation
+Normal, contrast 0) and **REF-M** (Monochrome Profile, all neutral). Every frame
+is measured against the reference from its own mode.
+
+**Shoot each reference twice — once at the start of its group and again at the
+end — and check them against each other before trusting anything else in the
+group.** This is the control that makes the run interpretable, and the first
+attempt (2026-08-10) had no repeat reference, which is why it could not be
+salvaged. Measure one against the other:
+
+```
+scripts/measure-tone-curve.py ref-c-start.jpg ref-c-end.jpg
+```
+
+Two frames with identical settings must give the identity curve, so `max dev` is
+a direct reading, in levels, of everything that drifted while the group was shot
+— room light, display output, anything. A few levels is fine and can be treated
+as the measurement's noise floor. Tens of levels means the group is void: an
+illumination change is indistinguishable from a tone curve, because both are
+"every pixel came out at a different level than before".
+
+**Shoot group A first and measure it before shooting anything else.** It decides
+whether the remaining 30-odd frames are the right ones.
+
+**Group A — is the tone curve separable? Color Profile. (REF-C + 9 frames)**
+
+| singles | pairs |
+|---|---|
+| H +7 | H +7, S -7 |
+| M +7 | H +7, M -7 |
+| M -7 | M +7, S -7 |
+| S -7 | Contrast +2, H +7 |
+| Contrast +2 | |
+
+Run each pair through `--compose`, giving the two singles then the combined
+frame:
+
+```
+scripts/measure-tone-curve.py --compose ref-c.jpg h+7.jpg s-7.jpg h+7_s-7.jpg
+```
+
+If every pair comes back `independent`, the whole visualiser is three measured
+basis curves plus contrast, composed in series — a small, clean implementation,
+and group B's sweep is all that is left to shoot. If any pair comes back
+`INTERACTING`, that axis needs measuring on a grid instead, and the shot list
+below is the wrong one. There is no point designing the drawing before knowing
+which.
+
+The pairs are the ones most likely to interact: the two extremes (H against S),
+and each adjacent pair, whose ranges plausibly overlap. Contrast is tested here
+rather than assumed separate because it is a tone curve like the others and
+belongs in the same composite — which is why SPEC moves it from group 4 into
+group 3.
+
+**Group B — the sweep. Color Profile. (20 new frames)**
+
+Eight values per channel — -7, -5, -3, -1, +1, +3, +5, +7 — for Highlight,
+Midtone and Shadow. Four of those 24 (H +7, M +7, M -7, S -7) are already shot in
+group A. Eight rather than all fifteen because the visualiser interpolates
+between measured curves anyway, and a slider this smooth does not need every
+detent measured; 0 is REF-C.
+
+**Group C — contrast. Color Profile. (3 new frames)**
+
+-2, -1, +1. (+2 is in group A.)
+
+**Group D — gradation. Natural. (REF-N + 4 frames)**
+
+High Key, Low Key, one Auto frame for the record, and (High Key, Contrast +2).
+
+The Auto frame is not measurable, as above; it is worth having so the failure is
+documented against a real file rather than asserted. The last frame is the
+`--compose` test for contrast over gradation — the counterpart of group A's
+contrast pair, and needed because this is the only place the two can meet.
+
+**Group E — does the same setting mean the same thing in another mode? (REF-M +
+3 frames)**
+
+- Natural, Contrast +2. Compare the recovered curve against group A's Color
+  Profile Contrast +2. If they match, contrast is one mode-independent curve and
+  the app stores it once; if not, it needs measuring per mode.
+- Monochrome Profile, S -7 and H +7, against REF-M. Same question for the tone
+  curve: the Color and Mono Profile modes both offer it, and whether they render
+  it identically decides whether the app needs one table or two.
+
+Do not read `chan` on the mono frames — the output is neutral by construction, so
+it says nothing there.
+
+### Reading the output
+
+```
+frame                     16    32    64    96   128   160   192   224   240   max dev   chan       tones
+h+7.jpg                 16.2  32.1  64.0  95.8 127.1 156.3 180.2 198.4 210.1  -29.9@240   1.20       2-254
+```
+
+- The nine numbered columns are output level at that input level, and `tones` is
+  the range the reference actually constrained. Anything outside it prints `-`.
+- `max dev` is the furthest the curve strays from the identity diagonal and the
+  input level where that happens — the one-line summary of what the setting does.
+- `chan` is the widest disagreement between the recovered R, G and B curves. The
+  target is neutral by construction, so any spread came from the camera. A low
+  reading means the setting works on luminance and a single grey curve is the
+  right graphic; a reading several times higher means the channels are being
+  curved separately and it is not. Read it by comparing frames, not against zero.
+
+`--csv` writes the full 256-level curves, which is the form the app will want
+them in.
+
+### First attempt, 2026-08-10: void, and why
+
+Frames H1072011-H1072020 (OM-3, Color Profile 1, 1/20 f/2.0 ISO 100, WB 5300K)
+covered group A's ten slots. They do not answer the question, and the run is kept
+here as the record of what to control rather than as a measurement.
+
+What was right: the settings were dialled correctly on eight of ten frames, the
+exposure was fixed, `WB_RBLevels` was byte-identical `562 434 256 256` across all
+ten, and the reference covered levels 2-251 with 0.00 percent clipped at either
+end.
+
+All four composition tests returned `INTERACTING` under every model, at 9-29 rms
+levels. That reads like a finding about the camera and is not one, because the
+errors are **one-signed**: every combined frame came out brighter than any model
+predicts, with mean errors of -10.8, -10.7, -25.7 and -24.3 levels. A genuine
+interaction wanders either side of zero. A one-signed bias means something moved
+between frames — and the four biases fall into two tight clusters that track
+capture time (the pairs completed at 11:47-11:48 biased about -10.7, those at
+11:49 about -25), over a run lasting 4 minutes 22 seconds.
+
+Illumination drift is the obvious candidate and cannot be confirmed from the
+files: EXIF `LightValue` is computed from the exposure settings, so it reads a
+constant 6.3 across the run and probes nothing. **Without a repeat reference frame
+there is no way to separate a scene that got brighter from a camera that curves
+tones, because both say "every pixel came out at a different level".** That
+control is now first in the shot list above.
+
+Three further defects, listed so the reshoot fixes all of them at once:
+
+- **Autofocus was on at f/2.0**, and focus distance wandered 1.895 to 2.245 m
+  across a scene metres deep. Refocusing redistributes levels independently of
+  any tone setting.
+- **The exposure filled the range**, so the settings had nowhere to go: the four
+  darkening frames crushed 12-15 percent of the frame to black and H1072020 blew
+  5.9 percent to white. Excluding the clipped levels does not rescue the models,
+  so this is not the whole story, but it is not recoverable either.
+- **H1072013 and H1072014 carry Highlights +1**, not 0, so the two Midtone
+  singles are really (H+1, M+7) and (H+1, M-7). Two of the four composition tests
+  depended on them.
+
+The target was a room interior rather than the ramp. That is legitimate in
+principle — coverage was good — but it is what brought the focus and
+scene-stability variables in, and it is why the flat ramp is worth using.
+

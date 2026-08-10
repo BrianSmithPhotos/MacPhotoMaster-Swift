@@ -366,10 +366,44 @@ In priority order — the rest of the visualiser first.
 - **Camera-look visualiser, groups 3 to 6.** Groups 1 and 2 shipped 2026-08-10 (§1); what remains is
   everything below the hero graphic, and the **tone curve is next**. Unlike group 2 this needs
   design decisions before code: whether `ToneLevel`'s highlight/mid/shadow are one spline or three
-  independent pivots, where each pivot sits on the curve and how far along it each one reaches, and
-  how `Gradation` (Auto / Normal / High Key / Low Key) composes with them — it may be a preset of
-  the same three rather than a fourth axis. Expect that to need measuring off real frames the way
-  the three rings were, rather than being readable off the maker-note alone.
+  independent pivots, and where each pivot sits on the curve and how far along it each one reaches.
+  Expect that to need measuring off real frames the way the three rings were, rather than being
+  readable off the maker-note alone.
+
+  How `Gradation` composes with them is **not** among those questions, as of 2026-08-10: it cannot,
+  because the two never coexist. Gradation belongs to the standard picture modes and the
+  highlight/mid/shadow curve to the Color and Monochrome Profile modes, so no frame carries both,
+  while contrast sits on top of either. The composite is therefore always one tonal control composed
+  with contrast — a much smaller thing to draw than a gradation preset stacked on three tone axes.
+
+  **Decided 2026-08-10, before shooting.** Draw **one composite result curve**, not the camera's and
+  OM Workspace's two (Highlight-and-Shadow on one, Midtone on a second). That split is a grouping
+  artefact of their editing UI: it shows what was dialled in rather than what came out, which is the
+  opposite of what this overlay is for. Workspace is also not a reference for the shape — it offers
+  a -10 Shadow the camera's own ±7 range cannot express, so what it draws is its own developer's
+  rendering, not the camera's. **Contrast folds into that curve too** and therefore moves from group
+  4 to group 3, leaving sharpness and saturation as the sliders. **High Key and Low Key are drawn as
+  measured curves in their own right** — not folded in with the tone sliders, since they never
+  appear alongside them. **Auto cannot be drawn at all**: it is a scene-adaptive local operator with
+  no single curve to find, so it stays the flag the parser already makes it (`gradationIsAuto`) and
+  the view names it rather than drawing it.
+
+  **The curve is the result; the values are what you dial.** Those are two different questions and
+  the graphic should answer both. Reading an existing image, what matters is the tone response the
+  frame actually got — so the curve is the composite, with the individual settings not separately
+  visible in it. But wanting that look *again* means needing the numbers to set on the camera, which
+  the composite by construction cannot show. So the drawn curve carries its originating values
+  alongside it, revealed on hover rather than shown permanently: the settings are the secondary
+  question, and printing five numbers over a 220pt strip would crowd out the shape. Same argument as
+  the disc in §1 — draw the result, keep the reading available.
+
+  Measurement tooling and the ~41-frame shot list are written and waiting on frames — see
+  `scripts/README.md` "make-tone-ramp.py and measure-tone-curve.py". The decisive experiment is
+  first in that list: whether the pivots compose independently, which decides whether this is three
+  measured basis curves or a grid. Because each tonal control lives in its own picture mode, the
+  shot list carries a separate reference frame per mode, and it also asks whether contrast and the
+  tone curve mean the same thing across modes — which decides whether the app stores one table or
+  several.
 
   The groups below are the original plan. They held up in implementation, so they stand as written
   for the remaining work.
@@ -394,8 +428,11 @@ In priority order — the rest of the visualiser first.
      tint, or nothing at all. That exclusivity is what makes one large graphic viable rather than a
      stack of widgets. *Done*, though the profile wheel became a saturation disc rather than a ring
      — see §1 for why radius and saturation both carry the value.
-  3. **Tonal response** — `ToneLevel`, `Gradation` and `PictureModeEffect` all bend the same curve.
-  4. **Sliders** — contrast, sharpness, saturation.
+  3. **Tonal response** — `ToneLevel`, `Gradation`, `PictureModeEffect` and contrast all bend the
+     same curve, so they compose into one drawn curve rather than sitting beside each other.
+  4. **Sliders** — sharpness and saturation. Contrast started here and moved to group 3 (above): it
+     reads like a slider in the menu, but it is a tone curve, and drawing it apart from the other
+     tone controls would misrepresent the result.
   5. **Finish** — grain, vignetting, the stacked art-filter `fx` records.
   6. **Provenance** — which B&W route supplied filter/tint, and the ORF/JPEG divergence.
      Diagnostic; collapsed by default.

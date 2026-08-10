@@ -376,11 +376,21 @@ In priority order — the visualiser first.
   Two things fall out of the groups. B&W filter and tint reach group 2 by three mutually exclusive
   routes with three different numberings, and the parser must keep those strictly apart — but they
   mean the same thing to the eye, so the view should merge them: the separation is a file-format
-  concern, not a display concern. And the three rings differ only in stop count (12, 18, 30), so one
-  component parameterised by N covers all of them.
+  concern, not a display concern. And the three rings share one geometry — a hue circle with the
+  measured stop positions marked — so the ring itself is one component.
 
-  Partial Color and Colour Creator are both measured; the 12 Colour Profile spokes are not — see
-  `scripts/README.md` under `make-hue-wheel.py`.
+  What they do *not* share is arity, and `CameraLook` already shows it: `hueSliders` is twelve
+  simultaneous values, one per spoke, while `partialColor` and `colorCreator` are each a single
+  selected stop. So the ring takes one of two value renderers — a per-spoke magnitude around the
+  circle, or a marker plus its band — rather than being parameterised by stop count alone.
+
+  All three rings are now measured off real frames (2026-08-09) — see `scripts/README.md` under
+  `make-hue-wheel.py`. Two results bear directly on how to draw them. The twelve Colour Profile
+  spokes are *not* evenly spaced: gaps run 11.7 to 44.1 degrees, spaced perceptually rather than
+  geometrically, so the wheel wants the measured centres and not twelve at 30. And Partial Color has
+  a real band to draw rather than a marker: types I and III share a 62-70 degree band and differ
+  only at the shoulders (III's 90-to-10% edge is 4-14 degrees against I's 18-21), while II is that
+  same band sitting on a 16-20% floor of retained chroma across the rest of the wheel.
 
 - **Applying a camera look through Apple's RAW engine.** After the visualiser, not before.
   `RawDevelopService` renders at `CIRAWFilter`'s defaults deliberately (Apple's engine on the file

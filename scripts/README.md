@@ -169,6 +169,13 @@ WB 5300K. Registration off the hub patches, validated on the unfiltered
 H1071945 — measured hue tracks wheel angle to a median +0.9 degrees, and the
 recovered rotation is within 0.6 degrees of level on all ten frames.
 
+`measure-partial-color.py` is the measurement, kept so the table below stays
+reproducible. Reference frame first, then the filtered ones:
+
+```
+scripts/measure-partial-color.py REF.JPG FRAME.JPG [FRAME.JPG ...]
+```
+
 Measure **chroma** (`max-min`), not saturation. Saturation is `(max-min)/max`,
 which inflates wherever `max` is small, and blue is the dimmest hue the display
 renders — in S the blue residual below reads about twice its real size. Same

@@ -383,7 +383,15 @@ In priority order — the rest of the visualiser first.
   maker note still records the ignored value, so **the view must suppress contrast whenever
   `Gradation != Normal`** rather than trusting the field — drawing it would show a 20-level bend the
   photograph never received. This makes the graphic simpler, not harder: with a gradation preset set,
-  the composite *is* the gradation curve.
+  the composite *is* the gradation curve. Confirmed on all three presets, not generalised from one:
+  High Key +1.2, Low Key +1.0 and Auto -0.6 are all the identity curve, against a Normal control of
+  +20.2.
+
+  **The composite is one grey curve, not three.** `ToneLevel`'s controls were suspected of curving
+  the channels apart, because the per-channel spread ran near a third of each deviation — but that
+  was the measuring rig's own colour cast, not the camera. Reshot under a neutral white balance the
+  spread collapses (Highlight +7: 9.4-10.1 down to 3.04), and what is left is at most a tenth of the
+  deviation and inseparable from the residual cast. Nothing a 220pt strip could render.
 
   **Also answered 2026-08-11 by group E: the tone curve and contrast are mode-independent, so the
   app stores one table, not one per picture mode.** Monochrome Profile and Color Profile render

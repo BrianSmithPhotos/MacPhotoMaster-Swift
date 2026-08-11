@@ -1358,4 +1358,74 @@ needs the white balance held fixed, so use Auto to find the neutral point and lo
 None of this disturbs the tone-curve results above, which are read on luma. It is
 what would have to happen first before `chan` could be read as a camera property.
 
-Remaining: nothing. Groups A to E are measured.
+### The double-checks, 2026-08-11: both hold
+
+H1072159-2180, 11:40 to 11:48, shot to close the two gaps left after groups A to E.
+Anchors +30.4 and +30.1, in line with every other session.
+
+**Gradation overrides contrast under all three presets, not just High Key.** The rule
+in `docs/SPEC.md` had been generalised from one case; it is now measured on all of
+them, each as a direct two-frame comparison:
+
+| pair | max dev |
+|---|---|
+| High Key contrast 0 -> +2 | +1.2 @126 |
+| Low Key contrast 0 -> +2 | +1.0 @108 |
+| Gradation Auto contrast 0 -> +2 | -0.6 @101 |
+| Normal contrast 0 -> +2 (control) | +20.2 @227 |
+
+Three identities against a control that moves 20 levels. **Suppress contrast whenever
+`Gradation != Normal`.**
+
+**`chan` was mostly the white balance, and one grey curve is the right graphic.** The
+set was reshot under Auto WB, which measured neutral to R-B -1.5 against the 5300K
+rig's -23.6. Same settings, same luma results, and `chan` collapses:
+
+| setting | max dev, 5300K | max dev, neutral | chan, 5300K | chan, neutral |
+|---|---|---|---|---|
+| Highlight +7 | +30.1 to +30.6 | +30.4 @203 | 9.4 to 10.1 | **3.04** |
+| Midtone +7 | +58.8 @120 | +59.8 @115 | - | **5.14** |
+| Shadow -7 | -31.1 @44 | -29.9 @43 | - | **0.68** |
+
+So the cast was the dominant term, as suspected. What remains is at most about a tenth
+of each deviation, and it cannot be separated from the leftover 1.5-level cast on this
+data - Shadow -7 reads 0.68 on a 30-level move while Highlight +7 reads 3.04 on the
+same size of move, which is either a real difference between the controls or simply
+that the shadow control works where the ramp is dark and the cast is smallest. Either
+way the upper bound is small enough that **the camera does not curve the channels
+apart in any way a 220pt strip could show, and the composite stays a single grey
+curve.** Closing that properly would need a genuinely neutral capture, not a 1.5-level
+one; there is no reason to go there.
+
+**A side benefit: the luma results are white-balance independent.** Highlight +7,
+Midtone +7 and Shadow -7 all reproduce within 1.2 levels across a white balance change
+that moved R-B by 22 levels. That was assumed all along, since the curves are read on
+luma; it is now checked.
+
+**Auto WB held still, this time.** Its four references read R-B -1.57, -1.56, -1.53,
+-1.49 - a spread of 0.08 over 78 seconds, so it behaved as a fixed white balance for
+this run. Do not read that as a general permission: Auto re-decides per frame and this
+run was short and evenly lit. A one-touch custom WB metered off the ramp is still the
+right way to hold it for a long run. (The Midtone +7 frame reads -0.78 rather than
+-1.5, which is not a white balance change: that setting moves the luma distribution
+far enough that the fixed midband sampling window lands on a different part of the
+ramp.)
+
+### The rig, recorded 2026-08-11 before teardown
+
+Whether the anchor survives a rebuild has never been tested, so these are what a rebuild
+would have to reproduce:
+
+- **Camera** OM-3, 20mm prime, 1/8 f/5.6 ISO 500, JPEG.
+- **Focus distance** 0.695 m (from EXIF, so it is on every frame of every run).
+- **Camera height** base plate 1042 mm, putting the lens near the centre of the screen.
+- **Display** Studio Display, Default scaling, brightness slider about a third of the
+  way up, **Automatically adjust brightness off**, **True Tone off**, preset "Apple
+  Display (P3-600 nits)". Auto-brightness and True Tone are the two that voided
+  attempt 2; both are confirmed off in the screenshot taken after the last run.
+- **Target** the generated ramp shown as desktop **wallpaper**, never in a viewer.
+- **Check on rebuild:** the reference should cover roughly levels 2-228 with nothing
+  clipped at either rail, and Color Profile Highlight +7 should measure near +30 @205.
+  Both are printed by the script without extra work.
+
+Remaining: nothing. Groups A to E are measured, and both double-checks hold.

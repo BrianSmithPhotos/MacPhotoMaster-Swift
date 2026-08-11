@@ -1427,6 +1427,15 @@ would have to reproduce:
 - **Check on rebuild:** the reference should cover roughly levels 2-228 with nothing
   clipped at either rail, and Color Profile Highlight +7 should measure near +30 @205.
   Both are printed by the script without extra work.
+- **The display bezel is in the bottom of frame** - a wedge thickening to the right, 0.224%
+  of frame area, 1.64% of frame height at its worst. Checked rather than assumed, by
+  re-measuring three settings with the bottom 7% cropped away: below input 220 the curve
+  moves **0.03 to 0.14 levels**, and the whole of the effect lands on the top one or two
+  levels, which are already dropped or already inside the extension. It cancels because it is
+  in the reference frame and the test frame identically, so cumulative-histogram matching
+  sends it through the same curve as the ramp. Worth reproducing rather than fixing: the
+  bezel is dark, and a large well-populated black area is what keeps the *dark* end matchable
+  where the white end is not.
 
 Remaining: nothing. Groups A to E are measured, and both double-checks hold.
 
@@ -1473,10 +1482,22 @@ Gradation High Key (+23.8 at 213) and Low Key (-12.0 at 55) are in the same tabl
 **The ends are extended, not measured.** The reference frame covers about input 2 to 228 -
 below that it has too few pixels per level to match, above it the displayed ramp has no
 brighter tone at all. `label-tone-curves.py` joins each end to the corner, (0,0) and
-(255,255), with a straight line. The low end costs nothing (the curve is already within 1.5
-levels of the identity at input 2). The high end is a real approximation: the true curve has
-to flatten as it approaches white, and a straight line does not, so expect a small kink in
-the outer tenth of any plot.
+(255,255). The low end is a straight line and costs nothing - the curve is already within 1.5
+levels of the identity at input 2, over a span of a level or two.
+
+The high end needed more than a line, and the reason is specific to contrast. A straight run
+at (255,255) has to reverse whatever the curve was doing in a single level, which is
+invisible for a control already falling back towards the identity but not for one still near
+its peak: **Contrast +1 peaks at input 228 and +2 at 226**, against Highlight's 205, Midtone's
+120 and Shadow's 45. Contrast +2 entered the seam at slope 1.12 where the line demanded 0.27,
+and the corner was plainly visible in the app. It is now a cubic that leaves at the slope
+actually measured over the last eight levels, arrives parallel to the identity, and clamps
+both end slopes into `[0, 3 x secant]` - the Fritsch-Carlson band, which is what guarantees
+the result stays monotonic. Without the clamp the three steepest curves (Highlight +7,
+Contrast +2, High Key) dip: tangency and a parallel landing are jointly unsatisfiable over 27
+levels when the curve has 20-plus levels of deviation left to shed. The worst slope break
+above input 200 is now 0.39 levels, and peak deviations are unchanged. It is still an
+approximation, still confined to the outer tenth of the plot.
 
 **The brightest level the matcher reports is junk, and gets dropped.** It is the level where
 the reference's cumulative histogram reaches 1.0, so it does not match a populated level at

@@ -16,9 +16,10 @@ so they are dropped here. See scripts/README.md for what each run was.
 
 The measured domain is roughly input 2 to 228: below that the reference frame has too few pixels
 per level to match, and above it the displayed ramp simply has no brighter tone. Both ends are
-extended linearly to the corners (0,0) and (255,255), which is an approximation - the real curve
-must flatten near white rather than run straight at it - and it is confined to the outer tenth of
-the plot. Levels are kept as floats; the app rounds when it draws.
+extended to the corners (0,0) and (255,255) - a straight line at the dark end, where the span is a
+level or two, and a monotonic cubic at the bright end, where 27 levels of straight line put a
+visible corner in the contrast curves. Either way it is an approximation confined to the outer
+tenth of the plot. Levels are kept as floats; the app rounds when it draws.
 """
 import argparse
 import csv
@@ -99,8 +100,28 @@ def extend(levels: list[float | None]) -> list[float]:
     filled = list(levels)
     for i in range(low):
         filled[i] = levels[low] * i / low
+    # Curve into white rather than running straight at it. A straight line puts a visible corner in
+    # Contrast, the one control still near its peak deviation where the measurements stop (+1 peaks
+    # at input 228 and +2 at 226, against Highlight's 205 and Midtone's 120), so the line has to
+    # reverse a still-rising curve within a level. Everything else was already falling and barely
+    # moves either way.
+    span = 255 - high
+    secant = (255 - levels[high]) / span
+    back = measured[-9] if len(measured) > 8 else measured[0]
+    # Leave at the slope actually measured, arrive parallel to the identity, and clamp both into
+    # [0, 3*secant] - the Fritsch-Carlson band, which is what keeps the cubic monotonic. Tangency
+    # and a parallel landing over 27 levels are jointly impossible for the steepest curves, and
+    # unclamped they put a dip in Highlight +7, Contrast +2 and High Key.
+    leaving = min(max((levels[high] - levels[back]) / (high - back), 0), 3 * secant)
+    arriving = min(1.0, 3 * secant)
     for i in range(high + 1, 256):
-        filled[i] = levels[high] + (255 - levels[high]) * (i - high) / (255 - high)
+        t = (i - high) / span
+        filled[i] = (
+            (2 * t**3 - 3 * t**2 + 1) * levels[high]
+            + (t**3 - 2 * t**2 + t) * leaving * span
+            + (-2 * t**3 + 3 * t**2) * 255
+            + (t**3 - t**2) * arriving * span
+        )
     # Interior gaps are single levels the matcher could not populate; bridge them the same way.
     for a, b in zip(measured, measured[1:]):
         for i in range(a + 1, b):

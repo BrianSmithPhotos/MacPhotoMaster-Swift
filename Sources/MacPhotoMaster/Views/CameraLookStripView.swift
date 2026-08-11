@@ -160,17 +160,21 @@ struct CameraLookStripView: View {
     }
 
     /// What to set on the camera to get this curve again, in the camera's own menu order.
+    ///
+    /// Every control that feeds the curve is listed, including the ones sitting at zero. Showing only
+    /// what moved would make this a description of the curve, and it is meant to be a dial-in list:
+    /// reproducing a look means knowing the settings that have to be *left* alone as much as the ones
+    /// that have to be changed. A control absent from the maker note is a control this Picture Mode
+    /// does not have, and stays absent here.
     private func curveValues(_ look: CameraLook) -> [(String, String)] {
         var values: [(String, String)] = []
         for code in ["HL", "Mid", "SH"] {
-            if let level = look.toneLevels.first(where: { $0.code == code && $0.value != 0 }) {
+            if let level = look.toneLevels.first(where: { $0.code == code }) {
                 values.append((toneName(code), signed(level.value)))
             }
         }
         if let gradation = look.gradation { values.append(("Gradation", gradation)) }
-        if !CameraLookToneComposite.contrastIsSuppressed(look), let contrast = look.contrast,
-            contrast != 0
-        {
+        if !CameraLookToneComposite.contrastIsSuppressed(look), let contrast = look.contrast {
             values.append(("Contrast", signed(contrast)))
         }
         return values
@@ -284,7 +288,11 @@ private struct CameraLookCurveView: View {
         }
         .font(.caption2)
         .padding(6)
-        .background(RoundedRectangle(cornerRadius: 5).fill(.regularMaterial))
+        // Translucent so the curve stays readable underneath — the values answer "what do I dial",
+        // and losing sight of the shape they produced while reading them defeats the point. Material
+        // plus `.opacity` rather than material alone, for the same reason as the strip's own
+        // background: on macOS 27 beta vibrancy does not composite against in-window content.
+        .background(RoundedRectangle(cornerRadius: 5).fill(.thinMaterial).opacity(0.78))
         .padding(8)
     }
 }

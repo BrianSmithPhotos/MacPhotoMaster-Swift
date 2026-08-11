@@ -30,12 +30,27 @@ struct CameraLookStripView: View {
             if isRawFile {
                 rawState
             } else if let look {
-                Text(look.mode)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                let rendering = CameraLookRendering.rendering(for: look)
 
-                CameraLookRingView(rendering: CameraLookRendering.rendering(for: look))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(look.mode)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    // Under the mode name rather than across the middle of the wheel. It qualifies
+                    // *which* Partial Color this is — II keeps a floor everywhere, I and III do not
+                    // — so it belongs with the name, and centred in the circle it fought the ring
+                    // it was sitting inside.
+                    if let note = renderingNote(rendering) {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                CameraLookRingView(rendering: rendering)
                     .frame(height: 150)
                     .frame(maxWidth: .infinity)
 
@@ -57,6 +72,14 @@ struct CameraLookStripView: View {
                 .opacity(0.72)
         }
         .accessibilityIdentifier("cameraLookStrip")
+    }
+
+    /// A line qualifying the hero graphic, or nil where it would say nothing. Only Partial Color II
+    /// has one: it keeps a measured 16-20% of chroma everywhere outside the band, where I and III
+    /// collapse the rest of the wheel to grey (scripts/README.md "Partial Color I/II/III").
+    private func renderingNote(_ rendering: CameraLookRendering) -> String? {
+        guard case .partialColor(_, _, let band) = rendering, band.floor > 0 else { return nil }
+        return "Keeps \(Int((band.floor * 100).rounded()))% elsewhere"
     }
 
     private var rawState: some View {
@@ -589,13 +612,6 @@ private struct CameraLookRingView: View {
         path.move(to: point(hue: band.center, radius: outer - ringWidth - 4, from: center))
         path.addLine(to: point(hue: band.center, radius: outer + 3, from: center))
         context.stroke(path, with: .color(.primary), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-
-        if band.floor > 0 {
-            context.draw(
-                Text("keeps \(Int((band.floor * 100).rounded()))% elsewhere")
-                    .font(.system(size: 8)),
-                at: CGPoint(x: center.x, y: center.y))
-        }
     }
 
     // MARK: - Not a hue wheel

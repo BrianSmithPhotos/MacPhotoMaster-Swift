@@ -361,50 +361,70 @@ private struct CameraLookRingView: View {
                 drawProfileArea(context, center: center, outer: outer, readings: readings, area: area)
 
             case .colorCreator(let creator):
-                drawWheel(context, center: center, outer: outer, chroma: { _ in 0.35 })
+                drawRing(context, center: center, outer: outer, color: { hue(at: $0, chroma: 0.35) })
                 drawColorCreator(context, center: center, outer: outer, creator: creator)
 
             case .partialColor(_, _, let band):
-                drawWheel(
+                drawRing(
                     context, center: center, outer: outer,
-                    chroma: { CameraLookGeometry.retainedChroma(band, at: $0) })
+                    color: { hue(at: $0, chroma: CameraLookGeometry.retainedChroma(band, at: $0)) })
                 drawBandMarker(context, center: center, outer: outer, band: band)
+
+            // A B&W mode with nothing named has nothing to letter over a disc, and a filled disc for
+            // it sat oddly beside the rings every other mode gets. Same annulus, lightness swept
+            // round it instead of hue. The disc comes back the moment there is a filter or a tint to
+            // show, because then it is carrying a wash and some words rather than only saying "grey".
+            case .monochrome(let mono) where mono.isEmpty:
+                drawRing(context, center: center, outer: outer, color: grey(at:))
 
             case .monochrome(let mono):
                 drawMonochrome(context, center: center, outer: outer, mono: mono)
 
             case .none:
-                drawWheel(context, center: center, outer: outer, chroma: { _ in 0.15 })
+                drawRing(context, center: center, outer: outer, color: { hue(at: $0, chroma: 0.15) })
             }
         }
         .accessibilityHidden(true)
     }
 
-    // MARK: - The shared wheel
+    // MARK: - The shared ring
 
     private var ringWidth: CGFloat { 22 }
 
-    /// The background annulus, drawn as short arcs so each can carry its own chroma — which is what
-    /// lets Partial Color show the rest of the wheel collapsing while the kept band stays saturated.
-    private func drawWheel(
+    /// The background annulus, drawn as short arcs so each can carry its own colour — which is what
+    /// lets Partial Color show the rest of the wheel collapsing while the kept band stays saturated,
+    /// and what lets monochrome sweep lightness round the same shape instead of hue.
+    private func drawRing(
         _ context: GraphicsContext, center: CGPoint, outer: CGFloat,
-        chroma: (Double) -> Double
+        color: (Double) -> Color
     ) {
         let step = 2.0
-        var hue = 0.0
-        while hue < 360 {
+        var angle = 0.0
+        while angle < 360 {
             var path = Path()
             path.addArc(
                 center: center, radius: outer - ringWidth / 2,
-                startAngle: .degrees(-(hue + step)), endAngle: .degrees(-hue),
+                startAngle: .degrees(-(angle + step)), endAngle: .degrees(-angle),
                 clockwise: false)
-            context.stroke(
-                path,
-                with: .color(
-                    Color(hue: hue / 360, saturation: chroma(hue), brightness: 0.95)),
-                lineWidth: ringWidth)
-            hue += step
+            context.stroke(path, with: .color(color(angle)), lineWidth: ringWidth)
+            angle += step
         }
+    }
+
+    /// The hue at an angle, at the given chroma. Brightness is fixed: the wheel's job is to place
+    /// hue and saturation, and letting lightness vary too would make two readings out of one arc.
+    private func hue(at angle: Double, chroma: Double) -> Color {
+        Color(hue: angle / 360, saturation: chroma, brightness: 0.95)
+    }
+
+    /// Lightness swept round the ring, white at twelve o'clock and dark at six.
+    ///
+    /// A cosine rather than a linear ramp, because a linear black-to-white sweep meets itself at the
+    /// start angle and leaves a hard seam — the one edge in the graphic that would mean nothing. This
+    /// closes on itself. Held inside 0.05-0.95 to match the colour ring's own brightness, so the two
+    /// sit at the same weight beside each other rather than the greyscale one shouting.
+    private func grey(at angle: Double) -> Color {
+        Color(white: 0.05 + 0.90 * (1 + cos((angle - 90) * .pi / 180)) / 2)
     }
 
     // MARK: - Twelve simultaneous magnitudes

@@ -83,8 +83,18 @@ def label(settings: dict[str, str]) -> str | None:
 
 
 def extend(levels: list[float | None]) -> list[float]:
-    """Fills the unmeasured ends by drawing a straight line to each corner."""
+    """Drops the unreliable top level, then fills the unmeasured ends with a line to each corner.
+
+    The brightest level the matcher reports is where the reference's cumulative histogram reaches
+    1.0, so it matches the *brightest pixel in the test frame* rather than a populated level -
+    the displayed ramp's white end is a thin sliver and a single hot pixel moves it. It shows up
+    as a step of up to +9.9 levels where the neighbouring steps are +1.0. Dropping exactly one
+    level fixes every column; the dark end does not have the mirror problem, because black is a
+    large area of the frame and stays well populated.
+    """
     measured = [i for i, value in enumerate(levels) if value is not None]
+    levels = list(levels)
+    levels[measured.pop()] = None
     low, high = measured[0], measured[-1]
     filled = list(levels)
     for i in range(low):

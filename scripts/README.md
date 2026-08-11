@@ -1477,3 +1477,14 @@ brighter tone at all. `label-tone-curves.py` joins each end to the corner, (0,0)
 levels of the identity at input 2). The high end is a real approximation: the true curve has
 to flatten as it approaches white, and a straight line does not, so expect a small kink in
 the outer tenth of any plot.
+
+**The brightest level the matcher reports is junk, and gets dropped.** It is the level where
+the reference's cumulative histogram reaches 1.0, so it does not match a populated level at
+all - it matches the brightest *pixel* in the test frame, which the ramp's thin white sliver
+and a single hot pixel are enough to move. The tell is a step of up to +9.9 levels sitting
+between neighbours stepping +1.0 (Midtone +5, input 228 to 229). It is one-sided: the dark
+end is clean, because black is a large area of the frame and stays well populated. Dropping
+exactly one level per column fixes every case, and it is worth knowing how much it was
+costing - resampling the table to 17 knots reproduces it to **1.8 levels** with the drop and
+**8.2** without, so the bad sample was the dominant error in everything downstream while
+being invisible in the peak-deviation numbers the runs were read on.

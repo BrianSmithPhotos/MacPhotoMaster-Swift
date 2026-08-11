@@ -12,9 +12,15 @@ ten-thousandth of the frame. A step wedge leaves the levels between its patches 
 real scene leaves them lumpy - both show up as unmeasured gaps in the middle of the curve. A
 ramp populates all 256 levels evenly by construction.
 
-Neutral by construction too (R=G=B at every column), which is what makes the measurement's
-per-channel spread reading meaningful: any difference between the recovered R, G and B curves
-came from the camera, because there was none in the target.
+Neutral by construction too (R=G=B at every column) - but that is a property of this file, not
+of the frame that comes back, and it does not by itself make the measurement's per-channel
+spread reading meaningful. Measured 2026-08-11, the captured reference is cool by R-B -15
+overall and -21 through the midband, from the display and the camera's fixed white balance
+together. The channels then sample different parts of the ramp, so one shared luminance curve
+read back per channel shows a spread proportional to the effect size, indistinguishable from
+the camera genuinely curving the channels apart. Reading `chan` as a camera property needs a
+custom white balance set off the displayed ramp first. See scripts/README.md "Groups B and C
+measured".
 
 The ramp runs left to right with no border, markings or registration features, because
 histogram matching does not care where anything sits in the frame - only what levels are

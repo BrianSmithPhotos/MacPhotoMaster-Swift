@@ -824,10 +824,16 @@ exposures — still long, so splitting again by channel is fine) and **B2 = Shad
 plus group C** (7 and 3 new frames, 21 exposures). Every run opens with the
 anchor and carries its own opening and closing REF-C.
 
+*Shot 2026-08-11 as one sitting rather than two — anchor, B1, anchor, B2, anchor,
+11.3 minutes — and the references held to 1.5 levels anyway. See "Groups B and C
+measured". The split advice stays: that run got a good morning, and no run can
+promise the next one.*
+
 **Group C — contrast. Color Profile. (3 new frames)**
 
 -2, -1, +1. (+2 is in group A.) Small enough to ride along at the end of a group
-B run rather than needing a sitting of its own — same mode, same reference.
+B run rather than needing a sitting of its own — same mode, same reference. *Shot
+2026-08-11 at the end of B2, exactly so.*
 
 **Group D — gradation and contrast. Natural. (REF-N + 5 frames, 11 exposures)**
 
@@ -1161,3 +1167,90 @@ cheapest next probe is four frames: the same pairs at intermediate strengths (H+
 S-4 alongside the measured H+7 & S-7), which shows whether the residual scales with
 the applied displacement and so whether it is modellable at all. Nothing else here
 needs redoing first - the run above is sound and its frames are the baseline.
+
+### Groups B and C measured, 2026-08-11: the sweep
+
+H1072074-2131, 10:46:32 to 10:57:50, 1/8 f/5.6 ISO 500. Shot as one sitting in the
+planned shape - anchor, B1, anchor, B2, anchor - so all three anchors and both runs
+share one continuous reference chain.
+
+**Reference stability worst 1.5 levels and two-signed over 11.3 minutes**, across 28
+references. That is better than group A managed in half the time, and it means the
+six-minute run limit above is conservative rather than necessary; leave it in place,
+because what it buys is insurance against a morning that turns out worse, and this
+run cannot tell you the next one will be this good.
+
+Three frames need naming before the numbers:
+
+- **H1072073 is a false start** - another window in shot. Mean level 73.7 against
+  137 for every other frame in the run and a column profile 138 levels off the
+  median, so it is not a marginal call. Excluded.
+- **H1072076, H1072106 and H1072109** are the redundant half of a doubled reference
+  where an anchor meets the run it opens. Harmless, but `--paired` requires strict
+  alternation, so one of each pair is dropped and the other still brackets its
+  neighbour within about 20 seconds.
+- **H1072092 is an unplanned Highlight +7**, shot to complete the sweep rather than
+  leaning on group A's. It is the most useful extra frame in the run: see below.
+
+    scripts/measure-tone-curve.py --paired H1072074.JPG ... H1072131.JPG
+
+| dial | Highlight | Midtone | Shadow | Contrast |
+|---|---|---|---|---|
+| -7 | -29.9 @201 | -59.4 @121 * | -31.1 @44 * | |
+| -5 | -22.0 @201 | -41.7 @122 | -21.6 @43 | |
+| -3 | -13.0 @207 | -27.4 @113 | -12.8 @44 | |
+| -2 | | | | -9.7 @194 |
+| -1 | -4.8 @208 | -9.2 @122 | -4.7 @44 | -4.6 @189 |
+| +1 | +4.8 @204 | +8.2 @117 | +3.9 @49 | +12.8 @228 |
+| +2 | | | | +19.8 @228 * |
+| +3 | +12.9 @204 | +24.7 @126 | +12.2 @48 | |
+| +5 | +20.8 @205 | +41.8 @117 | +20.9 @46 | |
+| +7 | +29.8 @205 | +58.8 @120 * | +29.3 @45 | |
+
+`*` from group A. Every column is monotonic in the dial and every tone-level pair is
+symmetric about zero to within about a level - Midtone -5/+5 reads -41.7 against
++41.8. That symmetry and monotonicity is a free internal check worth as much as the
+reference stability: a drift large enough to matter would have broken one or the
+other, and neither broke.
+
+**Contrast is not symmetric, and the tone levels are.** Contrast +1 moves +12.8 while
+-1 moves only -4.6, and +2/-2 are +19.8 against -9.7 - positive contrast travels
+about twice as far as negative, and the two peak in different places (around 228
+going up, around 190 coming down). So contrast cannot be interpolated as an odd
+function through zero the way the tone levels can; the app needs the measured value
+on each side.
+
+**The anchor works.** Highlight +7 was measured four times across this run and once
+in group A:
+
+| frame | time | max dev |
+|---|---|---|
+| H1072075 (anchor) | 10:46:48 | +31.3 @204 |
+| H1072092 (in sweep) | 10:50:26 | +29.8 @205 |
+| H1072107 (anchor) | 10:53:18 | +30.4 @204 |
+| H1072130 (anchor) | 10:57:39 | +29.1 @205 |
+| group A | 07:38 | +29.5 @205 |
+
+Range 2.2 levels, no trend in time, and the run's mean of +30.2 sits 0.7 from group
+A. **So the anchor's own repeatability is about 2 levels, not the 1.5 of the
+reference chain**, and that is the real figure for cross-run work: a cross-mode
+difference in group E has to clear about 2 levels before it means anything. That
+number could not have been had without the unplanned fourth Highlight +7, which is
+why it was worth shooting - one repeat inside a run separates the anchor's own
+repeatability from run-to-run difference, and three anchors alone cannot.
+
+**`chan` is not interpretable on this rig, and the ramp's docstring overstated it.**
+The generated PNG is neutral by construction, but the captured reference is not: the
+display and the camera's fixed white balance leave it cool by R-B -15 overall and
+-21 through the midband, stable to a level across the run. Each channel therefore
+samples a different part of the ramp, so one shared luminance curve read back per
+channel yields a spread proportional to the effect - which is exactly the observed
+pattern, `chan` running near 30 percent of `max dev` on every frame regardless of
+setting. Nothing here says whether the camera curves channels separately. **It does
+not touch any result above**, because those are all read on luma. To answer the
+question properly the rig needs a custom white balance set off the displayed ramp so
+the capture is neutral, verified with one frame; until then treat `chan` as unread.
+Left for whenever a per-channel question actually arises - the visualiser draws one
+grey curve, so it does not arise yet.
+
+Remaining: group D (Natural, 11 exposures) and group E (Monochrome Profile, 5).

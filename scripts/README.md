@@ -503,7 +503,9 @@ sees.
 
 Display `ramp.png` full screen. It is a full-bleed linear grey ramp with no
 markings — histogram matching needs no registration features, so unlike the hue
-wheel this target tolerates being shot freehand and slightly crooked. What it
+wheel this target tolerates being shot slightly crooked, and blurred. It does not
+tolerate being shot freehand, because a pan between frames slides the frame along
+the ramp; see the tripod note below. What it
 does need is every level populated: the generated ramp's thinnest level holds
 0.23 percent of the frame against the script's 0.01 percent floor, so there is
 room for the camera to compress a region and keep it measurable.
@@ -542,12 +544,40 @@ ramp at the display's native resolution and matching its aspect ratio (5120x2880
 for a Studio Display) so it fills the screen without letterbox bars; black bars
 would put a spike at level 0 and clip the bottom of every frame.
 
+**Show the ramp as the desktop wallpaper, not in an image viewer.** A viewer in
+full screen still draws its own chrome over the picture, and chrome is a flat
+plateau of near-white pixels that the ramp itself never produces. Measured on
+macOS 27 beta with Preview full-screen: a 97-pixel band across the top of the
+panel, 3.8 percent of its height, captured at 240 to 245. The ramp alone reaches
+level 239, so *every* level above that in such a frame comes from chrome rather
+than from the target — and a flat plateau is a step in the cumulative histogram,
+which is exactly the shape that carries no information about where the curve
+goes. Highlight +7 is the setting that works up there.
+
+The band is survivable while it is identical in every frame, because it is part
+of the scene and the camera curves it like everything else. The danger is that it
+is not: chrome auto-hides, toolbars appear, the pointer wanders into shot. A band
+present in one frame and absent from its reference is worth up to **+10.2 levels**
+at level 232 and **+7.1** at 128 — two to three times the independence threshold,
+one-signed, and indistinguishable from the room having drifted. Wallpaper has no
+chrome by construction, and the file maps one image pixel to one display pixel.
+Hide the desktop icons and any desktop widgets, set the Dock and the menu bar to
+auto-hide, and keep the pointer parked off the panel or in a corner.
+
 **Frame so the ramp fills the viewfinder** — no bezel, no wall, no desk. Anything
 else in shot is scene content whose levels are not under control, and on the first
 attempt it was the room, not the target, that carried the drift. Setting the
 camera's aspect ratio to 16:9 rather than its native 4:3 is the tidy way to lose
 the bezels above and below a widescreen display: it is a sensor crop, so it
 changes what is in frame without touching how tones are rendered.
+
+Shoot one deliberately *wrong* frame first, though — pulled back far enough to
+show the bezel on all four sides. Filling the viewfinder hides the panel edges,
+which is exactly where chrome lives, so a correctly framed check frame cannot
+tell you the screen is clean. The pulled-back frame can: the panel's own edges
+give the scale, anything bright sitting against them is chrome, and the whole
+diagnosis costs one shot. This is how the Preview band above was found, after
+four correctly framed check frames had shown nothing wrong.
 
 Focus last, after everything else is in position, and remember that manual focus
 does not follow the camera or the screen when either is moved — autofocus once on

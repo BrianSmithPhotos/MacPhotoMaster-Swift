@@ -1278,6 +1278,23 @@ anchor repeatability of about 2, which is as clean an answer as this rig can giv
 because it confirms the measurement path does what it claims where the answer is
 known in advance.
 
+A free cross-check on that, from references already in the run - the three modes'
+*base* renderings, each mode's neutral reference measured against Color Profile's:
+
+| pair | max dev |
+|---|---|
+| REF-C -> REF-N (Natural) | -2.0 @121 |
+| REF-C -> REF-M (Monochrome Profile) | -3.2 @128 |
+| REF-C -> REF-C (control, 2.5 minutes apart) | +0.8 @228 |
+
+So the picture modes are not quite identical at zero either: Natural sits 2 levels and
+Mono 3 levels below Color Profile through the midtones, against a control of 0.8. Too
+small to matter for a 220pt strip, and it does not touch the mode-independence result
+above - every setting is measured against its own mode's reference, so a base offset
+cancels - but it is the bound worth quoting if the identity baseline is ever asked to
+mean something precise. `chan` reads 20.94 on the mono comparison, which is meaningless
+for the reason given below: mono output is neutral and the colour reference is not.
+
 **Gradation overrides Picture Mode contrast entirely.** This is the surprise, and it
 contradicts what `docs/SPEC.md` assumed before shooting:
 

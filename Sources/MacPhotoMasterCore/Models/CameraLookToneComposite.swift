@@ -19,9 +19,12 @@ import Foundation
 ///   level), and one grey curve serves all three channels (per-channel spread collapses to 3.04
 ///   once the rig's white balance is neutral).
 ///
-/// **Not measured, and assumed here:** how a Gradation preset combines with the tone dials. It is
-/// applied as its own serial stage after them, which reuses the shape of the measured stages rather
-/// than inventing a new one, but the rig came down before the pair could be shot.
+/// How a Gradation preset combines with the tone dials was never measured, and does not need to be:
+/// the two live in different Picture Modes — Gradation in the standard ones, the tone dials in the
+/// Colour and Monochrome Profiles — so no frame carries both. Checked, not assumed: across the 154
+/// distinct maker-note signatures in `CameraLookFixture.json`, 29 move a tone dial and 3 set a
+/// non-Normal Gradation, and none do both. The code composes them serially anyway rather than
+/// carrying a special case for a combination it would then have to decide how to reject.
 public enum CameraLookToneComposite {
     /// The rendered curve, as an output level for each input level 0...255, or nil when there is
     /// nothing honest to draw.

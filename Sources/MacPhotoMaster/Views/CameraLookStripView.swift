@@ -84,24 +84,36 @@ struct CameraLookStripView: View {
         }
     }
 
-    /// Groups 3-5. Held as plain rows for now; the tone curve is the next thing to become a graphic.
+    /// Groups 3-5. Group 3 is a graphic where there is a curve to draw and rows where there is not.
     @ViewBuilder
     private func readings(for look: CameraLook) -> some View {
-        let tonal = tonalRows(look)
-        let sliders = sliderRows(look)
+        let curve = CameraLookToneComposite.curve(for: look)
+        let tonal = tonalRows(look, hasCurve: curve != nil)
+        let sliders = sliderRows(look, hasCurve: curve != nil)
         let finish = finishRows(look)
 
-        if !tonal.isEmpty { group("Tone", tonal) }
+        if let curve {
+            group("Tone", tonal) {
+                CameraLookCurveView(curve: curve, values: curveValues(look))
+            }
+        } else if !tonal.isEmpty {
+            group("Tone", tonal)
+        }
         if !sliders.isEmpty { group("Sliders", sliders) }
         if !finish.isEmpty { group("Finish", finish) }
     }
 
-    private func group(_ title: String, _ rows: [(String, String)]) -> some View {
+    private func group<Content: View>(
+        _ title: String,
+        _ rows: [(String, String)],
+        @ViewBuilder content: () -> Content = { EmptyView() }
+    ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Divider()
             Text(title)
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
+            content()
             ForEach(rows, id: \.0) { row in
                 HStack {
                     Text(row.0)
@@ -115,21 +127,53 @@ struct CameraLookStripView: View {
         }
     }
 
-    private func tonalRows(_ look: CameraLook) -> [(String, String)] {
+    /// The tonal readings the curve cannot carry. With a curve drawn that is only what it does not
+    /// express — the dialled values move onto the curve itself, revealed on hover (docs/SPEC.md
+    /// group 3: "the curve is the result; the values are what you dial").
+    private func tonalRows(_ look: CameraLook, hasCurve: Bool) -> [(String, String)] {
         var rows: [(String, String)] = []
-        for level in look.toneLevels { rows.append((toneName(level.code), signed(level.value))) }
-        if let gradation = look.gradation { rows.append(("Gradation", gradation)) }
+        if !hasCurve {
+            for level in look.toneLevels { rows.append((toneName(level.code), signed(level.value))) }
+            if let gradation = look.gradation { rows.append(("Gradation", gradation)) }
+        }
         if look.gradationIsAuto { rows.append(("Gradation", "auto-override")) }
         if let effect = look.pictureModeEffect { rows.append(("Effect", effect)) }
         return rows
     }
 
-    private func sliderRows(_ look: CameraLook) -> [(String, String)] {
+    /// Contrast is missing here whenever the curve carries it: it was measured as a stage of the
+    /// tone rendering, not a slider alongside it, so it moved into group 3 (docs/SPEC.md). It comes
+    /// back only when the camera ignored it, where the point is that the number in the file is not
+    /// what the photograph got.
+    private func sliderRows(_ look: CameraLook, hasCurve: Bool) -> [(String, String)] {
         var rows: [(String, String)] = []
-        if let contrast = look.contrast { rows.append(("Contrast", signed(contrast))) }
+        if let contrast = look.contrast {
+            if CameraLookToneComposite.contrastIsSuppressed(look) {
+                rows.append(("Contrast", "\(signed(contrast)) unused"))
+            } else if !hasCurve {
+                rows.append(("Contrast", signed(contrast)))
+            }
+        }
         if let sharpness = look.sharpness { rows.append(("Sharpness", signed(sharpness))) }
         if let saturation = look.saturation { rows.append(("Saturation", signed(saturation))) }
         return rows
+    }
+
+    /// What to set on the camera to get this curve again, in the camera's own menu order.
+    private func curveValues(_ look: CameraLook) -> [(String, String)] {
+        var values: [(String, String)] = []
+        for code in ["HL", "Mid", "SH"] {
+            if let level = look.toneLevels.first(where: { $0.code == code && $0.value != 0 }) {
+                values.append((toneName(code), signed(level.value)))
+            }
+        }
+        if let gradation = look.gradation { values.append(("Gradation", gradation)) }
+        if !CameraLookToneComposite.contrastIsSuppressed(look), let contrast = look.contrast,
+            contrast != 0
+        {
+            values.append(("Contrast", signed(contrast)))
+        }
+        return values
     }
 
     private func finishRows(_ look: CameraLook) -> [(String, String)] {
@@ -150,6 +194,99 @@ struct CameraLookStripView: View {
     }
 
     private func signed(_ value: Int) -> String { value > 0 ? "+\(value)" : "\(value)" }
+}
+
+/// Group 3: the tone response the frame was actually rendered with, drawn as one curve.
+///
+/// One composite curve rather than the camera's own two-control split, because that split shows what
+/// was dialled in and this overlay is for what came out (docs/SPEC.md group 3). The dialled values
+/// are the other half of the question — wanting this look again means needing the numbers — so they
+/// ride along on hover rather than being printed permanently over a 196pt square.
+///
+/// Every level plotted is measured; `CameraLookToneComposite` has the provenance and the composition
+/// rules. The curve is drawn against the identity diagonal, which is what makes a bend legible at
+/// this size: without it a 30-level lift near white is just a slightly bent line.
+private struct CameraLookCurveView: View {
+    let curve: [Double]
+    let values: [(String, String)]
+
+    @State private var showsValues = false
+
+    var body: some View {
+        Canvas { context, size in
+            draw(in: &context, size: size)
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .overlay { if showsValues && !values.isEmpty { valueList } }
+        .contentShape(Rectangle())
+        .onHover { showsValues = $0 }
+        // Hover does not exist on iPad, so one tap is the same reveal. A single recognizer over the
+        // whole square, because stacked ones here would fight each other for the same hit area.
+        .onTapGesture { showsValues.toggle() }
+        .accessibilityIdentifier("cameraLookCurve")
+    }
+
+    private func draw(in context: inout GraphicsContext, size: CGSize) {
+        let plot = CGRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5)
+
+        context.stroke(
+            Path(roundedRect: plot, cornerRadius: 3), with: .color(.secondary.opacity(0.35)),
+            lineWidth: 1)
+
+        for fraction in [0.25, 0.5, 0.75] {
+            var line = Path()
+            line.move(to: CGPoint(x: plot.minX + plot.width * fraction, y: plot.minY))
+            line.addLine(to: CGPoint(x: plot.minX + plot.width * fraction, y: plot.maxY))
+            line.move(to: CGPoint(x: plot.minX, y: plot.minY + plot.height * fraction))
+            line.addLine(to: CGPoint(x: plot.maxX, y: plot.minY + plot.height * fraction))
+            context.stroke(line, with: .color(.secondary.opacity(0.15)), lineWidth: 0.5)
+        }
+
+        var identity = Path()
+        identity.move(to: CGPoint(x: plot.minX, y: plot.maxY))
+        identity.addLine(to: CGPoint(x: plot.maxX, y: plot.minY))
+        context.stroke(
+            identity, with: .color(.secondary.opacity(0.5)),
+            style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+
+        // Shading the gap to the diagonal is what shows the *direction* of the bend at a glance —
+        // a lift and a drop of the same size are otherwise near-identical shapes at this scale.
+        var area = Path()
+        area.move(to: CGPoint(x: plot.minX, y: plot.maxY))
+        for input in 0...255 { area.addLine(to: point(input, plot)) }
+        area.addLine(to: CGPoint(x: plot.maxX, y: plot.minY))
+        area.closeSubpath()
+        context.fill(area, with: .color(.accentColor.opacity(0.18)))
+
+        var line = Path()
+        line.move(to: point(0, plot))
+        for input in 1...255 { line.addLine(to: point(input, plot)) }
+        context.stroke(line, with: .color(.accentColor), lineWidth: 1.8)
+    }
+
+    /// Level space is 0-255 on both axes, with output growing upwards.
+    private func point(_ input: Int, _ plot: CGRect) -> CGPoint {
+        CGPoint(
+            x: plot.minX + plot.width * CGFloat(input) / 255,
+            y: plot.maxY - plot.height * CGFloat(curve[input]) / 255)
+    }
+
+    private var valueList: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(values, id: \.0) { value in
+                HStack(spacing: 6) {
+                    Text(value.0).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Text(value.1).monospacedDigit()
+                }
+            }
+        }
+        .font(.caption2)
+        .padding(6)
+        .background(RoundedRectangle(cornerRadius: 5).fill(.regularMaterial))
+        .padding(8)
+    }
 }
 
 /// The hero graphic: one hue circle, with the measured stop positions marked.

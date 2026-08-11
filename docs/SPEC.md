@@ -448,8 +448,27 @@ In priority order — the rest of the visualiser first.
   they agree at +4.60, +4.58 and +4.60, and the two pairs involving Midtone track each other within
   0.6 of a level, with the Midtone-free pair the odd one out.
 
-  The groups below are the original plan. They held up in implementation, so they stand as written
-  for the remaining work.
+  **Group 3 shipped 2026-08-11.** The 30 measured curves are committed as `scripts/curves/` and
+  generated into `CameraLookToneCurves`; `CameraLookToneComposite` applies the composition rules and
+  `CameraLookCurveView` draws the result against the identity diagonal, values on hover. Two things
+  fell out of building it that the measurement had not:
+
+  - **The brightest level every run reported was junk** — it is where the reference's cumulative
+    histogram reaches 1.0, so it matches the brightest *pixel* rather than a populated level.
+    Invisible in the peak-deviation numbers each run was read on, and yet it was the dominant error
+    in everything downstream: resampling the table costs 1.8 levels with it dropped and 8.2 with it
+    kept. See `scripts/README.md` "The brightest level the matcher reports is junk".
+  - **The "no frame carries both Gradation and the tone dials" claim above now has evidence**, where
+    before it was an argument from which control lives in which Picture Mode. Across the 154 distinct
+    maker-note signatures in `CameraLookFixture.json`, 29 move a tone dial and 3 set a non-Normal
+    Gradation, and none do both.
+
+  Contrast moved into group 3 as decided, so it is no longer a slider row — except when the camera
+  ignored it, where it is shown as "unused", because the point there is that the number in the file
+  is not what the photograph got.
+
+  Groups 4 to 6 remain. The groups below are the original plan; they held up in implementation, so
+  they stand as written for the remaining work.
 
   `Tests/MacPhotoMasterTests/Fixtures/CameraLookFixture.json` holds
   154 frames shot 2026-08-07 to 2026-08-09, one per distinct maker-note signature, giving 146

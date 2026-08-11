@@ -77,11 +77,26 @@ public enum CameraLookRendering: Equatable {
         if let creator = look.colorCreator { return .colorCreator(creator) }
 
         let monochrome = merged(look)
-        if !monochrome.isEmpty { return .monochrome(monochrome) }
+        if !monochrome.isEmpty || rendersNoColour(look.mode) { return .monochrome(monochrome) }
 
         if !look.hueSliders.isEmpty { return .profileSpokes(look.hueSliders) }
 
         return .none
+    }
+
+    /// Modes that render no colour at all, whatever else is or is not dialled.
+    ///
+    /// Without this a Monochrome Profile with no filter and no tint — `"No Filter"` and `"Normal"`,
+    /// which is how it leaves the factory — reads as an empty monochrome reading, falls past every
+    /// case, and lands on the neutral hue wheel. A hue wheel is the one graphic a B&W mode can never
+    /// be. The empty `Monochrome` still carries no filter and no tint, so the graphic degrades to the
+    /// plain black-to-white gradient on its own; only the routing was wrong.
+    ///
+    /// Matched on `contains` because the same profile arrives by two routes: `PictureMode` reads
+    /// `"Monochrome Profile 4"` directly, while the Colour Profiles come through the art-filter
+    /// token instead, and a future capture could plausibly do the same here.
+    private static func rendersNoColour(_ mode: String) -> Bool {
+        mode == "Monotone" || mode.contains("Monochrome")
     }
 
     /// The three routes folded into one reading. Checked in the order the parser fills them, and

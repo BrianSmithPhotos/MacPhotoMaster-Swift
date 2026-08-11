@@ -217,6 +217,19 @@ final class CameraLookRenderingTests: XCTestCase {
         }
     }
 
+    /// A B&W mode straight out of the box carries no filter and no tint, so its reading is empty —
+    /// and it must still get the monochrome graphic, because the fallback is a hue wheel. Tags are
+    /// H1071747.JPG's, a real Monochrome Profile 4 frame from the fixture.
+    func testUntouchedMonochromeProfileStillGetsTheMonochromeGraphic() {
+        for mode in ["Monochrome Profile 4; 2", "Monotone; 2"] {
+            guard case .monochrome(let mono) = rendering(["Olympus:PictureMode": mode]) else {
+                return XCTFail("\(mode) fell through to a colour graphic")
+            }
+            XCTAssertNil(mono.filter)
+            XCTAssertNil(mono.tint)
+        }
+    }
+
     // MARK: - Nothing to draw
 
     /// A mode with readings that are all outside group 2 still has no hero graphic — the tone curve

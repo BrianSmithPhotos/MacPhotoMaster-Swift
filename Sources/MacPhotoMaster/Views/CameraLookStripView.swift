@@ -226,7 +226,18 @@ private struct CameraLookCurveView: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: .infinity)
-        .overlay { if showsValues && !values.isEmpty { valueList } }
+        // Half the plot's width, centred. The list is short rows of a word and a number, so at full
+        // width it reads as a gap with text at either edge; pulling it in makes it one block and
+        // leaves more of the curve visible either side of it.
+        .overlay {
+            if showsValues && !values.isEmpty {
+                GeometryReader { proxy in
+                    valueList
+                        .frame(width: proxy.size.width / 2)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
         .contentShape(Rectangle())
         .onHover { showsValues = $0 }
         // Hover does not exist on iPad, so one tap is the same reveal. A single recognizer over the
@@ -297,7 +308,6 @@ private struct CameraLookCurveView: View {
         // plus `.opacity` rather than material alone, for the same reason as the strip's own
         // background: on macOS 27 beta vibrancy does not composite against in-window content.
         .background(RoundedRectangle(cornerRadius: 5).fill(.thinMaterial).opacity(0.78))
-        .padding(8)
     }
 }
 

@@ -1429,3 +1429,51 @@ would have to reproduce:
   Both are printed by the script without extra work.
 
 Remaining: nothing. Groups A to E are measured, and both double-checks hold.
+
+### The measured curves, captured into the repo as `scripts/curves/`
+
+The frames live on one SD card and the rig is coming down, so the curves themselves are now
+committed rather than left as something re-derivable. Two layers:
+
+- **The per-run exports** - `group-a-color-profile.csv`, `group-bc-sweep.csv`,
+  `group-d-natural.csv`, `group-e-mono-profile.csv`, `neutral-wb-check.csv` - straight from
+  `measure-tone-curve.py --paired --csv`, columns headed by frame filename. These are the
+  evidence, including the mode-independence and neutral-white-balance checks that are not
+  table entries.
+- **`tone-curve-table.csv`** - the 30 curves the app draws, columns headed by setting name.
+  Built by `label-tone-curves.py`, which reads each frame's maker notes back off the card and
+  renames the column accordingly, so the table no longer needs the card.
+
+```
+./scripts/label-tone-curves.py scripts/curves /Volumes/OM\ SYSTEM/DCIM/107OMSYS
+```
+
+Only single-dial frames go in: the composition frames (two dials at once) and the repeated
+anchor exposures were measurements about the protocol, not entries. Where a setting was shot
+in more than one run the sweep's own run wins, so a dial's eight curves are internally
+consistent; **Midtone +-7, Shadow -7 and Contrast +2 exist only in group A** and therefore
+cross a run seam worth about 2 levels.
+
+The table is worth a look as a sanity check on the whole programme, because nothing in the
+measurement enforces any of it. All 30 curves come out monotonic. Each dial acts where its
+name says and nowhere else - Highlight is flat to under a level below input 128 and peaks
+near 205, Midtone peaks near 120, Shadow near 45 and is back to zero by 128. And the three
+tone dials are symmetric about zero to about a level at every step:
+
+| dial | -7 | -5 | -3 | -1 | +1 | +3 | +5 | +7 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Highlight | -29.9 | -22.0 | -13.0 | -4.8 | +4.8 | +12.9 | +20.8 | +29.8 |
+| Midtone | -59.4 | -41.7 | -27.4 | -9.2 | +8.2 | +24.7 | +41.8 | +58.8 |
+| Shadow | -31.1 | -21.6 | -12.8 | -4.7 | +3.9 | +12.2 | +20.9 | +29.3 |
+
+Peak deviation from the identity, in levels. Contrast is the exception and is not symmetric
+(-2 -9.7, -1 -4.6, +1 +12.8, +2 +19.8), so it cannot be interpolated as an odd function.
+Gradation High Key (+23.8 at 213) and Low Key (-12.0 at 55) are in the same table.
+
+**The ends are extended, not measured.** The reference frame covers about input 2 to 228 -
+below that it has too few pixels per level to match, above it the displayed ramp has no
+brighter tone at all. `label-tone-curves.py` joins each end to the corner, (0,0) and
+(255,255), with a straight line. The low end costs nothing (the curve is already within 1.5
+levels of the identity at input 2). The high end is a real approximation: the true curve has
+to flatten as it approaches white, and a straight line does not, so expect a small kink in
+the outer tenth of any plot.

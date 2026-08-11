@@ -1,0 +1,154 @@
+#!/usr/bin/env -S uv run --no-project --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""Turns the per-run curve exports into one labelled table the app can consume.
+
+`measure-tone-curve.py --csv` writes columns headed by frame filename, because that is all it
+knows. This reads the camera's own maker notes back off those frames and renames each column to
+the setting it was shot at - "Highlight +5", "Contrast -2", "High Key" - producing a single
+`tone-curve-table.csv` that no longer needs the SD card to be readable.
+
+Only single-dial frames go in. The runs also contain composition frames (two dials at once) and
+repeated anchor exposures; both were measurements about the *protocol*, not entries in the table,
+so they are dropped here. See scripts/README.md for what each run was.
+
+The measured domain is roughly input 2 to 228: below that the reference frame has too few pixels
+per level to match, and above it the displayed ramp simply has no brighter tone. Both ends are
+extended linearly to the corners (0,0) and (255,255), which is an approximation - the real curve
+must flatten near white rather than run straight at it - and it is confined to the outer tenth of
+the plot. Levels are kept as floats; the app rounds when it draws.
+"""
+import argparse
+import csv
+import re
+import subprocess
+from pathlib import Path
+
+# The runs, in the order a setting should be taken from them. Each setting's own sweep lives in
+# one run, so preferring that run keeps a dial's curve internally consistent; the +-7 endpoints
+# and Contrast +2 were only ever shot in group A, so those cross a run seam worth about 2 levels
+# (the anchor's measured repeatability - scripts/README.md "Groups B and C measured").
+RUNS = ["group-bc-sweep.csv", "group-a-color-profile.csv", "group-d-natural.csv"]
+
+# Repeated Highlight +7 exposures shot at the seams of the group B/C run to track drift. They are
+# the same setting as the sweep's own Highlight +7 and would otherwise compete with it.
+ANCHORS = {"H1072075.JPG", "H1072107.JPG", "H1072130.JPG"}
+
+DIALS = {"Highlights": "Highlight", "Midtones": "Midtone", "Shadows": "Shadow"}
+
+
+def read_settings(frame: Path) -> dict[str, str]:
+    """The four maker-note fields that identify a tone frame, as raw exiftool strings."""
+    tags = ["Olympus:ToneLevel", "Olympus:PictureModeContrast", "Olympus:Gradation"]
+    out = subprocess.run(
+        ["exiftool", "-s", "-T", *[f"-{tag}" for tag in tags], str(frame)],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip("\n")
+    tone, contrast, gradation = out.split("\t")
+    return {"tone": tone, "contrast": contrast, "gradation": gradation}
+
+
+def label(settings: dict[str, str]) -> str | None:
+    """The setting name for a frame, or None if it is not a single-dial table entry.
+
+    `ToneLevel` is a flat list - "Highlights; 7; -7; 7; Shadows; 0; -7; 7; ..." - where each dial
+    is followed by its value and then its own min and max, so the value is the field after the
+    name and the two after it are limits, not settings.
+    """
+    fields = [f.strip() for f in settings["tone"].split(";")]
+    dials = {
+        DIALS[name]: int(fields[i + 1])
+        for i, name in enumerate(fields)
+        if name in DIALS
+    }
+    contrast = int(re.match(r"-?\d+", settings["contrast"]).group())
+    gradation = settings["gradation"].split(";")[0].strip()
+
+    if gradation in ("High Key", "Low Key"):
+        # Gradation overrides the contrast dial, so a non-zero contrast here is a value the
+        # camera recorded and ignored - it does not make this a two-setting frame.
+        return gradation if not any(dials.values()) else None
+    if gradation != "Normal":
+        return None
+
+    moved = {name: value for name, value in dials.items() if value != 0}
+    if contrast != 0:
+        moved["Contrast"] = contrast
+    if len(moved) != 1:
+        return None
+    name, value = moved.popitem()
+    return f"{name} {value:+d}"
+
+
+def extend(levels: list[float | None]) -> list[float]:
+    """Fills the unmeasured ends by drawing a straight line to each corner."""
+    measured = [i for i, value in enumerate(levels) if value is not None]
+    low, high = measured[0], measured[-1]
+    filled = list(levels)
+    for i in range(low):
+        filled[i] = levels[low] * i / low
+    for i in range(high + 1, 256):
+        filled[i] = levels[high] + (255 - levels[high]) * (i - high) / (255 - high)
+    # Interior gaps are single levels the matcher could not populate; bridge them the same way.
+    for a, b in zip(measured, measured[1:]):
+        for i in range(a + 1, b):
+            filled[i] = levels[a] + (levels[b] - levels[a]) * (i - a) / (b - a)
+    return [float(value) for value in filled]
+
+
+def read_run(path: Path) -> dict[str, list[float | None]]:
+    """One export as {frame filename: 256 levels, None where unmeasured}."""
+    with path.open() as handle:
+        rows = list(csv.DictReader(handle))
+    frames = [name for name in rows[0] if name != "input"]
+    return {
+        frame: [float(row[frame]) if row[frame] else None for row in rows]
+        for frame in frames
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("curves", type=Path, help="directory holding the per-run CSV exports")
+    parser.add_argument("frames", type=Path, help="directory holding the JPEGs")
+    parser.add_argument("--output", type=Path, default=None)
+    args = parser.parse_args()
+
+    table: dict[str, list[float]] = {}
+    source: dict[str, str] = {}
+    for run in RUNS:
+        for frame, levels in read_run(args.curves / run).items():
+            if frame in ANCHORS:
+                continue
+            name = label(read_settings(args.frames / frame))
+            if name is None or name in table:
+                continue
+            table[name] = extend(levels)
+            source[name] = frame
+
+    output = args.output or args.curves / "tone-curve-table.csv"
+    columns = sorted(table, key=sort_key)
+    with output.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["input", *columns])
+        for level in range(256):
+            writer.writerow([level, *[f"{table[name][level]:.3f}" for name in columns]])
+
+    print(f"wrote {output} with {len(columns)} curves")
+    for name in columns:
+        print(f"  {name:<14} {source[name]}")
+
+
+def sort_key(name: str) -> tuple[int, int, str]:
+    """Dials in menu order and ascending value, with the gradation presets last."""
+    order = ["Highlight", "Midtone", "Shadow", "Contrast"]
+    dial, _, value = name.rpartition(" ")
+    if dial not in order:
+        return (len(order), 0, name)
+    return (order.index(dial), int(value), name)
+
+
+if __name__ == "__main__":
+    main()

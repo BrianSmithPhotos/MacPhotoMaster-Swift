@@ -108,12 +108,16 @@ def extend(levels: list[float | None]) -> list[float]:
     span = 255 - high
     secant = (255 - levels[high]) / span
     back = measured[-9] if len(measured) > 8 else measured[0]
-    # Leave at the slope actually measured, arrive parallel to the identity, and clamp both into
-    # [0, 3*secant] - the Fritsch-Carlson band, which is what keeps the cubic monotonic. Tangency
-    # and a parallel landing over 27 levels are jointly impossible for the steepest curves, and
-    # unclamped they put a dip in Highlight +7, Contrast +2 and High Key.
+    # Leave at the slope actually measured, arrive at the secant slope, and clamp the leaving slope
+    # into [0, 3*secant] - the Fritsch-Carlson band, which is what keeps the cubic monotonic. The
+    # clamp is load-bearing: unclamped it dips Highlight +7, Contrast +2 and High Key.
+    #
+    # Arriving at the secant rather than parallel to the identity, because a parallel landing forces
+    # the curve to plunge and then climb back - Contrast +2 reached slope 0.00 at input 240 and
+    # recovered to 0.83 by 255, an S-bend that is an artefact of the constraint and not of anything
+    # measured. Handing off to the average slope over the extension just declines, once.
     leaving = min(max((levels[high] - levels[back]) / (high - back), 0), 3 * secant)
-    arriving = min(1.0, 3 * secant)
+    arriving = secant
     for i in range(high + 1, 256):
         t = (i - high) / span
         filled[i] = (
@@ -140,10 +144,16 @@ def read_run(path: Path) -> dict[str, list[float | None]]:
     }
 
 
-# Where the Swift table samples each curve. Sixteen-level spacing plus the top corner, because
-# reproducing the 256-level table from these knots is worth 1.8 levels at worst - below the 2-level
-# repeatability the anchor frames measured, so a denser table would only be storing noise.
-KNOTS = list(range(0, 256, 16)) + [255]
+# Where the Swift table samples each curve. Sixteen-level spacing, plus 232 and 248 near white.
+#
+# The app joins these knots with straight lines, so what matters is not only how far the drawn curve
+# sits from the measured one but how much its *slope* jumps at a knot - a value error spreads out
+# invisibly, a slope jump is a corner you can see. Sixteen-level spacing costs 2.0 levels of value,
+# comfortably inside the anchors' 2-level repeatability, and yet put an 0.87 slope break in
+# Contrast +2 at knot 224, which is where the curve turns hardest into white. The two extra knots
+# take that to 0.50, below the 0.57 that Shadow +7 has at input 32 from genuine measured curvature.
+# Going denser than this stops helping: at 8-level spacing throughout the worst break is still 0.50.
+KNOTS = sorted(set(list(range(0, 256, 16)) + [232, 248, 255]))
 
 # The parser's own vocabulary, so a parsed CameraLook indexes this table without translation.
 SWIFT_DIALS = {"Highlight": "HL", "Midtone": "Mid", "Shadow": "SH", "Contrast": "Contrast"}
@@ -168,6 +178,10 @@ public enum CameraLookToneCurves {
     /// Deviation at each knot, by the parser's dial code and then the dialled value. Only the odd
     /// steps were shot; even ones interpolate, which the measured spacing supports (Midtone runs
     /// 8.2, 24.7, 41.8, 58.8 at +1/+3/+5/+7, so its steps are 16.5, 17.1, 17.0 apart).
+    ///
+    /// Deviation rather than absolute output is also what makes the knots sparse enough to read:
+    /// every one of these numbers is a departure from the identity, so a run of zeros is a stretch
+    /// the control genuinely left alone.
     public static let dials: [String: [Int: [Double]]] = [
 %s    ]
 

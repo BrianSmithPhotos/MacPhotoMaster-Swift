@@ -164,18 +164,22 @@ struct CameraLookStripView: View {
     /// Every control that feeds the curve is listed, including the ones sitting at zero. Showing only
     /// what moved would make this a description of the curve, and it is meant to be a dial-in list:
     /// reproducing a look means knowing the settings that have to be *left* alone as much as the ones
-    /// that have to be changed. A control absent from the maker note is a control this Picture Mode
-    /// does not have, and stays absent here.
+    /// that have to be changed.
+    ///
+    /// The zeros have to be reconstructed here rather than read off the look, because the parser
+    /// drops them — a `CameraLook` carries what the photographer *changed*, which is what every other
+    /// row in this strip wants. Listing all four unconditionally is safe rather than a guess: all 154
+    /// distinct maker-note signatures in `CameraLookFixture.json` carry all three tone dials and a
+    /// contrast field, so there is no Picture Mode here that lacks one.
     private func curveValues(_ look: CameraLook) -> [(String, String)] {
         var values: [(String, String)] = []
         for code in ["HL", "Mid", "SH"] {
-            if let level = look.toneLevels.first(where: { $0.code == code }) {
-                values.append((toneName(code), signed(level.value)))
-            }
+            let level = look.toneLevels.first(where: { $0.code == code })?.value ?? 0
+            values.append((toneName(code), signed(level)))
         }
         if let gradation = look.gradation { values.append(("Gradation", gradation)) }
-        if !CameraLookToneComposite.contrastIsSuppressed(look), let contrast = look.contrast {
-            values.append(("Contrast", signed(contrast)))
+        if !CameraLookToneComposite.contrastIsSuppressed(look) {
+            values.append(("Contrast", signed(look.contrast ?? 0)))
         }
         return values
     }

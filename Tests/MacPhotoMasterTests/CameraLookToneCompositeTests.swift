@@ -143,6 +143,24 @@ final class CameraLookToneCompositeTests: XCTestCase {
         }
     }
 
+    /// The knots are joined by straight lines, so the curve is only as smooth as its sampling — and
+    /// a value error that passes can still leave a corner you can see, because the eye reads the
+    /// change in slope rather than the displacement. Sixteen-level spacing alone cost 0.87 of a level
+    /// of slope in Contrast +2 at knot 224, where the curve turns hardest into white, while sitting
+    /// well inside the 2-level value budget the spacing was chosen on. Bound is 0.6, which every dial
+    /// clears; the largest genuine break in the measured data is Shadow +7 at input 32 (0.57).
+    func testNoCurveTurnsSharplyEnoughToLookLikeACorner() throws {
+        for value in [-2, -1, 1, 2] {
+            let curve = try XCTUnwrap(CameraLookToneComposite.curve(for: look(contrast: value)))
+            let slopes = (1...255).map { curve[$0] - curve[$0 - 1] }
+            for input in 1..<slopes.count {
+                XCTAssertLessThan(
+                    abs(slopes[input] - slopes[input - 1]), 0.6,
+                    "Contrast \(value) breaks slope at input \(input + 1)")
+            }
+        }
+    }
+
     // MARK: - The table itself
 
     /// The table is generated from the CSV, so this guards the join rather than the numbers: the

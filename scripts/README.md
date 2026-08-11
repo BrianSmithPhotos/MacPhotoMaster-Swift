@@ -1491,13 +1491,18 @@ invisible for a control already falling back towards the identity but not for on
 its peak: **Contrast +1 peaks at input 228 and +2 at 226**, against Highlight's 205, Midtone's
 120 and Shadow's 45. Contrast +2 entered the seam at slope 1.12 where the line demanded 0.27,
 and the corner was plainly visible in the app. It is now a cubic that leaves at the slope
-actually measured over the last eight levels, arrives parallel to the identity, and clamps
-both end slopes into `[0, 3 x secant]` - the Fritsch-Carlson band, which is what guarantees
-the result stays monotonic. Without the clamp the three steepest curves (Highlight +7,
-Contrast +2, High Key) dip: tangency and a parallel landing are jointly unsatisfiable over 27
-levels when the curve has 20-plus levels of deviation left to shed. The worst slope break
-above input 200 is now 0.39 levels, and peak deviations are unchanged. It is still an
-approximation, still confined to the outer tenth of the plot.
+actually measured over the last eight levels, arrives at the secant slope, and clamps the
+leaving slope into `[0, 3 x secant]` - the Fritsch-Carlson band, which is what guarantees the
+result stays monotonic. Without the clamp the three steepest curves (Highlight +7, Contrast
++2, High Key) dip.
+
+The arrival slope took two goes, and the first one was wrong in a way worth recording.
+Landing *parallel to the identity* is the intuitive choice and it forces an S-bend: with 20-plus
+levels of deviation still to shed over 27 input levels, Contrast +2 plunged to slope 0.00 at
+input 240 and then climbed back to 0.83 by 255. Monotonic, and still a visible kink, because
+what the eye picks up is the change in slope and not the value. Handing off to the **secant**
+- the average slope over the extension - just declines, once. Peak deviations are unchanged
+either way. It is still an approximation, still confined to the outer tenth of the plot.
 
 **The brightest level the matcher reports is junk, and gets dropped.** It is the level where
 the reference's cumulative histogram reaches 1.0, so it does not match a populated level at
@@ -1506,6 +1511,17 @@ and a single hot pixel are enough to move. The tell is a step of up to +9.9 leve
 between neighbours stepping +1.0 (Midtone +5, input 228 to 229). It is one-sided: the dark
 end is clean, because black is a large area of the frame and stays well populated. Dropping
 exactly one level per column fixes every case, and it is worth knowing how much it was
-costing - resampling the table to 17 knots reproduces it to **1.8 levels** with the drop and
+costing - resampling the table to knots reproduces it to about **2 levels** with the drop and
 **8.2** without, so the bad sample was the dominant error in everything downstream while
 being invisible in the peak-deviation numbers the runs were read on.
+
+**Score a sampled curve on slope, not just on value.** The app joins the stored knots with
+straight lines, so a knot set has two costs and only one of them is obvious. Sixteen-level
+spacing costs 2.0 levels of value - comfortably inside the anchors' 2-level repeatability, so
+it passed - while putting an 0.87 break in the *drawn slope* of Contrast +2 at knot 224,
+which is exactly where the curve turns hardest into white. That break is a corner you can see;
+the value error is a displacement you cannot. Two extra knots at 232 and 248 take it to 0.50,
+which is below the 0.57 that Shadow +7 has at input 32 from genuine measured curvature, so
+contrast stops being the outlier. Denser than that does not help: at 8-level spacing
+throughout the worst break is still 0.50. Same shape as the junk-brightest-level defect - a
+statistic that averages over the flaw will not report the flaw.

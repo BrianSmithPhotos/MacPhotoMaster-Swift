@@ -714,7 +714,7 @@ from the cast. The luma curve, which is what gets drawn, is unaffected either wa
 - Sharpness and Noise Filter fixed, ISO fixed and low. Sharpening works on edges
   and a smooth ramp barely gives it any, but there is no reason to let it vary.
 
-### The shot list, about 41 frames
+### The shot list — 30 setting frames after group A, about 70 exposures
 
 Three references, one per picture mode used: **REF-C** (Color Profile, all tone
 levels 0, all twelve hue sliders 0, contrast 0), **REF-N** (Natural, Gradation
@@ -738,19 +738,47 @@ as the measurement's noise floor. Tens of levels means the group is void: an
 illumination change is indistinguishable from a tone curve, because both are
 "every pixel came out at a different level than before".
 
-**For group A, shoot the reference between every setting frame** — REF, H+7, REF,
-M+7, REF, and so on. Bracketing the group at its two ends detects drift but
-cannot correct it, which is exactly where the second attempt died: the closing
-reference proved 12 levels of drift and there was nothing to be done with the ten
-frames in between. Interleaving makes each setting measurable against a reference
-shot 20 seconds earlier instead of four minutes, and turns consecutive references
-into a continuous record of what the room is doing. It costs 11 extra frames on
-the one group that decides the whole design. If those references come back within
-a level or two of each other, the environment is proven stable and groups B to E
-can go back to bracketing at the ends only.
+**Shoot the reference between every setting frame** — REF, H+7, REF, M+7, REF,
+and so on. Bracketing a group at its two ends detects drift but cannot correct
+it, which is exactly where the second attempt died: the closing reference proved
+12 levels of drift and there was nothing to be done with the ten frames in
+between. Interleaving makes each setting measurable against a reference shot 20
+seconds earlier instead of four minutes, and turns consecutive references into a
+continuous record of what the room is doing.
+
+**Keep interleaving for every group, not just group A.** An earlier version of
+this list said that once group A proved stable, the rest could go back to
+bracketing at the ends only. Group A did prove stable — 1.7 levels, two-signed —
+but that is a fact about one 5.5-minute window on one morning, not a property of
+the room, and attempt 2 shows the same room drifting 12 levels on a different
+afternoon. Interleaving is the single difference between attempt 3 being
+measurable and attempt 2 being void, and it costs one frame per setting. The
+honest price: it roughly doubles groups B to E, from about 30 exposures to about
+65. Shutter actuations are cheaper than a lost morning.
+
+**Keep each run under about six minutes.** Drift exposure scales with wall-clock
+length, not frame count, and 5.5 minutes is the only length so far proven. Split
+anything longer into separate runs, each self-contained with its own opening and
+closing reference — group B in particular should be shot as two runs rather than
+one 41-frame sitting. A brightening morning is a monotonic, one-signed drift,
+which the protocol reliably detects and cannot repair, so the defence is a short
+run rather than a denser one.
+
+**Start every session after group A with an anchor frame: REF-C, Highlight +7,
+REF-C, in Color Profile, before changing Picture Mode or starting the group.**
+Group A measured Color Profile Highlight +7 at `+29.5@205`. If the session's
+anchor lands within a level or two of that, this run is comparable with group A's
+and the cross-group comparisons below rest on measurement; if it does not, those
+comparisons are void even though the within-group results are still fine. Without
+it, a genuine cross-mode difference and a run-to-run artefact look identical, and
+group E exists only to read that difference. Highlight +7 specifically because it
+is the largest deviation measured, so it carries the most signal, and because it
+is deliberately not one of the settings under cross-group test.
 
 **Shoot group A first and measure it before shooting anything else.** It decides
-whether the remaining 30-odd frames are the right ones.
+whether the remaining 30-odd frames are the right ones. *(Done, 2026-08-11 — see
+"Group A measured" below. The pairs interact, but only mildly enough to be
+absorbed; the shot list below stands.)*
 
 **Group A — is the tone curve separable? Color Profile. (REF-C + 9 frames)**
 
@@ -782,7 +810,7 @@ rather than assumed separate because it is a tone curve like the others and
 belongs in the same composite — which is why SPEC moves it from group 4 into
 group 3.
 
-**Group B — the sweep. Color Profile. (20 new frames)**
+**Group B — the sweep. Color Profile. (20 new frames, split into two runs)**
 
 Eight values per channel — -7, -5, -3, -1, +1, +3, +5, +7 — for Highlight,
 Midtone and Shadow. Four of those 24 (H +7, M +7, M -7, S -7) are already shot in
@@ -790,31 +818,103 @@ group A. Eight rather than all fifteen because the visualiser interpolates
 between measured curves anyway, and a slider this smooth does not need every
 detent measured; 0 is REF-C.
 
+Interleaved this is 41 exposures in one sitting, which is twice the length ever
+proven stable. Split it: **B1 = Highlight and Midtone** (13 new frames, 27
+exposures — still long, so splitting again by channel is fine) and **B2 = Shadow
+plus group C** (7 and 3 new frames, 21 exposures). Every run opens with the
+anchor and carries its own opening and closing REF-C.
+
 **Group C — contrast. Color Profile. (3 new frames)**
 
--2, -1, +1. (+2 is in group A.)
+-2, -1, +1. (+2 is in group A.) Small enough to ride along at the end of a group
+B run rather than needing a sitting of its own — same mode, same reference.
 
-**Group D — gradation. Natural. (REF-N + 4 frames)**
+**Group D — gradation and contrast. Natural. (REF-N + 5 frames, 11 exposures)**
 
-High Key, Low Key, one Auto frame for the record, and (High Key, Contrast +2).
+Shoot in this order, reference between every frame:
 
-The Auto frame is not measurable, as above; it is worth having so the failure is
-documented against a real file rather than asserted. The last frame is the
-`--compose` test for contrast over gradation — the counterpart of group A's
-contrast pair, and needed because this is the only place the two can meet.
+```
+REF-N
+High Key
+REF-N
+Low Key
+REF-N
+Contrast +2
+REF-N
+High Key + Contrast +2
+REF-N
+Gradation Auto
+REF-N
+```
 
-**Group E — does the same setting mean the same thing in another mode? (REF-M +
-3 frames)**
+Contrast +2 is here rather than in group E because `--compose` needs both singles
+plus the combined frame, and the fourth frame is the contrast-over-gradation
+compose test — the counterpart of group A's contrast pair, and needed because
+Natural is the only place the two can meet. The earlier version of this list put
+Contrast +2 in group E, which left group D unable to run its own compose test and
+put two Picture Modes inside one group, against the rule above. The same frame
+answers both questions, so it belongs in the Natural run.
 
-- Natural, Contrast +2. Compare the recovered curve against group A's Color
-  Profile Contrast +2. If they match, contrast is one mode-independent curve and
-  the app stores it once; if not, it needs measuring per mode.
-- Monochrome Profile, S -7 and H +7, against REF-M. Same question for the tone
-  curve: the Color and Mono Profile modes both offer it, and whether they render
-  it identically decides whether the app needs one table or two.
+Gradation Auto is not measurable, as above, and is shot last so its failure costs
+nothing: it is here only so the limitation is documented against a real file
+rather than asserted.
 
-Do not read `chan` on the mono frames — the output is neutral by construction, so
-it says nothing there.
+**Group E — Monochrome Profile. (REF-M + 2 frames, 5 exposures)**
+
+```
+REF-M
+Highlight +7
+REF-M
+Shadow -7
+REF-M
+```
+
+Do not read `chan` on these — the output is neutral by construction, so it says
+nothing there.
+
+**For the paper note.** The four remaining runs, in full, in capture order. Every
+line is one frame. `REF` means the reference for that run's mode, unchanged
+settings. Shoot the anchor first in every run, before touching Picture Mode.
+
+```
+ANCHOR (all runs)   REF-C / Color Profile H+7 / REF-C     expect +29.5@205
+
+B1  Color Profile   REF-C
+                    H-7 REF-C  H-5 REF-C  H-3 REF-C  H-1 REF-C
+                    H+1 REF-C  H+3 REF-C  H+5 REF-C
+                    M-5 REF-C  M-3 REF-C  M-1 REF-C
+                    M+1 REF-C  M+3 REF-C  M+5 REF-C
+                    (H+7, M+7, M-7 already shot in group A)
+
+B2  Color Profile   REF-C
+                    S-5 REF-C  S-3 REF-C  S-1 REF-C
+                    S+1 REF-C  S+3 REF-C  S+5 REF-C  S+7 REF-C
+                    C-2 REF-C  C-1 REF-C  C+1 REF-C
+                    (S-7, C+2 already shot in group A)
+
+D   Natural         REF-N
+                    High Key REF-N   Low Key REF-N   Contrast +2 REF-N
+                    High Key + Contrast +2 REF-N
+                    Gradation Auto REF-N          (last; not measurable)
+
+E   Mono Profile    REF-M
+                    H+7 REF-M   S-7 REF-M
+```
+
+Split B1 again by channel if it runs long. Order within a run does not matter to
+the measurement, only that a reference sits either side of every setting frame.
+
+**The cross-mode question is read, not shot.** It needs no frames of its own,
+because groups A, D and E already contain both halves of each comparison. Once
+all three are measured, and provided each session's anchor frame agreed with
+group A:
+
+- Natural Contrast +2 (group D) against Color Profile Contrast +2 (group A). If
+  they match, contrast is one mode-independent curve and the app stores it once;
+  if not, it needs measuring per mode.
+- Monochrome Profile Highlight +7 and Shadow -7 (group E) against the same two in
+  Color Profile (group A). Both modes offer the tone curve, and whether they
+  render it identically decides whether the app needs one table or two.
 
 ### Reading the output
 

@@ -646,14 +646,48 @@ from the cast. The luma curve, which is what gets drawn, is unaffected either wa
   fraction at both ends of the reference and warns above 0.5 percent.
 
   An earlier version of this section asked for black at 20 and white at 235. That
-  is not achievable with a full-range ramp on a good display, and the second
-  attempt showed why: at 1/8 f/5.6 ISO 250 the ramp landed at 12-222 with nothing
-  clipped, and the display's own black-to-white range is wider than the camera's
-  output range, so the bottom cannot be lifted without the top clipping. A third
-  of a stop more would put white at about 246 — no room left for Highlight +7 —
-  while moving black only from 12 to 14. **Leave it there.** Highlight +7 lifts
-  the top by about 20 levels and fits; Shadow -7 will crush the darkest few
-  percent, and losing the curve below input 12 is the cheaper loss.
+  is not achievable with a full-range ramp on a good display: the display's own
+  black-to-white range is wider than the camera's output range, so the bottom
+  cannot be lifted without the top clipping.
+
+  **Find the exposure with a bracket, not with arithmetic.** Shoot the reference
+  at five or six shutter speeds a third of a stop apart and measure each. Scaling
+  one frame by stops to predict another does not work here, because the camera's
+  shoulder is exactly what the exposure choice has to escape, and it is the part
+  a power law gets most wrong. The bracket costs six shots and half a minute.
+
+  Read the bracket for what the *settings* will do to it, not for whether the
+  reference itself fits — almost every exposure in a bracket fits. The bracket
+  shot on 2026-08-11 at f/5.6 ISO 500:
+
+  | shutter | black | white | at 255 |
+  |---|---|---|---|
+  | 0.4s | 6 | 255 | 15.34% |
+  | 0.3s | 5 | 255 | 0.97% |
+  | 1/4s | 4 | 250 | 0.00% |
+  | 1/5s | 3 | 242 | 0.00% |
+  | 1/6s | 2 | 236 | 0.00% |
+  | 1/8s | 2 | 228 | 0.00% |
+
+  The last four all pass as references and only one of them is usable. Highlight
+  +7 was then measured at +31 levels, so it needs about that much headroom: 1/6s
+  leaves 19 and 1/5s leaves 13. **Pick with a margin of a full stop-third**, since
+  a quarter stop of error is the difference between fine and ruined.
+
+  **1/8 f/5.6 ISO 500 is the confirmed setting for this rig** — reference 1-228
+  with nothing clipped at either end, Highlight +7 reaching 251 with 0.008 percent
+  blown, Shadow -7 flattening 3.26 percent onto black.
+
+  That last figure is over the 0.5 percent rail limit and is still correct.
+  **The limit is a test of the reference, not of the frames.** A reference that
+  clips has failed to span the range; a *test* frame that clips may simply be the
+  setting doing its job. Shadow -7 crushes blacks — that is the behaviour the
+  visualiser exists to show. Check what the clipping costs in input levels rather
+  than in frame area: here 3.26 percent of the area turned out to be reference
+  levels 0-3 only, because the ramp's darkest columns pile up against the
+  display's black floor. The curve is resolved from input 3 upward. Reasoning
+  from area alone predicted losing everything below input 35, which was wrong by
+  an order of magnitude.
 - **Autofocus once on the screen, then switch to manual focus and do not touch
   it.** AF left on refocuses per frame, and at f/2.0 that moves the focus plane by
   centimetres — which changes the histogram independently of any tone setting,
@@ -933,3 +967,30 @@ errors of +4.2 to +11.8 levels against a 3-level threshold. The fourth, contrast
 against highlights, came in at 2.09 rms under "serial a-then-b" — the closest any
 test has come to independent, and the first thing to re-check on the reshoot.
 
+
+### Setup validated, 2026-08-11: what a stable run looks like
+
+Before shooting group A a third time, five frames were taken to prove the rig
+rather than to measure anything: reference, Highlight +7, reference, Shadow -7,
+reference, at 1/8 f/5.6 ISO 500, 84 seconds end to end.
+
+    scripts/measure-tone-curve.py --paired H1072049.JPG H1072050.JPG \
+        H1072051.JPG H1072052.JPG H1072053.JPG
+
+**Reference stability came back at 0.3 levels, against a threshold of 3 and the
+second attempt's 12.0.** That is the number to look at first on any run, and it
+is the whole difference between this setup and the two that were voided. Four
+changes got it there and it is not obvious which mattered most, so keep all four:
+the ramp shown as wallpaper rather than in a viewer, *Automatically adjust
+brightness* off, the room dark rather than dim, and the time of day chosen so the
+sun is not on that side of the building. The per-frame drift error bars were 0.41
+and 0.23 levels.
+
+The two settings bracket the range the others live in, which is why they are the
+right pair to prove an exposure with: Highlight +7 measured +31.4 at input 204,
+Shadow -7 measured -29.7 at 43. If both fit, everything between them fits.
+
+Channel spread read 10.08 and 10.16 on the two frames. Almost equal across two
+settings that do opposite things is the signature of a shared white-point cast
+rather than a per-channel tone curve — read this column by comparing frames, never
+against zero. A single grey curve is still the right graphic.

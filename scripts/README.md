@@ -835,7 +835,7 @@ promise the next one.*
 B run rather than needing a sitting of its own — same mode, same reference. *Shot
 2026-08-11 at the end of B2, exactly so.*
 
-**Group D — gradation and contrast. Natural. (REF-N + 5 frames, 11 exposures)**
+**Group D — gradation and contrast. Natural. (REF-N + 5 frames, 11 exposures)** *(shot 2026-08-11)*
 
 Shoot in this order, reference between every frame:
 
@@ -865,7 +865,7 @@ Gradation Auto is not measurable, as above, and is shot last so its failure cost
 nothing: it is here only so the limitation is documented against a real file
 rather than asserted.
 
-**Group E — Monochrome Profile. (REF-M + 2 frames, 5 exposures)**
+**Group E — Monochrome Profile. (REF-M + 2 frames, 5 exposures)** *(shot 2026-08-11, with Midtone +7 in place of Highlight +7 — the better choice, see the result)*
 
 ```
 REF-M
@@ -1253,4 +1253,92 @@ the capture is neutral, verified with one frame; until then treat `chan` as unre
 Left for whenever a per-channel question actually arises - the visualiser draws one
 grey curve, so it does not arise yet.
 
-Remaining: group D (Natural, 11 exposures) and group E (Monochrome Profile, 5).
+### Groups D and E measured, 2026-08-11: the tone curve is one table
+
+H1072132-2156, 11:10:40 to 11:17:36, anchored at both ends and in the middle.
+Reference stability 1.1 levels in group D, 0.4 in group E. Anchors +30.6, +30.3 and
++29.9 - inside 0.7 of each other and 1.1 of group A's +29.5, so this session is
+comparable with the earlier ones and the cross-mode readings below are real.
+
+**Group E was shot with Midtone +7 in place of the planned Highlight +7.** That is
+the better frame for the job and the plan should have said so: Midtone +7 is the
+largest single deviation the camera produces, so it carries the most signal, and it
+has a Color Profile counterpart just as Highlight does.
+
+| setting | Monochrome Profile | Color Profile (groups A, B) | difference |
+|---|---|---|---|
+| Midtone +7 | +58.7 @121 | +58.8 @120 | 0.1 |
+| Shadow -7 | -31.1 @45 | -31.1 @44 | 0.0 |
+| Contrast +2 | +20.0 @226 (Natural) | +19.8 @228 | 0.2 |
+
+**So the tone curve and contrast are both mode-independent, and the app stores one
+table rather than one per mode.** The differences are a tenth of a level against an
+anchor repeatability of about 2, which is as clean an answer as this rig can give.
+`chan` reads 0.00 on both mono frames, as the shot list predicted - worth noting only
+because it confirms the measurement path does what it claims where the answer is
+known in advance.
+
+**Gradation overrides Picture Mode contrast entirely.** This is the surprise, and it
+contradicts what `docs/SPEC.md` assumed before shooting:
+
+| pair | max dev |
+|---|---|
+| High Key contrast 0 -> High Key contrast +2 | **+1.2 @126** |
+| Normal contrast 0 -> Normal contrast +2 (control) | +20.2 @227 |
+
+Measured directly between the two frames, not through a model. Under High Key the
+contrast dial does nothing at all - the identity curve, inside the run's own 1.1
+levels of noise - while the same dial change under Normal moves 20 levels. The
+`--compose` test agrees from the other direction, calling the pair `INTERACTING` at
+8.82 rms under every model with two-signed means, but that framing was misleading:
+the combined frame is not some hard-to-model blend, it is High Key alone to within
+half a level at every input, and it peaks at 235 so nothing is being clipped.
+
+**The maker note still records the contrast value that the camera ignored.**
+H1072142 carries `PictureModeContrast` +2 alongside `Gradation` High Key, and that +2
+had no effect on the rendering. The visualiser must therefore not draw contrast when
+`Gradation` is anything but Normal, even though the field is populated - drawing it
+would show a 20-level bend the photograph never received.
+
+The gradation curves themselves, in Natural:
+
+| setting | 16 | 64 | 128 | 192 | 224 | max dev |
+|---|---|---|---|---|---|---|
+| High Key | 16.5 | 66.0 | 139.3 | 213.8 | 245.7 | +23.8 @213 |
+| Low Key | 10.6 | 52.7 | 124.2 | 193.2 | 230.0 | -12.0 @55 |
+| Auto | 21.7 | 92.2 | 152.6 | 202.6 | 225.7 | +37.3 @86 |
+
+Gradation Auto produced a curve here only because the target is a smooth global ramp;
+it is a scene-adaptive local operator and this number does not transfer to any real
+photograph. It is recorded so the limitation sits against a measured file rather than
+an assertion, which is why the frame was worth shooting.
+
+### White balance: Auto is neutral on this rig, 6200K is not
+
+Shot to answer the `chan` question above. Same ramp, same Natural picture mode, three
+white balances, measured through the midband where neither rail squeezes the cast:
+
+| white balance | R-G | G-B | R-B |
+|---|---|---|---|
+| 5300K Fine Weather (the runs above) | -21.2 | -2.5 | -23.6 |
+| **Auto** | **-2.0** | **-0.8** | **-2.9** |
+| Custom WB 6200K | -7.5 | +11.0 | +3.4 |
+
+**The 6200K frame looks neutral on the only axis the eye judges well, and is not
+neutral.** Its R-B of +3.4 is the smallest in the table, but that is two errors
+cancelling: green sits about 9 levels above the average of red and blue. Dialling a
+colour temperature only moves along the amber-blue axis, and the rig's error has a
+green-magenta component that no Kelvin value can reach - which is exactly the
+component human vision is worst at, and why it looked right.
+
+Auto lands within 3 levels on every axis, a factor of eight better than the 5300K the
+tone-curve runs used. **The fix for a per-channel measurement is a one-touch custom WB
+metered off the displayed ramp itself**, which sets both axes at once from the actual
+target, rather than a dialled Kelvin - or 6200K with a magenta shift applied and
+re-measured. Do not simply switch the rig to Auto: it re-decides per frame, and a run
+needs the white balance held fixed, so use Auto to find the neutral point and lock it.
+
+None of this disturbs the tone-curve results above, which are read on luma. It is
+what would have to happen first before `chan` could be read as a camera property.
+
+Remaining: nothing. Groups A to E are measured.

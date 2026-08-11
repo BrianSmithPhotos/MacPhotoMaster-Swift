@@ -376,6 +376,20 @@ In priority order — the rest of the visualiser first.
   while contrast sits on top of either. The composite is therefore always one tonal control composed
   with contrast — a much smaller thing to draw than a gradation preset stacked on three tone axes.
 
+  **Corrected 2026-08-11 by group D** (`scripts/README.md` "Groups D and E measured"). "Contrast
+  sits on top of either" is wrong, and measurably so: when `Gradation` is anything but Normal the
+  camera **ignores** `PictureModeContrast` completely. High Key contrast 0 against High Key contrast
+  +2 is the identity curve to 1.2 levels, while the same dial change under Normal moves 20.2. The
+  maker note still records the ignored value, so **the view must suppress contrast whenever
+  `Gradation != Normal`** rather than trusting the field — drawing it would show a 20-level bend the
+  photograph never received. This makes the graphic simpler, not harder: with a gradation preset set,
+  the composite *is* the gradation curve.
+
+  **Also answered 2026-08-11 by group E: the tone curve and contrast are mode-independent, so the
+  app stores one table, not one per picture mode.** Monochrome Profile and Color Profile render
+  Midtone +7 within 0.1 of a level of each other and Shadow -7 within 0.0; Natural and Color Profile
+  render Contrast +2 within 0.2. All are far inside the rig's ~2-level cross-run repeatability.
+
   **Decided 2026-08-10, before shooting.** Draw **one composite result curve**, not the camera's and
   OM Workspace's two (Highlight-and-Shadow on one, Midtone on a second). That split is a grouping
   artefact of their editing UI: it shows what was dialled in rather than what came out, which is the

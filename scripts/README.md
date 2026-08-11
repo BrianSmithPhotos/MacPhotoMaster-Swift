@@ -994,3 +994,57 @@ Channel spread read 10.08 and 10.16 on the two frames. Almost equal across two
 settings that do opposite things is the signature of a shared white-point cast
 rather than a per-channel tone curve — read this column by comparing frames, never
 against zero. A single grey curve is still the right graphic.
+
+### Group A measured, 2026-08-11: the result
+
+Nineteen frames, 07:34:30 to 07:39:53, 1/8 f/5.6 ISO 500, reference re-shot between
+every setting. **Reference stability worst 1.7 levels and two-signed** (-0.4, +0.2,
+-0.2, +0.6, -1.7, +0.7, +1.4, +0.2, +1.2) — wander rather than drift, against a
+threshold of 3 and the second attempt's one-signed 12.0. Per-frame drift error bars
+0.32 to 2.23 levels. Every reference clean at both rails.
+
+    scripts/measure-tone-curve.py --paired H1072054.JPG ... H1072072.JPG
+
+| setting | 16 | 64 | 128 | 192 | 224 | max dev |
+|---|---|---|---|---|---|---|
+| Highlight +7 | 16.1 | 63.6 | 127.9 | 219.8 | 248.5 | +29.5 @205 |
+| Midtone +7 | 30.5 | 110.4 | 186.6 | 230.7 | 245.0 | +58.8 @120 |
+| Midtone -7 | 2.0 | 17.7 | 68.9 | 153.0 | 202.9 | -59.4 @121 |
+| Shadow -7 | 1.0 | 37.6 | 125.6 | 189.6 | 223.1 | -31.1 @44 |
+| Contrast +2 | 10.6 | 52.9 | 129.2 | 203.7 | 243.6 | +19.8 @228 |
+
+Midtone +7 and -7 read +58.8 at input 120 and -59.4 at 121 — symmetric to 0.6 of a
+level, from two separately bracketed frames. Worth checking on any rerun: it costs
+nothing and it is the only internal consistency test the run contains.
+
+**Contrast composes with Highlight serially and cleanly**: rms 0.46, max -0.88 at
+level 177, comfortably independent. Contrast first, then Highlight. So Picture Mode
+contrast is a separate stage in the visualiser, not part of the tone-level basis.
+This is the test that came closest on the voided run (2.09 rms) and it holds up.
+
+**The three tone-level pairs interact.** Additive offset is the best model for all
+three and beats serial composition badly on two of them:
+
+| pair | additive rms | serial a-then-b | serial b-then-a | worst additive error |
+|---|---|---|---|---|
+| H+7 & S-7 | 4.09 | 4.29 | 4.64 | -6.13 @94 |
+| H+7 & M-7 | 3.64 | 4.27 | 12.15 | -7.30 @149 |
+| M+7 & S-7 | 3.84 | 11.46 | 10.28 | -7.81 @151 |
+
+So the mechanism is the one anticipated — displacements from the diagonal that sum,
+as a control nudging spline points and re-splining would give — but it is wrong by
+up to about 8 levels, concentrated in the upper midtones.
+
+The script prints "a one-signed mean error means something drifted" and on the first
+pair the mean is -3.8, one-signed. **The stability reading overrides that warning**:
+the references held to 1.7 two-signed and the three frames' own error bars total 2.2,
+so the interaction is real. This is exactly the judgement `report_stability` exists to
+make, and it is the reason the drift heuristic must never be read on its own.
+
+Not modelled, deliberately. At level 128 the three residuals are +4.60, +4.58 and
++4.60, and the two pairs involving Midtone track each other within 0.6 of a level
+across the whole range, with the Midtone-free pair the odd one out — but the spread
+across all three reaches 8.76 levels, so no single correction curve serves, and three
+points cannot fit one. The cheapest way to learn whether the residual is modellable
+is to reshoot the same pairs at intermediate strengths (H+4 & S-4) and see whether it
+scales.

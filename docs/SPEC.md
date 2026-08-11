@@ -397,13 +397,34 @@ In priority order — the rest of the visualiser first.
   question, and printing five numbers over a 220pt strip would crowd out the shape. Same argument as
   the disc in §1 — draw the result, keep the reading available.
 
-  Measurement tooling and the ~41-frame shot list are written and waiting on frames — see
+  Measurement tooling and the ~41-frame shot list are written — see
   `scripts/README.md` "make-tone-ramp.py and measure-tone-curve.py". The decisive experiment is
   first in that list: whether the pivots compose independently, which decides whether this is three
   measured basis curves or a grid. Because each tonal control lives in its own picture mode, the
   shot list carries a separate reference frame per mode, and it also asks whether contrast and the
   tone curve mean the same thing across modes — which decides whether the app stores one table or
   several.
+
+  **Answered 2026-08-11 by group A** (`scripts/README.md` "Group A measured"). Contrast composes
+  with Highlight serially and independently — 0.46 rms against a 3-level threshold — so Picture Mode
+  contrast is a **separate stage** applied over the tone-level curve, not part of the same basis.
+  The three tone levels do **not** compose independently: additive offset is the best of the three
+  models tested but is wrong by up to about 8 levels in the upper midtones.
+
+  **Decided: compose the tone levels additively and accept that error.** Eight levels is about 3
+  percent of the range on a 220pt strip whose job is to show the shape of what the camera did — it
+  does not change which way the curve bends or where it pivots, which is the whole content of the
+  graphic. So this stays three measured basis curves plus a contrast stage; it does not become a
+  grid. The alternative was ~30 more frames to tabulate combinations the viewer cannot see.
+
+  That is a decision about *this* use case, not a claim that the interaction is uninteresting. If
+  the composition itself is ever worth studying — how a camera's tone controls really combine is a
+  fair question in its own right — the cheapest next probe is the same pairs at intermediate
+  strengths (H+4 & S−4 against H+7 & S−7) to see whether the residual scales with the applied
+  displacement. That separates a modellable effect from one that would have to be tabulated, for
+  four frames. Group A's residuals are suggestive but three points cannot fit anything: at input 128
+  they agree at +4.60, +4.58 and +4.60, and the two pairs involving Midtone track each other within
+  0.6 of a level, with the Midtone-free pair the odd one out.
 
   The groups below are the original plan. They held up in implementation, so they stand as written
   for the remaining work.

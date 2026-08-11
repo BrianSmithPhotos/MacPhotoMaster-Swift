@@ -1048,3 +1048,16 @@ across all three reaches 8.76 levels, so no single correction curve serves, and 
 points cannot fit one. The cheapest way to learn whether the residual is modellable
 is to reshoot the same pairs at intermediate strengths (H+4 & S-4) and see whether it
 scales.
+
+**Decided 2026-08-11: compose additively and accept the 8 levels.** For the
+visualiser's purposes the error does not change which way the curve bends or where
+it pivots, which is the entire content of a 220pt strip, so the tone curve stays
+three measured basis curves plus a separate contrast stage rather than becoming a
+measured grid. See `docs/SPEC.md` group 3 for the reasoning.
+
+That closes the question for *this* use case only. How a camera's tone controls
+actually combine is a fair question on its own, and if it is ever picked up the
+cheapest next probe is four frames: the same pairs at intermediate strengths (H+4 &
+S-4 alongside the measured H+7 & S-7), which shows whether the residual scales with
+the applied displacement and so whether it is modellable at all. Nothing else here
+needs redoing first - the run above is sound and its frames are the baseline.

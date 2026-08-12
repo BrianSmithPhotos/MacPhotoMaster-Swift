@@ -138,14 +138,23 @@ struct CameraLookStripView: View {
                 .foregroundStyle(.secondary)
             content()
             ForEach(rows, id: \.0) { row in
-                HStack {
+                if row.1.isEmpty {
+                    // A presence-only reading, where the name is the whole statement. Drawn in the
+                    // value's own style rather than the label's, because a secondary-grey name with
+                    // an empty column beside it reads as a value that failed to load.
                     Text(row.0)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 6)
-                    Text(row.1)
-                        .monospacedDigit()
+                        .font(.caption)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    HStack {
+                        Text(row.0)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 6)
+                        Text(row.1)
+                            .monospacedDigit()
+                    }
+                    .font(.caption)
                 }
-                .font(.caption)
             }
         }
     }
@@ -211,7 +220,10 @@ struct CameraLookStripView: View {
         var rows: [(String, String)] = []
         if let grain = look.grain { rows.append(("Grain", grain)) }
         if let shading = look.shading { rows.append(("Shading", signed(shading))) }
-        for case .effect(let name) in look.artEffects { rows.append((name, "on")) }
+        // No value: a stacked effect is either recorded or it is not, so the row only exists when it
+        // is on and "Soft Focus on" says nothing "Soft Focus" does not. `group` draws a valueless row
+        // as the statement it is rather than as a label waiting for a number.
+        for case .effect(let name) in look.artEffects { rows.append((name, "")) }
         return rows
     }
 

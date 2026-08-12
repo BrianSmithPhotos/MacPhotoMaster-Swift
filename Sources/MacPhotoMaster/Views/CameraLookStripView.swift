@@ -401,7 +401,11 @@ private struct CameraLookRingView: View {
 
     // MARK: - The shared ring
 
-    private var ringWidth: CGFloat { 22 }
+    /// Thin enough to read as the frame around the graphic rather than as the graphic. It was 22,
+    /// from when the ring was the whole picture and the middle held only a marker; now that the
+    /// Colour Creator's cast reaches into the middle, the band only has to carry hue and can give
+    /// the space back.
+    private var ringWidth: CGFloat { 14 }
 
     /// The background annulus, drawn as short arcs so each can carry its own colour — which is what
     /// lets Partial Color show the rest of the wheel collapsing while the kept band stays saturated,
@@ -663,8 +667,12 @@ private struct CameraLookRingView: View {
     ///
     /// The sides are cubics rather than straight lines because a straight-sided wedge reads as a
     /// selection — a slice of the wheel being picked out — and this is the opposite: something the
-    /// chosen hue is pushing into the frame. The control points pull the width forward toward the
-    /// tip, which is what gives the leaf shape rather than a cone.
+    /// chosen hue is pushing into the frame.
+    ///
+    /// They bow *inward*: both control points sit nearer the centreline than the straight chord
+    /// does, so the shape pinches away from a wide base into a long point. Bowing them outward gave
+    /// a fat leaf that looked like an amount of area, which is the wrong reading — the reading is
+    /// how far in the cast gets, and a concave side keeps the eye on the tip.
     private func petalPath(center: CGPoint, hue: Double, rim: CGFloat, tip: CGFloat) -> Path {
         let half = 26.0
         let depth = rim - tip
@@ -673,12 +681,12 @@ private struct CameraLookRingView: View {
         path.move(to: point(hue: hue - half, radius: rim, from: center))
         path.addCurve(
             to: point(hue: hue, radius: tip, from: center),
-            control1: point(hue: hue - half, radius: rim - depth * 0.45, from: center),
-            control2: point(hue: hue - half * 0.45, radius: tip, from: center))
+            control1: point(hue: hue - half * 0.30, radius: rim - depth * 0.50, from: center),
+            control2: point(hue: hue, radius: tip + depth * 0.25, from: center))
         path.addCurve(
             to: point(hue: hue + half, radius: rim, from: center),
-            control1: point(hue: hue + half * 0.45, radius: tip, from: center),
-            control2: point(hue: hue + half, radius: rim - depth * 0.45, from: center))
+            control1: point(hue: hue, radius: tip + depth * 0.25, from: center),
+            control2: point(hue: hue + half * 0.30, radius: rim - depth * 0.50, from: center))
         path.addArc(
             center: center, radius: rim,
             startAngle: .degrees(-(hue + half)), endAngle: .degrees(-(hue - half)),

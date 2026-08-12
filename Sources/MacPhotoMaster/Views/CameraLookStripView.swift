@@ -417,14 +417,17 @@ private struct CameraLookRingView: View {
         Color(hue: angle / 360, saturation: chroma, brightness: 0.95)
     }
 
-    /// Lightness swept round the ring, white at twelve o'clock and dark at six.
+    /// Lightness swept round the ring, lightest at two o'clock and darkest at eight.
     ///
     /// A cosine rather than a linear ramp, because a linear black-to-white sweep meets itself at the
     /// start angle and leaves a hard seam — the one edge in the graphic that would mean nothing. This
-    /// closes on itself. Held inside 0.05-0.95 to match the colour ring's own brightness, so the two
-    /// sit at the same weight beside each other rather than the greyscale one shouting.
+    /// closes on itself. The ring's angle runs anticlockwise from three o'clock, so the peak at 30
+    /// puts the light up and to the right, where a lit surface reads as lit rather than as a diagram.
+    ///
+    /// Topping out at 0.80 rather than at the colour ring's own 0.95: white at full strength pulled
+    /// the eye straight to a graphic whose whole job is to say the frame has no colour in it.
     private func grey(at angle: Double) -> Color {
-        Color(white: 0.05 + 0.90 * (1 + cos((angle - 90) * .pi / 180)) / 2)
+        Color(white: 0.05 + 0.75 * (1 + cos((angle - 30) * .pi / 180)) / 2)
     }
 
     // MARK: - Twelve simultaneous magnitudes

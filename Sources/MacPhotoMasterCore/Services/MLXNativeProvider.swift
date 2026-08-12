@@ -21,15 +21,15 @@ public struct MLXNativeProvider: AIProvider {
     ///   - `cacheLimit` 1GB: keep a generous free-buffer cache so buffers are reused across the
     ///     generation loop instead of being round-tripped to the OS every step (a tiny cache made
     ///     generation very slow); ~2.7GB live + up to 1GB cache still leaves headroom under ~6GB.
-    ///   - `memoryLimit` 5GB (relaxed): a guardrail below the jetsam cap — MLX evicts cache to try to
-    ///     stay under it, but `relaxed` lets a genuinely larger single allocation through rather than
-    ///     failing. Doesn't constrain the ~2.7GB working set; only bounds cache growth.
+    ///   - `memoryLimit` 5GB: a guardrail below the jetsam cap — MLX evicts cache to try to stay
+    ///     under it, and an allocation past it waits on scheduled work rather than failing outright.
+    ///     Doesn't constrain the ~2.7GB working set; only bounds cache growth.
     /// Not applied on macOS (128GB, no such cap, and an unbounded cache aids throughput there). Runs
     /// once via the `static let`'s lazy init.
     private static let gpuMemoryConfigured: Void = {
         #if os(iOS)
-        MLX.GPU.set(cacheLimit: 1024 * 1024 * 1024)
-        MLX.GPU.set(memoryLimit: 5 * 1024 * 1024 * 1024)
+        MLX.Memory.cacheLimit = 1024 * 1024 * 1024
+        MLX.Memory.memoryLimit = 5 * 1024 * 1024 * 1024
         #endif
     }()
 

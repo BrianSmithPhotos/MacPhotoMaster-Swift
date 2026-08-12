@@ -310,6 +310,36 @@ The frame is reported from `layout()` and from both magnification paths, each ho
 turn before writing the binding, for the same "Modifying state during view update" reason as the
 zoom and centre bindings beside it.
 
+## Camera-look visualiser (where its pieces live)
+
+The visualiser (SPEC §1) spreads across every layer, and the split is worth stating because most of
+it is *data* rather than code, and that data was expensive to obtain:
+
+- `Models/CameraLook.swift` — the parsed value type. What the photographer changed, so a control
+  left at zero is absent rather than present-and-zero. Anything needing the full set (the curve's
+  hover list wants every dial including the untouched ones) reconstructs it rather than expecting
+  the parser to carry it.
+- `Services/CameraLookParsing.swift` — maker notes to `CameraLook`. Keeps the three B&W routes
+  strictly apart: they use three different numberings for the same option lists, so sharing a table
+  turns orange into red.
+- `Models/CameraLookGeometry.swift` — the **measured** ring geometry: Colour Profile spoke centres,
+  Partial Color band shapes and floors, Colour Creator hues. Hand-written from the measurement
+  write-ups, with the provenance in the doc comments.
+- `Models/CameraLookToneCurves.swift` — **generated**, not written. `scripts/label-tone-curves.py`
+  emits it from `scripts/curves/`. Do not hand-edit it; change the script or the measurements.
+- `Models/CameraLookToneComposite.swift` — the composition rules (tone dials add, contrast is a
+  serial stage applied first, Gradation overrides contrast entirely). Each rule is a measured result,
+  not arithmetic, and each has a test naming what it would mean to get it backwards.
+- `Models/CameraLookRendering.swift` — which hero graphic a look calls for. Two display *judgements*
+  live here rather than in the view, because both are about the data: merging the three B&W routes,
+  and letting a live reading beat a stale one.
+- `Views/CameraLookStripView.swift` — drawing only, in a `Canvas`. No decisions about what a look
+  means; if a question needs answering about the data, it belongs in one of the above.
+
+The measurement programme behind all of it — shot lists, tooling, results, and the runs that had to
+be thrown away — is in `scripts/README.md`. Anything that changes a number the visualiser draws
+should start there rather than in Swift.
+
 ## Concurrency rules
 
 - Never call `exiftool`, hit the network, or touch the filesystem from a SwiftUI `View` body or a
@@ -459,6 +489,19 @@ signed app that *created* the item (unlike TCC grants, which key on the stable d
 requirement and so survive rebuilds under the cert-backed signing), so keys created under an earlier
 signing context re-prompt forever; deleting them and re-saving from the current cert-signed bundle
 makes that bundle the owner, and an owner reads its own items without any prompt.
+
+`service` is a `var` rather than a `let` for one reason: **tests must not touch the real items.**
+`EBirdSpeciesListServiceTests` and `OpenRouterProviderTests` need `resolve`'s Keychain fallback to
+find nothing, and until 2026-08-11 they achieved that by deleting the real item in `setUp` and
+saving it back in `tearDown`. That re-created it through `SecItemAdd`, whose default ACL makes the
+calling process the sole owner — the test binary, not the app — so the app prompted on its next
+read, once per suite run, which reads as once per build. The restore path was also a data-loss
+route: `save(nil)` is a delete, so a read that came back nil quietly destroyed both keys. They now
+point `service` at a throwaway name for the duration; nothing is written under it, so no item is
+created at all. `APIKeyStoreTests` guards the property this depends on — that `service` is honoured
+by read, save and delete alike — since hardcoding it back into any one of them would restore the old
+behaviour with every other test still green. Any future test needing the Keychain should do the
+same, and never operate on the production service name.
 
 ## File safety
 

@@ -448,10 +448,16 @@ a finding.
 
 ## make-tone-ramp.py and measure-tone-curve.py
 
-The tone half of the look visualiser (docs/SPEC.md, groups 3-6): Highlight,
-Midtone and Shadow at +/-7 each, Contrast at +/-2, and Gradation. **Not yet
-measured** — this is the shot list and the tooling, written 2026-08-10 before
-the frames exist.
+The tone half of the look visualiser (docs/SPEC.md, group 3): Highlight,
+Midtone and Shadow at +/-7 each, Contrast at +/-2, and Gradation.
+
+**Measured 2026-08-09 to 2026-08-11; shipped 2026-08-11.** This section is the
+shot list and the tooling as written on 2026-08-10, before the frames existed.
+The sections that follow are the results, in the order they were shot, and two of
+them correct a claim made below — read "Groups D and E measured" and "The
+brightest level the matcher reports is junk" before trusting anything here as
+current. The 30 finished curves are committed as `scripts/curves/` and generated
+into `CameraLookToneCurves.swift` by `label-tone-curves.py`.
 
 **The camera's own structure does most of the work here.** Gradation and the
 tone curve are mutually exclusive, and not merely as a setting: Gradation belongs
@@ -459,6 +465,10 @@ to the standard picture modes, the Highlight/Midtone/Shadow curve belongs to the
 Color and Monochrome Profile modes, and no frame can carry both. Contrast sits on
 top of either. So the composite the visualiser draws is only ever *one* tonal
 control composed with contrast — never three tone axes plus a gradation preset.
+
+(That last claim about contrast is the one group D overturned: when Gradation is
+anything but Normal the camera ignores the contrast dial outright. Left standing
+here as it was written, because the correction is the finding.)
 
 That also fixes the shape of the measurement: **each mode needs its own reference
 frame.** Measuring a Color Profile frame against a Natural reference would fold

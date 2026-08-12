@@ -6,6 +6,14 @@ A from-scratch Swift/SwiftUI reimplementation of [MacPhotoMaster](https://github
 code should be organized. Both are self-contained; you don't need the Python sibling repo to work
 in this one.
 
+Two more that are worth knowing exist:
+
+- [`scripts/README.md`](scripts/README.md) — the helper scripts, and the measurement programme
+  behind the camera-look visualiser: what was shot, what came back, which runs were void and why.
+  Every number the visualiser draws traces to a section in there.
+- [`docs/MLX_PROVIDER.md`](docs/MLX_PROVIDER.md) — the native in-process MLX backend, its model
+  allowlist, and the decision record for why it exists alongside Ollama.
+
 ## Requirements
 
 - macOS 14+
@@ -95,6 +103,15 @@ Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works e
   elevation lookup (never trusting Timeline altitude), and reverse geocoding for location keywords
   and AI prompt context. Sync runs on launch, on folder navigation, and via a manual "Refresh
   Timeline" button in Settings (Cmd+,).
+- **Camera-look visualiser** (⌘L, off by default): a translucent strip over the preview drawing the
+  in-camera creative settings — one hero graphic for the colour rendering (Colour Profile disc,
+  Colour Creator wheel, Partial Color band, or monochrome), the composite tone curve with the
+  dialled values on hover, and the sliders and finish rows below. A RAW shows "Neutral rendered RAW"
+  instead, since the ORF carries the maker-note bytes but was never developed through them. The
+  ring positions, the Partial Color bands and all 30 tone curves are **measured off real frames**
+  rather than guessed — the shot lists, the tooling, the results and the wrong turns are written up
+  in [`scripts/README.md`](scripts/README.md), which is the reference for anything that changes the
+  numbers behind these graphics.
 - A native, read-only `NativeMetadataReader` (ImageIO-based) exists alongside `ExifToolClient` as a
   faster-path prototype for reads/previews — see its header doc for scope.
 - The Metadata pane is a `.inspector()` (not a third `NavigationSplitView` column), giving it the
@@ -164,6 +181,9 @@ avoid certifying a hallucinated species). Still deferred (last 8b item): subject
 - **iPadOS app**: source browse through process/move, `Timeline.json` GPS suggestion, reverse
   geocoding, and AI-assisted suggestions (MLX + OpenRouter, small-model prompt profile, eBird
   candidate list + local binomial lookup) — steps 1-8 plus 8b passes 1-2 — are shipped and
-  user-verified on the physical iPad (see "Status" above). Remaining: **subject isolation** (the last
-  8b item), a not-yet-designed Mac-initiated pull to move processed files off the iPad, and a possible
-  future Apple Foundation Models / `@Generable` on-device provider for guaranteed structured output.
+  user-verified on the physical iPad (see "Status" above). The Apple Foundation Models
+  (`foundation:`) provider listed here as a future possibility shipped 2026-07-24 and is in the
+  shared preset list, so it is available on both platforms — see `docs/ARCHITECTURE.md` "Provider
+  pattern (AI)" for the `@Generable` guided-generation shape and the macOS/iOS 27 SDK build
+  constraint. Remaining: **subject isolation** (the last 8b item), and a not-yet-designed
+  Mac-initiated pull to move processed files off the iPad.

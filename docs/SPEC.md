@@ -77,8 +77,8 @@ deterministically, and copy files into local storage.
     it is soft rather than more detailed. Re-decoding at a higher cap when zoomed in is deferred.
 - **Camera-look visualiser** (⌘L, off by default). A translucent strip over the preview showing the
   in-camera creative settings as a graphic rather than as the sentence §3 writes to `Instructions`.
-  Shipped 2026-08-10, covering element groups 1 and 2 of the plan under "Ideas, not started"; groups
-  3 to 6 (tone curve, sliders, finish, provenance) are still outstanding.
+  Element groups 1 and 2 shipped 2026-08-10, groups 3 to 5 (tone curve, sliders, finish) on
+  2026-08-11 — see the plan under "Ideas, not started". Only group 6 (provenance) is outstanding.
   - One hero graphic per look, which works because the colour-rendering modes are mutually
     exclusive: a twelve-spoke saturation disc for a Colour Profile, a 30-stop ring for Colour
     Creator, an 18-stop banded ring for Partial Color, a filter/tint circle for monochrome. A mode
@@ -92,6 +92,22 @@ deterministically, and copy files into local storage.
     outside the figure is muted rather than dropped, so the shape reads as the balance actually
     dialled in against the whole wheel. Values interpolate in angle between the measured spoke
     centres rather than stepping twelve ways, since those centres are unevenly spaced.
+  - The **tone curve** is the composite the frame was actually rendered with, drawn against the
+    identity diagonal, with the values that produced it revealed on hover rather than printed over
+    it. Contrast is folded in, and suppressed entirely when Gradation is not Normal, because the
+    camera ignores it there. Gradation Auto draws nothing at all — it is scene-adaptive, so there is
+    no curve to show. Every level plotted is measured; see "Ideas, not started" for the composition
+    rules and `scripts/README.md` for the provenance.
+  - Two of the hero graphics read *inward* rather than round, and both were arrived at by drawing
+    them the obvious way first. The **Colour Creator** shows its cast as a concave-sided petal
+    reaching in from the chosen hue, as deep as Vivid is strong and most saturated at its tip — the
+    inverse of the camera's own ring, where saturation grows outward from a grey middle. Inverting it
+    is what lets one wheel carry hue and amount without them fighting: the rim is already spent on
+    hue, so the only axis left is inward. A ray at fixed length said where the cast was but never how
+    much of it there was. An **untouched monochrome mode** gets the same annulus as everything else
+    with lightness swept round it instead of hue, not a filled disc: with no filter and no tint there
+    is nothing to letter over a disc, so it said only "grey". The disc returns the moment a filter or
+    tint gives it something to carry.
   - Anchored to the **photo's** top-right corner, not the pane's, so it stays on the picture as the
     side panes are resized instead of drifting into the letterbox margin. See
     docs/ARCHITECTURE.md "Preview overlays and where the photo actually is" — the rectangle has to
@@ -363,8 +379,16 @@ default settings, the point being Apple's engine applied to the file as the came
 
 In priority order — the rest of the visualiser first.
 
-- **Camera-look visualiser, groups 3 to 6.** Groups 1 and 2 shipped 2026-08-10 (§1); what remains is
-  everything below the hero graphic, and the **tone curve is next**. Unlike group 2 this needs
+- **Camera-look visualiser, group 6.** Groups 1 and 2 shipped 2026-08-10 and groups 3 to 5 on
+  2026-08-11 (§1), so what remains is **provenance** alone: which of the three B&W routes supplied
+  filter and tint, and the ORF/JPEG divergence. It is diagnostic rather than photographic — the one
+  group whose audience is someone debugging the parser rather than someone reading their own
+  photograph — which is why it is last and why it is meant to be collapsed by default.
+
+  The history below is kept because it is the record of what was measured and what was decided, and
+  those decisions are load-bearing in code that is now shipped.
+
+  Unlike group 2 this needed
   design decisions before code: whether `ToneLevel`'s highlight/mid/shadow are one spline or three
   independent pivots, and where each pivot sits on the curve and how far along it each one reaches.
   Expect that to need measuring off real frames the way the three rings were, rather than being
@@ -467,7 +491,13 @@ In priority order — the rest of the visualiser first.
   ignored it, where it is shown as "unused", because the point there is that the number in the file
   is not what the photograph got.
 
-  Groups 4 to 6 remain. The groups below are the original plan; they held up in implementation, so
+  **Groups 4 and 5 shipped 2026-08-11 too**, and were the small ones the plan expected: sharpness
+  and saturation as slider rows, grain, shading and the stacked art-filter records as finish rows.
+  One thing fell out of building them. A stacked effect is either recorded or it is not, so a value
+  column reading "on" beside it restated the presence of the row — those rows now carry the name
+  alone, drawn as the statement it is rather than as a label waiting for a number.
+
+  Group 6 remains. The groups below are the original plan; they held up in implementation, so
   they stand as written for the remaining work.
 
   `Tests/MacPhotoMasterTests/Fixtures/CameraLookFixture.json` holds
@@ -491,13 +521,18 @@ In priority order — the rest of the visualiser first.
      stack of widgets. *Done*, though the profile wheel became a saturation disc rather than a ring
      — see §1 for why radius and saturation both carry the value.
   3. **Tonal response** — `ToneLevel`, `Gradation`, `PictureModeEffect` and contrast all bend the
-     same curve, so they compose into one drawn curve rather than sitting beside each other.
+     same curve, so they compose into one drawn curve rather than sitting beside each other. *Done.*
   4. **Sliders** — sharpness and saturation. Contrast started here and moved to group 3 (above): it
      reads like a slider in the menu, but it is a tone curve, and drawing it apart from the other
-     tone controls would misrepresent the result.
-  5. **Finish** — grain, vignetting, the stacked art-filter `fx` records.
+     tone controls would misrepresent the result. *Done*, with contrast still appearing here as
+     "unused" where the camera ignored it — the point in that case being that the number in the file
+     is not what the photograph got.
+  5. **Finish** — grain, vignetting, the stacked art-filter `fx` records. *Done.*
   6. **Provenance** — which B&W route supplied filter/tint, and the ORF/JPEG divergence.
-     Diagnostic; collapsed by default.
+     Diagnostic; collapsed by default. *The only group not built.* Note that
+     `CameraLookRendering.merged` deliberately discards which route supplied a filter or tint, since
+     they mean the same thing to the eye — so this group needs that provenance carried alongside
+     rather than recovered, and that is a change to the rendering type, not just a new view.
 
   Two things fall out of the groups. B&W filter and tint reach group 2 by three mutually exclusive
   routes with three different numberings, and the parser must keep those strictly apart — but they

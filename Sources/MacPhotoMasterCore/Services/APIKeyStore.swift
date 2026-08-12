@@ -15,7 +15,13 @@ public enum APIKeyStore {
     /// bundle ID in 2026-07 during a deliberate keychain reset (the re-entry was already happening to
     /// re-own the items under the cert-backed signature), so the name shown in the macOS keychain
     /// prompt now matches the app. Only change it again alongside a reset that re-enters the keys.
-    private static let service = "photos.briansmith.macphotomaster.apikeys"
+    ///
+    /// A `var` solely so the tests (`@testable`) can point themselves at a throwaway service. They
+    /// used to clear the real items and put them back instead, which re-created them under
+    /// `SecItemAdd`'s default ACL — sole owner being whichever process called it, i.e. the test
+    /// binary — so the app prompted on its next read, once per suite run. Worse, a `read` that came
+    /// back nil made the restoring `save(nil)` a delete, so a test run could silently lose the keys.
+    static var service = "photos.briansmith.macphotomaster.apikeys"
 
     /// `envVar` wins when set (keeps `swift run`/terminal-launched debugging simple, matching the
     /// existing test suite's `setenv`/`unsetenv` pattern); otherwise falls back to whatever's saved

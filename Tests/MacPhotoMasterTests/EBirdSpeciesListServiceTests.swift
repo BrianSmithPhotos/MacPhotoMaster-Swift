@@ -9,21 +9,23 @@ import XCTest
 final class EBirdSpeciesListServiceTests: XCTestCase {
     /// `APIKeyStore.resolve` falls back to the Keychain when the env var is unset, so a real key
     /// saved via `SettingsView` on this machine would otherwise leak into
-    /// `testFetchTaxonomyThrowsMissingAPIKeyWhenUnset` — stash it away for the test and restore it
-    /// after, rather than assuming the Keychain is empty.
-    private var savedKeychainKey: String?
+    /// `testFetchTaxonomyThrowsMissingAPIKeyWhenUnset`. Point the store at a service nothing has
+    /// ever written to, rather than clearing the real item and putting it back — see
+    /// `APIKeyStore.service` for what that cost. Nothing is written here either, so no item is
+    /// created under this name; the reads simply find nothing.
+    private var realService: String!
 
     override func setUp() {
         super.setUp()
-        savedKeychainKey = APIKeyStore.read(account: "EBIRD_API_KEY")
-        APIKeyStore.delete(account: "EBIRD_API_KEY")
+        realService = APIKeyStore.service
+        APIKeyStore.service = "photos.briansmith.macphotomaster.tests"
         setenv("EBIRD_API_KEY", "test-key", 1)
     }
 
     override func tearDown() {
         MockEBirdURLProtocol.requestHandler = nil
         unsetenv("EBIRD_API_KEY")
-        APIKeyStore.save(savedKeychainKey, account: "EBIRD_API_KEY")
+        APIKeyStore.service = realService
         super.tearDown()
     }
 

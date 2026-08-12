@@ -356,6 +356,33 @@ final class CameraLookGeometryTests: XCTestCase {
         XCTAssertNil(CameraLookGeometry.colorCreatorHue(position: -1), "out of range")
     }
 
+    /// The petal's depth is the Vivid axis rescaled, so the two ends have to land exactly on the two
+    /// ends of the graphic: the strongest boost reaches the middle, and the monochrome end keeps only
+    /// the legibility nub that says which position it was. In between it has to rise with strength —
+    /// a depth that ran the other way would read as a stronger cast for a weaker setting.
+    func testColorCreatorReachSpansTheWheelAcrossTheVividRange() {
+        let range = CameraLookGeometry.colorCreatorStrengthRange
+        XCTAssertEqual(CameraLookGeometry.colorCreatorReach(strength: range.upperBound), 1.0)
+        XCTAssertEqual(CameraLookGeometry.colorCreatorReach(strength: range.lowerBound), 0.15)
+
+        for strength in (range.lowerBound + 1)...range.upperBound {
+            XCTAssertGreaterThan(
+                CameraLookGeometry.colorCreatorReach(strength: strength),
+                CameraLookGeometry.colorCreatorReach(strength: strength - 1),
+                "Vivid \(strength) reaches no further than \(strength - 1)")
+        }
+    }
+
+    /// Nothing outside the range reaches here from the parser, but the reach is a radius — a value
+    /// past either end would draw a petal outside the wheel or inside out.
+    func testColorCreatorReachStaysOnTheWheel() {
+        for strength in -20...20 {
+            let reach = CameraLookGeometry.colorCreatorReach(strength: strength)
+            XCTAssertGreaterThanOrEqual(reach, 0.15)
+            XCTAssertLessThanOrEqual(reach, 1.0)
+        }
+    }
+
     /// Position 26 measures green, which the camera's own header independently confirms by drawing
     /// a green swatch for it. The one anchor in the table that has outside corroboration.
     func testColorCreatorPositionTwentySixIsGreen() {

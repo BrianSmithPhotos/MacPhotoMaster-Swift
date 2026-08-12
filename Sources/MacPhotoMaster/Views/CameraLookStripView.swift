@@ -607,34 +607,84 @@ private struct CameraLookRingView: View {
 
     // MARK: - A single selected stop
 
-    /// The Colour Creator marker. Position 0 imposes no hue at all, so it draws as a hollow centre
-    /// dot rather than a ray — the camera makes the same distinction by drawing an empty swatch.
-    /// Vivid is bipolar saturation, shown as a bar rather than as the marker's radius (the radius
-    /// carries Vivid in OM Workspace's own UI, which is a source of confusion worth not copying).
+    /// The Colour Creator marker: a petal reaching in from the chosen hue, as deep as Vivid is
+    /// strong and most saturated at its tip.
+    ///
+    /// This runs the opposite way round from the camera's own ring, where saturation grows outward
+    /// from a grey middle. Inverting it is what lets one wheel carry both variables without them
+    /// fighting: the rim is already spent on hue, so the only axis left is inward, and depth then
+    /// reads as how much of that colour got into the picture. A ray at a fixed length said where the
+    /// cast was but never how much of it there was.
+    ///
+    /// Position 0 imposes no hue at all, so it keeps the hollow ring rather than growing a petal in
+    /// a direction it does not have — the camera makes the same distinction by drawing an empty
+    /// swatch — but the ring is now sized by Vivid, since at position 0 that is the whole setting.
     private func drawColorCreator(
         _ context: GraphicsContext, center: CGPoint, outer: CGFloat,
         creator: CameraLook.ColorCreator
     ) {
         let inner = outer - ringWidth
+        let reach = CameraLookGeometry.colorCreatorReach(strength: creator.strength)
+        let label = Text("Vivid \(creator.isMonochrome ? "mono" : signed(creator.strength))")
+            .font(.system(size: 10, weight: .semibold))
 
-        if let hue = CameraLookGeometry.colorCreatorHue(position: creator.position) {
-            var ray = Path()
-            ray.move(to: center)
-            ray.addLine(to: point(hue: hue, radius: inner, from: center))
-            context.stroke(
-                ray,
-                with: .color(Color(hue: hue / 360, saturation: 0.95, brightness: 0.95)),
-                style: StrokeStyle(lineWidth: 4, lineCap: .round))
-        } else {
-            var dot = Path()
-            dot.addEllipse(in: CGRect(x: center.x - 7, y: center.y - 7, width: 14, height: 14))
-            context.stroke(dot, with: .color(.secondary), lineWidth: 2)
+        guard let hue = CameraLookGeometry.colorCreatorHue(position: creator.position) else {
+            let radius = inner * 0.7 * reach
+            var ring = Path()
+            ring.addEllipse(
+                in: CGRect(
+                    x: center.x - radius, y: center.y - radius,
+                    width: radius * 2, height: radius * 2))
+            context.fill(ring, with: .color(.secondary.opacity(0.12)))
+            context.stroke(ring, with: .color(.secondary), lineWidth: 2)
+            context.draw(label, at: point(hue: 270, radius: inner * 0.82, from: center))
+            return
         }
 
-        let label = creator.isMonochrome ? "mono" : signed(creator.strength)
-        context.draw(
-            Text("Vivid \(label)").font(.system(size: 9, weight: .semibold)),
-            at: CGPoint(x: center.x, y: center.y + inner * 0.55))
+        // Grey at exact monochrome: the position still chose which hues render light or dark, so the
+        // petal has to stay, but painting it in a colour the frame does not contain would lie.
+        let tip = creator.isMonochrome
+            ? Color(white: 0.55)
+            : Color(hue: hue / 360, saturation: 0.95, brightness: 0.95)
+        let rim = creator.isMonochrome
+            ? Color(white: 0.88)
+            : Color(hue: hue / 360, saturation: 0.15, brightness: 0.98)
+
+        context.fill(
+            petalPath(center: center, hue: hue, rim: inner, tip: inner * (1 - reach)),
+            with: .radialGradient(
+                Gradient(colors: [tip, rim]), center: center, startRadius: 0, endRadius: inner))
+
+        // Opposite the petal, so a cast reaching the middle cannot land on its own caption.
+        context.draw(label, at: point(hue: hue + 180, radius: inner * 0.55, from: center))
+    }
+
+    /// A teardrop whose base sits on the wheel's inner edge and whose point is `tip` from the centre.
+    ///
+    /// The sides are cubics rather than straight lines because a straight-sided wedge reads as a
+    /// selection — a slice of the wheel being picked out — and this is the opposite: something the
+    /// chosen hue is pushing into the frame. The control points pull the width forward toward the
+    /// tip, which is what gives the leaf shape rather than a cone.
+    private func petalPath(center: CGPoint, hue: Double, rim: CGFloat, tip: CGFloat) -> Path {
+        let half = 26.0
+        let depth = rim - tip
+
+        var path = Path()
+        path.move(to: point(hue: hue - half, radius: rim, from: center))
+        path.addCurve(
+            to: point(hue: hue, radius: tip, from: center),
+            control1: point(hue: hue - half, radius: rim - depth * 0.45, from: center),
+            control2: point(hue: hue - half * 0.45, radius: tip, from: center))
+        path.addCurve(
+            to: point(hue: hue + half, radius: rim, from: center),
+            control1: point(hue: hue + half * 0.45, radius: tip, from: center),
+            control2: point(hue: hue + half, radius: rim - depth * 0.45, from: center))
+        path.addArc(
+            center: center, radius: rim,
+            startAngle: .degrees(-(hue + half)), endAngle: .degrees(-(hue - half)),
+            clockwise: false)
+        path.closeSubpath()
+        return path
     }
 
     /// A tick at the kept hue. The band itself is already visible in the wheel's own chroma, so this

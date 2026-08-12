@@ -238,6 +238,22 @@ public enum CameraLookGeometry {
     /// monochrome, 0 sits at the untouched reference, +3 boosts.
     public static let colorCreatorStrengthRange = -4...3
 
+    /// How far the cast reaches into the wheel, as a fraction of its radius — 1 meaning all the way
+    /// to the middle. The graphic reads depth as "how much of this colour got into the picture", so
+    /// this is just the Vivid axis rescaled: the strongest boost fills the wheel, the weakest cut
+    /// barely dents it.
+    ///
+    /// The floor of 0.15 is legibility, not measurement. At exact monochrome the honest depth is
+    /// zero, but the position still decides which hues render light or dark (the cast is applied
+    /// before the desaturation, which is why `CameraLookRendering` keeps the ring at all) — so a
+    /// nub survives to say which position it was, and the view greys it rather than colouring it.
+    public static func colorCreatorReach(strength: Int) -> Double {
+        let range = colorCreatorStrengthRange
+        let clamped = min(max(strength, range.lowerBound), range.upperBound)
+        let span = Double(range.upperBound - range.lowerBound)
+        return 0.15 + 0.85 * (Double(clamped - range.lowerBound) / span)
+    }
+
     // MARK: - Shared
 
     /// Folds an angle into 0..<360 so the tables above can be written as measured and the

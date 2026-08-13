@@ -263,7 +263,7 @@ and bottom and `0x8081` left and right, but `0x80a0` is left and right and
 `0x80a1` top and bottom. Extrapolating from Blur would have named both
 backwards.
 
-### White balance: Keep Warm Color, and the A-B/G-M shift exiftool misnames
+### White balance: Keep Warm Color, and the B-A/M-G shift exiftool misnames
 
 Two white balance settings that are not part of any picture mode, decoded
 2026-08-12 from frames H1072870-H1072875 — one variable per frame, on the OM-3.
@@ -281,10 +281,12 @@ bracketing, and the OM-3 writes **two** signed values where exiftool's table
 declares a single `int16s` — the definition predates the two-axis UI. Read it
 positionally:
 
-| Position | Axis | Positive | Negative |
+| Position | Axis | Negative | Positive |
 | --- | --- | --- | --- |
-| First value | A ↔ B | A (amber) | B (blue) |
-| Second value | G ↔ M | G (green) | M (magenta) |
+| First value | B ↔ A | B (blue) | A (amber) |
+| Second value | M ↔ G | M (magenta) | G (green) |
+
+Axes named the way the OM-3 and OM Workspace present them, negative end first.
 
 The frames, in order:
 

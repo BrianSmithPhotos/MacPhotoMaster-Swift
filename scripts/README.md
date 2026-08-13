@@ -263,6 +263,51 @@ and bottom and `0x8081` left and right, but `0x80a0` is left and right and
 `0x80a1` top and bottom. Extrapolating from Blur would have named both
 backwards.
 
+### White balance: Keep Warm Color, and the A-B/G-M shift exiftool misnames
+
+Two white balance settings that are not part of any picture mode, decoded
+2026-08-12 from frames H1072870-H1072875 — one variable per frame, on the OM-3.
+Both are written identically into the JPEG and the ORF.
+
+**Keep Warm Color** is `Olympus:WhiteBalance2` (0x0500): `Auto` means on,
+`Auto (Keep Warm Color Off)` means off. It is only legible under Auto WB. On a
+preset or Custom WB frame that same tag carries the WB *mode* instead
+(`Custom WB 1`, `5300K (Fine Weather)`, and so on), so the warm-colour setting
+has nowhere to appear and cannot be recovered.
+
+**The colour shift** is `Olympus:WhiteBalanceBracket` (0x0502), and both halves
+of that name are wrong for this camera. It is the WB compensation, not
+bracketing, and the OM-3 writes **two** signed values where exiftool's table
+declares a single `int16s` — the definition predates the two-axis UI. Read it
+positionally:
+
+| Position | Axis | Positive | Negative |
+| --- | --- | --- | --- |
+| First value | A ↔ B | A (amber) | B (blue) |
+| Second value | G ↔ M | G (green) | M (magenta) |
+
+The frames, in order:
+
+| Frame | Set at the camera | 0x0502 |
+| --- | --- | --- |
+| H1072870 | none (Keep Warm Color on) | `0 0` |
+| H1072871 | B+4, M+4 | `-4 -4` |
+| H1072872 | G+4, A+4 | `4 4` |
+| H1072873 | B+1, M+2 | `-1 -2` |
+| H1072874 | reset | `0 0` |
+| H1072875 | A+4, G+2 | `4 2` |
+
+The method matters more than the numbers here: H1072871 and H1072872 use the
+same magnitude on both axes, so between them they fix the *signs* but cannot
+tell which value is which axis — `-4 -4` reads the same either way round.
+H1072875's asymmetric `4 2` is what proves the order. Any future two-axis
+setting needs at least one frame with unequal magnitudes, or the result is a
+guess that looks like a measurement.
+
+The shift's effect also lands in `WB_RBLevels` and Composite `BlueBalance`
+(612 596 versus 612 432 across the two ±4 frames), but those are derived and
+move with the scene, so 0x0502 is the only place the setting itself lives.
+
 ### Still to measure
 
 Nothing. Every ring the camera writes has now been measured off real frames, so

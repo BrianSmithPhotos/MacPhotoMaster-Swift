@@ -685,4 +685,111 @@ final class CameraLookParsingTests: XCTestCase {
         XCTAssertTrue(look.segments.isEmpty)
         XCTAssertEqual(look.summary, "Muted")
     }
+
+    // MARK: - White balance
+    //
+    // Fixture values are the real readings from H1072870-H1072875, shot one variable per frame with
+    // the settings recorded at the camera before each exposure.
+
+    /// H1072875: A+4, G+2. The asymmetric magnitudes are what prove the axis order — an equal pair
+    /// reads the same whichever way round the values are.
+    func testWhiteBalanceShiftIsReportedInTheCameraSOwnLetters() throws {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Natural; 2",
+            "Olympus:WhiteBalanceBracket": "4 2",
+        ]
+
+        let look = try XCTUnwrap(CameraLookParsing.parse(from: metadata))
+
+        XCTAssertEqual(look.whiteBalanceShift?.blueAmber, 4)
+        XCTAssertEqual(look.whiteBalanceShift?.magentaGreen, 2)
+        XCTAssertEqual(look.summary, "Natural | wb A+4 G+2")
+    }
+
+    /// H1072871: B+4, M+4. Negative on both axes renders as the opposite pair of letters, never as a
+    /// minus sign — the camera has no negative amounts on this dial.
+    func testNegativeWhiteBalanceShiftRendersAsBlueAndMagenta() throws {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Natural; 2",
+            "Olympus:WhiteBalanceBracket": "-4 -4",
+        ]
+
+        let look = try XCTUnwrap(CameraLookParsing.parse(from: metadata))
+
+        XCTAssertEqual(look.summary, "Natural | wb B+4 M+4")
+    }
+
+    /// An axis at zero is a default like any other reading, so only the dialled axis appears.
+    func testZeroedAxisIsLeftOutOfTheShift() throws {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Natural; 2",
+            "Olympus:WhiteBalanceBracket": "0 -3",
+        ]
+
+        let look = try XCTUnwrap(CameraLookParsing.parse(from: metadata))
+
+        XCTAssertEqual(look.summary, "Natural | wb M+3")
+    }
+
+    /// H1072870/H1072874: nothing dialled. A zeroed pair is the default state, so it must not turn
+    /// an otherwise-silent Natural frame into an Instructions write.
+    func testUnshiftedFrameReportsNothing() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Natural; 2",
+            "Olympus:WhiteBalanceBracket": "0 0",
+            "Olympus:WhiteBalance2": "Auto",
+        ]
+
+        XCTAssertNil(CameraLookParsing.parse(from: metadata))
+    }
+
+    /// A single value names no axis, so it is left alone rather than assigned to one. exiftool
+    /// declares this tag as one `int16s`, and other bodies may well write it that way.
+    func testSingleValuedShiftIsIgnored() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Natural; 2",
+            "Olympus:WhiteBalanceBracket": "4",
+        ]
+
+        XCTAssertNil(CameraLookParsing.parse(from: metadata))
+    }
+
+    /// H1072871. Keep Warm Color off is the non-default, and the only reading this tag can give.
+    func testKeepWarmColorOffIsReported() throws {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Natural; 2",
+            "Olympus:WhiteBalance2": "Auto (Keep Warm Color Off)",
+        ]
+
+        let look = try XCTUnwrap(CameraLookParsing.parse(from: metadata))
+
+        XCTAssertTrue(look.keepWarmColorOff)
+        XCTAssertEqual(look.summary, "Natural | wb warm off")
+    }
+
+    /// Under a preset or Custom WB the same tag carries the WB mode, where the warm-colour setting
+    /// is simply not recoverable — so nothing is reported rather than a default that may be wrong.
+    func testKeepWarmColorIsSilentUnderNonAutoWhiteBalance() {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Natural; 2",
+            "Olympus:WhiteBalance2": "5300K (Fine Weather)",
+        ]
+
+        XCTAssertNil(CameraLookParsing.parse(from: metadata))
+    }
+
+    /// The white balance readings sit after the look settings, so a dialled frame keeps its existing
+    /// string and gains the shift on the end.
+    func testWhiteBalanceFollowsTheLookSettings() throws {
+        let metadata: [String: Any] = [
+            "Olympus:PictureMode": "Vivid; 2",
+            "Olympus:PictureModeContrast": "1 (min -2, max 2)",
+            "Olympus:WhiteBalanceBracket": "4 2",
+            "Olympus:WhiteBalance2": "Auto (Keep Warm Color Off)",
+        ]
+
+        let look = try XCTUnwrap(CameraLookParsing.parse(from: metadata))
+
+        XCTAssertEqual(look.summary, "Vivid | contrast +1 | wb A+4 G+2 | wb warm off")
+    }
 }

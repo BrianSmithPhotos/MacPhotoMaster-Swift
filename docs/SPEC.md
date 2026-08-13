@@ -175,6 +175,21 @@ deterministically, and copy files into local storage.
     neutral mode-dial value so a later RAW edit isn't pre-committed to the in-camera rendering.
     The camera's `*` "profile has been edited" indicator is not recoverable: it compares against the
     slot's saved baseline, and the file only carries current values. The values make it redundant.
+  - The same string also carries the two **white balance** menu settings, which are not creative-dial
+    settings but belong here for the same reason — no standard EXIF tag holds either. The
+    compensation is `Olympus:WhiteBalanceBracket` (0x0502), two signed values that exiftool declares
+    as one and misnames (it is compensation, not bracketing; reported upstream as exiftool issue
+    462), rendered in the camera's own letters as `wb A+4 G+2` so the string carries no sign
+    convention to misread. Keep Warm Color is `Olympus:WhiteBalance2` (0x0500) and renders as
+    `wb warm off`; it is legible only under Auto WB, because on a preset or Custom WB frame that tag
+    carries the WB mode instead, so anything else is reported as nothing rather than as a default.
+    Unlike the look settings this is recorded for documentation, not recovery: the shift survives
+    into the raw as-shot neutral and a RAW processor already applies it (measured through
+    `CIRAWFilter` — blue-amber moves `neutralTemperature`, magenta-green moves `neutralTint`, both
+    monotonic across ±4, and it survives the DNG detour in `AsShotNeutral`). What no processor shows
+    is the setting in the camera's own units, which is what this records. The raw therefore needs no
+    write and does not get one; the JPEG, where the shift is baked into pixels and the numbers are
+    gone, is where the record earns its place.
 - **iPad divergence:** no `exiftool`, so there's no in-place write at all — `NativeMetadataWriter`
   always writes a `.xmp` sidecar instead (see its doc comment), and on iPad that sidecar is staged in
   local app storage, never on the camera/card itself, keyed by original filename + size rather than

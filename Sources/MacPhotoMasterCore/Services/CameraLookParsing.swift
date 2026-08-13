@@ -68,6 +68,7 @@ public enum CameraLookParsing {
         pictureModeEffect(metadata, into: &look)
         gradation(metadata, into: &look)
         tone(metadata, into: &look)
+        whiteBalance(metadata, into: &look)
 
         if look.isModeOnly, chosenLook.isEmpty, pictureMode == "Natural" { return nil }
         return look
@@ -404,6 +405,33 @@ public enum CameraLookParsing {
     /// where `trailingInt` would trip over the trailing `"2)"`.
     private static func leadingInt(_ field: String) -> Int? {
         field.split(separator: " ").first.flatMap { Int($0) }
+    }
+
+    /// The two white balance menu settings, neither of which any standard EXIF tag carries.
+    ///
+    /// The shift is `0x0502`, which holds **two** signed values — blue-amber then magenta-green —
+    /// where exiftool declares a single `int16s` and names it `WhiteBalanceBracket`. Both halves of
+    /// that name are wrong for this camera: it is compensation, not bracketing (reported upstream at
+    /// exiftool issue 462). Values arrive space-separated rather than through the usual `;` fields,
+    /// and anything but the two-value form is left alone rather than guessed at, because a lone
+    /// value names no axis. exiftool has a second `WhiteBalanceBracket` at `0x0303`, but the OM-3
+    /// writes only `0x0502`, so the unqualified key is unambiguous here.
+    ///
+    /// Keep Warm Color is legible only under Auto WB. On a preset or Custom WB frame `WhiteBalance2`
+    /// carries the WB *mode* instead, so only the explicit off text is trusted — anything else stays
+    /// silent rather than reporting a default that may simply be unreadable.
+    private static func whiteBalance(_ metadata: [String: Any], into look: inout CameraLook) {
+        let shift = text(metadata, "Olympus:WhiteBalanceBracket")
+            .split(separator: " ")
+            .compactMap { Int($0) }
+        if shift.count == 2, shift[0] != 0 || shift[1] != 0 {
+            look.whiteBalanceShift = CameraLook.WhiteBalanceShift(
+                blueAmber: shift[0], magentaGreen: shift[1])
+        }
+
+        if text(metadata, "Olympus:WhiteBalance2") == "Auto (Keep Warm Color Off)" {
+            look.keepWarmColorOff = true
+        }
     }
 
     private static func fields(_ metadata: [String: Any], _ key: String) -> [String] {

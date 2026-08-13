@@ -79,6 +79,23 @@ public struct CameraLook: Hashable {
         }
     }
 
+    /// The white balance compensation, one signed amount per axis. Named negative-end-first to match
+    /// the OM-3, OM Workspace and exiftool's own `WBAdjBlueAmber`/`WBAdjMagentaGreen`, so `blueAmber`
+    /// is positive toward amber and `magentaGreen` positive toward green.
+    ///
+    /// Unlike the look settings this survives into the raw as-shot neutral, so a RAW processor
+    /// already applies it — recording it is documentary, a note of what was dialled in the camera's
+    /// own units, which no processor will show because they all display their own derived temp/tint.
+    public struct WhiteBalanceShift: Hashable {
+        public let blueAmber: Int
+        public let magentaGreen: Int
+
+        public init(blueAmber: Int, magentaGreen: Int) {
+            self.blueAmber = blueAmber
+            self.magentaGreen = magentaGreen
+        }
+    }
+
     public var partialColor: PartialColor?
     public var artEffects: [ArtEffect] = []
     public var colorCreator: ColorCreator?
@@ -108,6 +125,12 @@ public struct CameraLook: Hashable {
     public var gradationIsAuto: Bool = false
 
     public var toneLevels: [Slider] = []
+
+    /// Both axes zero is a default, so an unshifted frame holds `nil` rather than a zeroed shift.
+    public var whiteBalanceShift: WhiteBalanceShift?
+    /// Keep Warm Color is on by default, so only the off reading is ever held — and only when the
+    /// frame is Auto WB, where the setting is legible at all. See `CameraLookParsing.whiteBalance`.
+    public var keepWarmColorOff: Bool = false
 
     public init() {}
 
@@ -155,6 +178,9 @@ public struct CameraLook: Hashable {
 
         if !toneLevels.isEmpty { segments.append(Self.joined(toneLevels)) }
 
+        if let whiteBalanceShift { segments.append(Self.rendered(whiteBalanceShift)) }
+        if keepWarmColorOff { segments.append("wb warm off") }
+
         return segments
     }
 
@@ -165,6 +191,22 @@ public struct CameraLook: Hashable {
 
     /// True when the mode was named but nothing non-default was dialled in.
     public var isModeOnly: Bool { segments.isEmpty }
+
+    /// `wb A+4 G+2` — the letter names the direction dialled toward, exactly as the camera shows it,
+    /// so the rendered string carries no sign convention for a reader to get wrong. An axis at zero
+    /// is a default and drops out, leaving a single-axis shift as just `wb B+4`.
+    private static func rendered(_ shift: WhiteBalanceShift) -> String {
+        let axes = [
+            axis(shift.blueAmber, negative: "B", positive: "A"),
+            axis(shift.magentaGreen, negative: "M", positive: "G"),
+        ]
+        return (["wb"] + axes.compactMap { $0 }).joined(separator: " ")
+    }
+
+    private static func axis(_ value: Int, negative: String, positive: String) -> String? {
+        guard value != 0 else { return nil }
+        return "\(value < 0 ? negative : positive)+\(abs(value))"
+    }
 
     private static func joined(_ sliders: [Slider]) -> String {
         sliders.map { "\($0.code)\(signed($0.value))" }.joined(separator: " ")

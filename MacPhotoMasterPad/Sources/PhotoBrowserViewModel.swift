@@ -67,6 +67,11 @@ final class PhotoBrowserViewModel: ObservableObject {
     /// iPad yet) — until then it's just `titlePreview` below, a live rename preview.
     @Published var editableDescription: String = ""
     @Published var editableKeywords: String = ""
+
+    /// The keywords `loadEditBuffer` (or a staged draft) put in `editableKeywords` for the current
+    /// photo, so `suggestAI` can tell what the user has added by hand since (see
+    /// `MetadataEditParsing.userAddedKeywords`) — mirrors the Mac app's `loadedKeywords`.
+    private var loadedKeywords: [String] = []
     @Published private(set) var isSavingMetadata = false
     @Published var saveStatusMessage: String?
 
@@ -525,11 +530,13 @@ final class PhotoBrowserViewModel: ObservableObject {
         guard let asset = previewAsset else {
             editableDescription = ""
             editableKeywords = ""
+            loadedKeywords = []
             updateRenamePreview()
             return
         }
         editableDescription = asset.descriptionText
         editableKeywords = asset.keywords.joined(separator: ", ")
+        loadedKeywords = asset.keywords
         updateRenamePreview()
         applyStagedDraftIfPresent(for: asset)
         // With the toggle on, eagerly recompute the auto-crop for the newly previewed photo so the
@@ -580,8 +587,11 @@ final class PhotoBrowserViewModel: ObservableObject {
             editableDescription = draft.description
             // The develop marker is app bookkeeping, not one of the user's keywords, so it stays out
             // of the editable buffer — `performSave` puts it back when restaging.
-            editableKeywords = RawDevelopService.removingDevelopMarker(from: draft.keywords)
-                .joined(separator: ", ")
+            let keywords = RawDevelopService.removingDevelopMarker(from: draft.keywords)
+            editableKeywords = keywords.joined(separator: ", ")
+            // A restored draft is loaded state, not something typed this session, so it becomes the
+            // baseline `suggestAI` diffs a hand-typed hint against.
+            loadedKeywords = keywords
         }
     }
 
@@ -1557,6 +1567,12 @@ final class PhotoBrowserViewModel: ObservableObject {
             // and add it to the description (and as a keyword) — no fabrication, always correct.
             var description = result.description
             var keywords = result.keywords
+            // Captured before `editableKeywords` is overwritten below: the model's list replaces the
+            // whole field, and a keyword the user typed as a hint has to survive that. The prompt asks
+            // the model to treat existing keywords as a trusted guide, but the small on-device models
+            // this app runs routinely ignore that and drop the hint.
+            let userAddedKeywords = MetadataEditParsing.userAddedKeywords(
+                current: MetadataEditParsing.parseKeywords(editableKeywords), loaded: loadedKeywords)
             if let scientificNames = sourceRepresentativeID.flatMap({ birdScientificNamesByRepresentativeID[$0] }) {
                 // Post-hoc-validate a guided provider's typed species guess against the photo's eBird
                 // region: `foundation:` is sent no candidate list (it won't fit its context window), so
@@ -1587,7 +1603,8 @@ final class PhotoBrowserViewModel: ObservableObject {
                 }
             }
             editableDescription = description
-            editableKeywords = keywords.joined(separator: ", ")
+            editableKeywords = MetadataEditParsing.merging(userAdded: userAddedKeywords, into: keywords)
+                .joined(separator: ", ")
             // The timeout-retry fallback center-crops and re-sends, so its image — not the one
             // decoded above — is what actually produced this result.
             if result.timeoutRetrySucceeded, let retryImage = result.evaluatedImage {

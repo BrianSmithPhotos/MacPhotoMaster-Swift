@@ -275,6 +275,7 @@ final class AISuggestionServiceTests: XCTestCase {
         let prompt = try XCTUnwrap(provider.userPromptsPerCall.first)
         XCTAssertTrue(prompt.contains("strong, trusted guide"))
         XCTAssertTrue(prompt.contains("northern cardinal, cardinalis cardinalis"))
+        XCTAssertTrue(prompt.contains("mention it in the description as well"))
     }
 
     func testSuggestOmitsExistingKeywordsLineWhenBlank() async throws {
@@ -290,6 +291,7 @@ final class AISuggestionServiceTests: XCTestCase {
 
         let prompt = try XCTUnwrap(provider.userPromptsPerCall.first)
         XCTAssertFalse(prompt.contains("strong, trusted guide"))
+        XCTAssertFalse(prompt.contains("mention it in the description as well"))
     }
 
     func testSuggestIncludesLocationContextInPromptWhenProvided() async throws {

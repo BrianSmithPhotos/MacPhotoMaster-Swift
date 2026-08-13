@@ -242,6 +242,14 @@ public struct AISuggestionService {
                     + "trusted guide (the user has already confirmed them, often from an easier photo "
                     + "of the same subject) and prefer them over an independent guess unless what's "
                     + "shown clearly contradicts them: " + trimmedKeywords)
+            // The keywords are also the user's way of pointing at something they want written up — a
+            // named subject or object they've spotted in the frame. Without this the model treats them
+            // as keyword-list input only and can return a description that never mentions them.
+            lines.append(
+                "If one of those keywords names something you can actually see in the frame — a "
+                    + "subject, an object, a place — mention it in the description as well, not just in "
+                    + "the keywords: the user added it because it matters to this photo. Say nothing "
+                    + "about a keyword you cannot see in the image.")
         }
         let trimmedLocation = locationContext.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedLocation.isEmpty {

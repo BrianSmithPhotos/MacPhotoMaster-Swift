@@ -114,6 +114,12 @@ final class SourceBrowserViewModel: ObservableObject {
     /// from the rename filename, never from a user-typed title). See [[feedback-follow-reference-app]].
     @Published var editableDescription: String = ""
     @Published var editableKeywords: String = ""
+
+    /// The keywords `loadEditBuffer` put in `editableKeywords` for the current photo, so `suggestAI`
+    /// can tell what the user has added by hand since (see `MetadataEditParsing.userAddedKeywords`).
+    /// Deliberately not refreshed by the suggestion's own auto-save: a hint typed for this photo
+    /// keeps steering repeat Suggest runs until the selection moves.
+    private var loadedKeywords: [String] = []
     @Published var editableLatitudeText: String = ""
     @Published var editableLongitudeText: String = ""
     @Published private(set) var isSavingMetadata = false
@@ -1179,6 +1185,11 @@ final class SourceBrowserViewModel: ObservableObject {
             guard selectedAssetID == id else { return }
             var description = result.description
             var keywords = result.keywords
+            // Captured before `editableKeywords` is overwritten below: the model's list replaces the
+            // whole field, and a keyword the user typed as a hint has to survive that whether or not
+            // the model chose to echo it back.
+            let userAddedKeywords = MetadataEditParsing.userAddedKeywords(
+                current: MetadataEditParsing.parseKeywords(editableKeywords), loaded: loadedKeywords)
             if let scientificNames = sourceRepresentativeID.flatMap({ birdScientificNamesByRepresentativeID[$0] }) {
                 // Post-hoc-validate a guided provider's typed species guess against the photo's eBird
                 // region: `foundation:` is sent no candidate list (it won't fit its context window), so
@@ -1204,7 +1215,8 @@ final class SourceBrowserViewModel: ObservableObject {
                 }
             }
             editableDescription = description
-            editableKeywords = keywords.joined(separator: ", ")
+            editableKeywords = MetadataEditParsing.merging(userAdded: userAddedKeywords, into: keywords)
+                .joined(separator: ", ")
             // The timeout-retry crop (`AISuggestionService`'s separate fallback, unrelated to the
             // subject-isolation toggle) narrows the frame again, so the retry's own image is what
             // actually produced this result.
@@ -1490,6 +1502,7 @@ final class SourceBrowserViewModel: ObservableObject {
         guard let asset = selectedAsset else {
             editableDescription = ""
             editableKeywords = ""
+            loadedKeywords = []
             editableLatitudeText = ""
             editableLongitudeText = ""
             updateRenamePreview()
@@ -1497,6 +1510,7 @@ final class SourceBrowserViewModel: ObservableObject {
         }
         editableDescription = asset.descriptionText
         editableKeywords = asset.keywords.joined(separator: ", ")
+        loadedKeywords = asset.keywords
         editableLatitudeText = asset.gpsLatitude.map { String($0) } ?? ""
         editableLongitudeText = asset.gpsLongitude.map { String($0) } ?? ""
         updateRenamePreview()

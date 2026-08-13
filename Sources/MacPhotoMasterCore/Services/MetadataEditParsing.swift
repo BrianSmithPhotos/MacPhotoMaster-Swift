@@ -13,6 +13,27 @@ public enum MetadataEditParsing {
             .filter { !$0.isEmpty }
     }
 
+    /// The keywords in the edit buffer that weren't loaded from the file — what the user typed (or
+    /// what a reverse-geocode lookup merged in) since the photo was selected. An AI suggestion
+    /// replaces the whole keyword field with the model's own list, so these need re-attaching
+    /// afterwards: the prompt asks the model to treat existing keywords as a trusted guide, but
+    /// that's compliance, not a guarantee — small on-device models routinely ignore it and drop a
+    /// hint the user typed specifically to steer the identification.
+    ///
+    /// Case-insensitive, and keeps the buffer's own order.
+    public static func userAddedKeywords(current: [String], loaded: [String]) -> [String] {
+        let loadedLowercased = Set(loaded.map { $0.lowercased() })
+        return current.filter { !loadedLowercased.contains($0.lowercased()) }
+    }
+
+    /// Puts `userAdded` back at the front of an AI suggestion's keyword list — most
+    /// specific/identifying first, same ordering rule the prompt gives the model — skipping any the
+    /// model already produced.
+    public static func merging(userAdded: [String], into keywords: [String]) -> [String] {
+        let existing = Set(keywords.map { $0.lowercased() })
+        return userAdded.filter { !existing.contains($0.lowercased()) } + keywords
+    }
+
     /// Parses the latitude/longitude text fields into a `GPSCoordinate`, reusing `altitude` from
     /// whatever the asset already has (the edit form has no altitude field — that's populated by
     /// Timeline/elevation lookups, not typed in, per docs/SPEC.md §7). Either field blank or

@@ -294,6 +294,17 @@ default settings, the point being Apple's engine applied to the file as the came
   skews AI description/keyword output toward the filter effect rather than the actual scene.
 - Vision-capability pre-check before sending an image request (don't send a vision request to a
   text-only model).
+- **A hand-typed keyword hint survives the suggestion.** Keywords the user adds to the field before
+  pressing Suggest (typically to steer a species ID) are sent to the model as trusted context *and*
+  re-attached to the front of its result afterwards, deterministically — the prompt asks the model to
+  keep them, but only capable models comply, and a small on-device one dropping the hint is what the
+  user actually sees. Keywords loaded from the file are not force-preserved, so a re-suggest can still
+  drop a stale one. Baseline is what was loaded when the photo was selected, so the hint keeps
+  steering repeat Suggest runs until the selection moves
+  (`MetadataEditParsing.userAddedKeywords`/`merging`). The prompt additionally asks the model to
+  mention a hinted keyword **in the description** when it can see the thing named — a hint is often the
+  user pointing at a subject they want written up (a sculpture, a landmark), not just a keyword to
+  carry. That half is model compliance, not a guarantee: nothing can force prose about the hint.
 - Fallback chain for timeouts/empty responses: retry once with a cropped, lower-effort request
   before surfacing a failure to the user. Log request timing/payload size for diagnostics.
 - Auto-applied metadata rules at save/process time (not shown live in the editable fields):

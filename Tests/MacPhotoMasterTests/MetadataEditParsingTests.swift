@@ -22,6 +22,45 @@ final class MetadataEditParsingTests: XCTestCase {
         XCTAssertEqual(MetadataEditParsing.parseKeywords(""), [])
     }
 
+    // MARK: - userAddedKeywords / merging
+
+    func testUserAddedKeywordsReturnsOnlyWhatIsNotLoadedFromTheFile() {
+        let added = MetadataEditParsing.userAddedKeywords(
+            current: ["egret", "marsh", "great blue heron"], loaded: ["egret", "marsh"])
+
+        XCTAssertEqual(added, ["great blue heron"])
+    }
+
+    func testUserAddedKeywordsMatchesLoadedKeywordsCaseInsensitively() {
+        let added = MetadataEditParsing.userAddedKeywords(
+            current: ["Egret", "great blue heron"], loaded: ["egret"])
+
+        XCTAssertEqual(added, ["great blue heron"])
+    }
+
+    func testUserAddedKeywordsUnchangedBufferAddsNothing() {
+        XCTAssertEqual(
+            MetadataEditParsing.userAddedKeywords(current: ["egret", "marsh"], loaded: ["egret", "marsh"]), [])
+    }
+
+    func testMergingPutsUserKeywordsFirst() {
+        let merged = MetadataEditParsing.merging(
+            userAdded: ["great blue heron"], into: ["heron", "wading bird", "wetland"])
+
+        XCTAssertEqual(merged, ["great blue heron", "heron", "wading bird", "wetland"])
+    }
+
+    func testMergingDoesNotDuplicateAKeywordTheModelAlreadyReturned() {
+        let merged = MetadataEditParsing.merging(
+            userAdded: ["great blue heron"], into: ["Great Blue Heron", "wetland"])
+
+        XCTAssertEqual(merged, ["Great Blue Heron", "wetland"])
+    }
+
+    func testMergingNothingAddedLeavesTheModelListAlone() {
+        XCTAssertEqual(MetadataEditParsing.merging(userAdded: [], into: ["heron", "wetland"]), ["heron", "wetland"])
+    }
+
     // MARK: - parseGPS
 
     func testParseGPSValidLatitudeAndLongitudeReusesGivenAltitude() {

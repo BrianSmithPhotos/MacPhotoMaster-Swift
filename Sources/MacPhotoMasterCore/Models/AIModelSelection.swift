@@ -13,8 +13,8 @@ public enum AIProviderID: String {
 }
 
 /// Parses the `"<provider>:<model>"` convention `SourceBrowserViewModel.aiModelText` uses (e.g.
-/// `"ollama:qwen3.6:35b"`, `"openrouter:google/gemini-2.5-flash"`). Splits on the *first* colon
-/// only — Ollama's own model-tag format embeds a colon (`"qwen2.5vl:72b"`), while OpenRouter slugs
+/// `"ollama:qwen3.8:27b-mlx"`, `"openrouter:google/gemini-2.5-flash"`). Splits on the *first* colon
+/// only — Ollama's own model-tag format embeds a colon (`"qwen3.8:27b-mlx"`), while OpenRouter slugs
 /// use `/` and never contain one, so this is unambiguous.
 public struct AIModelSelection {
     public let providerID: AIProviderID
@@ -32,9 +32,9 @@ public struct AIModelSelection {
     /// Default preset list for the AI Model dropdown, in the user-specified order — the field stays
     /// freely editable for any model not in this list.
     public static let presets: [String] = [
+        "ollama:qwen3.8:27b-mlx",
         "mlx:mlx-community/gemma-4-31b-it-8bit",
         "foundation:apple",
-        "ollama:qwen3.6:35b",
         "openrouter:google/gemini-3.1-flash-lite-image",
         "openrouter:google/gemini-2.5-flash",
         "openrouter:openai/gpt-5.1",
@@ -43,7 +43,6 @@ public struct AIModelSelection {
         "openrouter:openai/gpt-5.5",
         "openrouter:openai/gpt-5.6-luna",
         "openrouter:openai/gpt-4o-mini",
-        "ollama:qwen2.5vl:72b",
         "openrouter:qwen/qwen2.5-vl-72b-instruct",
         "openrouter:anthropic/claude-sonnet-5",
         "openrouter:mistralai/mistral-medium-3-5",

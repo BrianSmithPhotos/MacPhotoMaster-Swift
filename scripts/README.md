@@ -1374,6 +1374,18 @@ had no effect on the rendering. The visualiser must therefore not draw contrast 
 `Gradation` is anything but Normal, even though the field is populated - drawing it
 would show a 20-level bend the photograph never received.
 
+**OM Workspace does the same thing, observed 2026-08-16.** With a gradation preset in
+play, Workspace's Contrast slider moves and the render does not change. That is worth
+recording for two reasons. It puts the finding outside this rig: the vendor's own
+developer drops contrast at the same point in the pipeline, so this is where the
+rendering model actually parts company with the menu, not an artefact of measuring
+camera JPEGs off a ramp. And Workspace leaves the slider *enabled* - the stored value
+sits there looking live - which is precisely the trap the visualiser sidesteps by
+drawing contrast as "unused" instead of hiding it or believing it. Why Workspace does
+not grey it out is unknown. The value is per-picture-mode state that has to survive
+Gradation returning to Normal, so it must still be shown from somewhere, but that is
+an argument for greying it, not for leaving it live.
+
 The gradation curves themselves, in Natural:
 
 | setting | 16 | 64 | 128 | 192 | 224 | max dev |

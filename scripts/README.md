@@ -1381,10 +1381,20 @@ developer drops contrast at the same point in the pipeline, so this is where the
 rendering model actually parts company with the menu, not an artefact of measuring
 camera JPEGs off a ramp. And Workspace leaves the slider *enabled* - the stored value
 sits there looking live - which is precisely the trap the visualiser sidesteps by
-drawing contrast as "unused" instead of hiding it or believing it. Why Workspace does
-not grey it out is unknown. The value is per-picture-mode state that has to survive
-Gradation returning to Normal, so it must still be shown from somewhere, but that is
-an argument for greying it, not for leaving it live.
+drawing contrast as "unused" instead of hiding it or believing it.
+
+**The camera menu leaves it selectable too**, checked on the OM-3 body 2026-08-16
+under every gradation setting - so Workspace is mirroring the camera rather than
+making its own call, and the question is why the *camera* does not disable it. Most
+likely this was never designed as a mutual exclusion and simply falls out of pipeline
+order: a gradation preset replaces the tone stage the contrast dial feeds, so contrast
+is not overridden by a rule so much as rendered irrelevant by what runs instead. The
+maker note is the evidence for that reading - the camera still writes the ignored +2,
+where a designed exclusion would more plausibly clear it or skip it. Against that, the
+value is per-picture-mode state that has to survive Gradation returning to Normal, so
+it does have to be displayed from somewhere; but that argues for greying it while
+still showing the number, which is what neither the camera nor Workspace does. Left
+as an inference, not a finding: nothing here can see the firmware.
 
 The gradation curves themselves, in Natural:
 

@@ -437,9 +437,9 @@ In priority order — the rest of the visualiser first.
   High Key +1.2, Low Key +1.0 and Auto -0.6 are all the identity curve, against a Normal control of
   +20.2. **Corroborated outside this app, 2026-08-16**: OM Workspace ignores its own Contrast slider
   under a gradation preset too — so this is the rendering model, not a quirk of in-camera JPEGs.
-  Workspace leaves the slider enabled while it does nothing, which is the presentation this app
-  deliberately does not copy; "unused" says the same thing without inviting the user to dial a
-  number that will not land.
+  Workspace leaves the slider enabled while it does nothing, and so does the camera menu (checked on
+  the body 2026-08-16) — which is the presentation this app deliberately does not copy; "unused"
+  says the same thing without inviting the user to dial a number that will not land.
 
   **The composite is one grey curve, not three.** `ToneLevel`'s controls were suspected of curving
   the channels apart, because the per-channel spread ran near a third of each deviation — but that

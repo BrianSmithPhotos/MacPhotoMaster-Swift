@@ -57,17 +57,30 @@ final class OlympusMakerNoteReaderTests: XCTestCase {
     }
 
     /// The TIFF block: IFD0 pointing at an ExifIFD, which holds the exposure bias and the note.
-    private func tiffBlock(note: [UInt8]) -> [UInt8] {
+    ///
+    /// `padding` inflates a filler entry sitting ahead of the note in the value pool, which is how a
+    /// note gets pushed past the reader's head-read cap without inventing a fake container.
+    private func tiffBlock(note: [UInt8], padding: Int = 0) -> [UInt8] {
         let ifd0Start = 8
         let exifStart = ifd0Start + 2 + 12 + 4
         let ifd0 = ifd(
             [Entry(tag: 0x8769, format: 4, count: 1, payload: le32(exifStart))], at: ifd0Start)
-        let exif = ifd(
-            [
-                Entry(tag: 0x9204, format: 10, count: 1, payload: le32(-7) + le32(10)),
-                Entry(tag: 0x927C, format: 7, count: note.count, payload: note),
-            ], at: exifStart)
-        return Array("II".utf8) + le16(42) + le32(ifd0Start) + ifd0 + exif
+        var entries = [Entry(tag: 0x9204, format: 10, count: 1, payload: le32(-7) + le32(10))]
+        if padding > 0 {
+            entries.append(
+                Entry(
+                    tag: 0x9286, format: 7, count: padding,
+                    payload: [UInt8](repeating: 0x20, count: padding)))
+        }
+        entries.append(Entry(tag: 0x927C, format: 7, count: note.count, payload: note))
+        return Array("II".utf8) + le16(42) + le32(ifd0Start) + ifd0 + ifd(entries, at: exifStart)
+    }
+
+    private func writeTemporaryFile(_ bytes: Data) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).orf")
+        try bytes.write(to: url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
     }
 
     /// The real shape of `ArtFilterEffect`: 20 components, of which only the first four name the
@@ -158,16 +171,62 @@ final class OlympusMakerNoteReaderTests: XCTestCase {
 
     /// A card pulled mid-write is a real thing to meet, and it must read as unknown rather than
     /// trap on an offset that runs off the end of the bytes.
+    ///
+    /// Every length, not a stride: this used to step by 7 and so jumped straight over 12, the one
+    /// length that actually trapped — a JPEG ending exactly at its `Exif\0\0` marker, which put the
+    /// TIFF header's offset one byte past the end.
     func testTruncatedFileReadsAsUnknownRatherThanTrapping() {
         let whole = jpeg(tiffBlock(note: makerNote(cameraSettings: cameraSettings)))
 
-        for length in stride(from: 0, to: whole.count, by: 7) {
+        for length in 0...whole.count {
             _ = OlympusMakerNoteReader.signals(in: whole.prefix(length))
         }
     }
 
     func testEmptyDataIsUnknown() {
         XCTAssertNil(OlympusMakerNoteReader.signals(in: Data()))
+    }
+
+    /// Reading from a URL takes only the head of the file, so it has to agree with reading the whole
+    /// of it — the file path is what the app actually calls.
+    func testReadingFromAFileAgreesWithReadingTheWholeBytes() throws {
+        let bytes = jpeg(tiffBlock(note: makerNote(cameraSettings: cameraSettings)))
+
+        let fromFile = try OlympusMakerNoteReader.signals(at: writeTemporaryFile(bytes))
+
+        XCTAssertEqual(fromFile, OlympusMakerNoteReader.signals(in: bytes))
+        XCTAssertEqual(fromFile?.shotNumber, 3)
+    }
+
+    /// A note sitting past the head-read cap must still be found. The head read is an optimisation,
+    /// and an optimisation that silently loses the signals would put grouping straight back to the
+    /// timestamp gap on exactly the frames it most needs help with.
+    func testNoteBeyondTheHeadReadIsStillFoundViaTheWholeFile() throws {
+        let bytes = Data(tiffBlock(note: makerNote(cameraSettings: cameraSettings), padding: 300 * 1024))
+
+        let fromFile = try OlympusMakerNoteReader.signals(at: writeTemporaryFile(bytes))
+
+        XCTAssertGreaterThan(bytes.count, 256 * 1024, "fixture must exceed the head cap to test this")
+        XCTAssertEqual(fromFile?.shotNumber, 3)
+        XCTAssertEqual(fromFile?.stackedFrameCount, 8)
+        XCTAssertEqual(fromFile, OlympusMakerNoteReader.signals(in: bytes))
+    }
+
+    /// The rule that makes the head read safe: given only part of a file, the reader either answers
+    /// exactly as it would with all of it, or says nothing. A partial answer is the dangerous case,
+    /// because a truncated `DriveMode` reads as a frame that simply never had a counter.
+    func testAPrefixEitherAnswersInFullOrNotAtAll() {
+        let whole = jpeg(tiffBlock(note: makerNote(cameraSettings: cameraSettings)))
+        let expected = OlympusMakerNoteReader.signals(in: whole)
+        XCTAssertNotNil(expected)
+
+        for length in 0..<whole.count {
+            let partial = OlympusMakerNoteReader.signals(
+                in: whole.prefix(length), requiringWholeNote: true)
+            if let partial {
+                XCTAssertEqual(partial, expected, "answered differently from \(length) bytes")
+            }
+        }
     }
 
     /// The real proof, and the reason the reader exists: it must agree with `exiftool` tag for tag

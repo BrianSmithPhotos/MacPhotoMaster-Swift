@@ -20,14 +20,35 @@ import Foundation
 /// - Offsets *inside* the note are relative to the start of the note itself, not to the TIFF
 ///   header the rest of the file's offsets are measured from.
 public enum OlympusMakerNoteReader {
+    /// How much of a file to read before falling back to the whole thing. Every OM-3 frame measured
+    /// keeps its maker note far inside this: 3,714 bytes into a JPEG, and at worst 17,880 into a RAW
+    /// across 61 sampled across the library. A wide margin, not a tight fit — and undersizing it
+    /// only costs a second read, never an answer.
+    private static let headLength = 256 * 1024
+
     /// The grouping signals for one file, or `nil` if it has no readable OM System maker note —
     /// a different make, a JPEG the camera never wrote, or a truncated file.
+    ///
+    /// Reads the head of the file rather than the whole of it. Mapping the whole file is free on a
+    /// mounted card, where only the pages actually touched are ever paged in, and ruinous through
+    /// iPadOS's file provider, where a card in a tethered camera cannot be mapped at all and every
+    /// byte crosses the cable: a 373-frame card cost about three minutes that way, against twenty
+    /// seconds for the ImageIO pass beside it, which reads incrementally. The whole-file read stays
+    /// as the fallback for anything the head didn't cover.
     public static func signals(at url: URL) -> CaptureSignals? {
+        if let handle = try? FileHandle(forReadingFrom: url) {
+            defer { try? handle.close() }
+            if let head = try? handle.read(upToCount: headLength),
+                let signals = signals(in: head, requiringWholeNote: true)
+            {
+                return signals
+            }
+        }
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
         return signals(in: data)
     }
 
-    /// A whole folder's worth, off the calling actor. Each file is cheap on its own — a mapped read
+    /// A whole folder's worth, off the calling actor. Each file is cheap on its own — a bounded read
     /// and a few hundred bytes of walking — but a card holds several hundred frames, and none of
     /// that belongs on the thread drawing the grid.
     public static func signals(at urls: [URL]) async -> [URL: CaptureSignals] {
@@ -36,11 +57,19 @@ public enum OlympusMakerNoteReader {
         }.value
     }
 
-    static func signals(in bytes: Data) -> CaptureSignals? {
+    /// - Parameter requiringWholeNote: reject bytes that stop short of everything this reads, rather
+    ///   than answering from what happens to be present. Only a prefix read needs it: a short answer
+    ///   and a whole one are both non-`nil`, and grouping cannot tell them apart — it would take a
+    ///   truncated `DriveMode` for a frame that simply has no counter, which is the misgrouping this
+    ///   whole reader exists to prevent.
+    static func signals(in bytes: Data, requiringWholeNote: Bool = false) -> CaptureSignals? {
         // Every offset below is measured from the start of the file, so a `Data` slice — whose own
         // indices start wherever it was sliced from — has to be rebased before any of it is read.
         let data = bytes.startIndex == 0 ? bytes : Data(bytes)
-        guard let tiff = tiffHeaderOffset(in: data) else { return nil }
+        // The header itself has to be there, not merely pointed at: a JPEG cut off right after its
+        // `Exif\0\0` marker yields an offset one past the last byte, and reading the byte-order mark
+        // at it would trap where every other read here degrades to nil.
+        guard let tiff = tiffHeaderOffset(in: data), tiff + 8 <= data.count else { return nil }
         let file = TIFFBytes(data: data, isBigEndian: data[tiff] == 0x4D)
         guard let ifd0 = file.uint32(at: tiff + 4) else { return nil }
 
@@ -52,6 +81,16 @@ public enum OlympusMakerNoteReader {
         let exif = file.entries(at: tiff + exifOffset, base: tiff)
         guard let note = exif.first(where: { $0.tag == 0x927C }) else { return nil }
         let exposure = exif.first { $0.tag == 0x9204 }.flatMap { file.signedRational(at: $0.valueOffset) }
+
+        // Two bounds settle whether a prefix held everything. The maker note declares its own byte
+        // length and every offset inside it is relative to itself, so it is self-contained once
+        // present whole; the exposure bias is the only other thing read, and it either resolved or
+        // it didn't.
+        if requiringWholeNote {
+            let wholeNote = note.valueOffset + note.count <= data.count
+            let wholeBias = exposure != nil || !exif.contains { $0.tag == 0x9204 }
+            guard wholeNote, wholeBias else { return nil }
+        }
 
         guard file.matches("OM SYSTEM\0", at: note.valueOffset) else { return nil }
         let noteBase = note.valueOffset

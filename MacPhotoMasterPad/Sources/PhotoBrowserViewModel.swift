@@ -268,6 +268,12 @@ final class PhotoBrowserViewModel: ObservableObject {
     private let ebirdService = EBirdSpeciesListService()
     private var ebirdCache: EBirdCache?
     private static let ebirdLogger = Logger(subsystem: "MacPhotoMaster", category: "EBirdSpecies")
+
+    /// Folder-load timings. A card reached through iPadOS's file provider behaves nothing like a
+    /// mounted one, and the difference is not guessable from the Mac — two rounds of reasoning about
+    /// where the time went (bytes read, then per-file latency) each predicted a speedup far larger
+    /// than the device actually delivered. So the device says where it goes.
+    private static let loadLogger = Logger(subsystem: "MacPhotoMaster", category: "FolderLoad")
     private var folderPathByCaptureSetID: [CaptureSet.ID: String] = [:]
 
     /// The current folder's capture groups as grouping produced them, the user's manual merges over
@@ -1019,9 +1025,11 @@ final class PhotoBrowserViewModel: ObservableObject {
         Task {
             defer { isLoading = false }
             do {
+                let startedAt = Date()
                 async let assetsTask = assetLoader.loadAssets(in: folderURL)
                 async let subfoldersTask = folderBrowser.subfolders(of: folderURL)
                 let (assets, folders) = try await (assetsTask, subfoldersTask)
+                let assetsAt = Date()
                 skippedPaths = await skippedAssetPaths(inFolder: folderURL)
                 processedAssetPaths = await loadProcessedAssetPaths(inFolder: folderURL)
                 developMarkedPaths = await loadDevelopMarkedPaths(among: assets)
@@ -1032,7 +1040,15 @@ final class PhotoBrowserViewModel: ObservableObject {
                 // same inputs. Without it the timestamp gap is all there is, which merges bursts
                 // shot back to back and shatters every interval run into singles. See docs/SPEC.md §1.
                 let signals = await OlympusMakerNoteReader.signals(at: assets.map(\.url))
+                let signalsAt = Date()
                 let allSets = grouping.group(assets, signals: signals)
+                Self.loadLogger.log(
+                    """
+                    Folder load: \(assets.count) files, \
+                    ImageIO pass \(assetsAt.timeIntervalSince(startedAt), format: .fixed(precision: 1))s, \
+                    maker-note pass \(signalsAt.timeIntervalSince(assetsAt), format: .fixed(precision: 1))s, \
+                    read \(signals.count) of them
+                    """)
                 automaticCaptureSets = allSets
                 mergeIDsByAssetPath = await mergeIDs(inFolder: folderURL)
                 rederiveCaptureSets()

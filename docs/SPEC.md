@@ -65,10 +65,12 @@ deterministically, and copy files into local storage.
     exiftool; measured on a 553-frame test card that cost 39 frames against the Mac's grouping —
     all over-merges of back-to-back short bursts, never a split capture. (The same-second rule this
     replaced misgrouped 233 of those 553.) `OlympusMakerNoteReader` closes that gap by reading the
-    five tags out of the file's own bytes, and is wired in as a fill-in wherever exiftool didn't
-    answer — the whole folder, on iPad. It matches exiftool tag for tag on every frame of the OM-3
-    test card; **still to be confirmed on the device itself**, where the open question is whether
-    iPadOS hands the app the original card bytes rather than a transcoded copy.
+    five tags out of the file's own bytes. Each app wires it in for itself, and they are separate
+    projects: the Mac's `SourceBrowserViewModel` uses it as a fill-in wherever exiftool didn't
+    answer, and the iPad's `PhotoBrowserViewModel` uses it as the only reader there is. It matches
+    exiftool tag for tag on every frame of the OM-3 test card; **still to be confirmed on the device
+    itself**, where the open question is whether iPadOS hands the app the original card bytes rather
+    than a transcoded copy.
   - **Manual merge** overrides all of the above: select two or more capture sets in the source grid
     and merge them into one (Mac right-click "Merge into One Capture Set", iPad Select mode's
     "Merge"), reversible with "Split Apart". For captures the camera left no counter behind for — a

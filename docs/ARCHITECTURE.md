@@ -371,8 +371,9 @@ as possible:
   capture-grouping signals in a couple of launches, which is what makes running it on every folder
   load affordable. The signals it reads live in Olympus maker notes, which ImageIO exposes no
   dictionary for at all, so the iPad reads the same five tags out of the file's bytes instead
-  (`OlympusMakerNoteReader`) and `SourceBrowserViewModel.groupingSignals(for:)` fills in with it
-  wherever exiftool didn't answer. Deliberately not a general maker-note decoder: everything
+  (`OlympusMakerNoteReader`). Both apps have to wire it in separately, since they are separate
+  projects with separate view models: `SourceBrowserViewModel.groupingSignals(for:)` fills in with
+  it wherever exiftool didn't answer, and `PhotoBrowserViewModel.load(_:)` calls it directly. Deliberately not a general maker-note decoder: everything
   grouping needs lives in one Olympus `CameraSettings` subdirectory, and anything wider belongs to
   exiftool on the Mac.
 - **Writes**: only batch files that share byte-identical target tag values — pass the shared

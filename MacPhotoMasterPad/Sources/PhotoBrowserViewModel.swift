@@ -1025,12 +1025,14 @@ final class PhotoBrowserViewModel: ObservableObject {
                 skippedPaths = await skippedAssetPaths(inFolder: folderURL)
                 processedAssetPaths = await loadProcessedAssetPaths(inFolder: folderURL)
                 developMarkedPaths = await loadDevelopMarkedPaths(among: assets)
-                // No `signals:` here, deliberately. The camera's burst/bracket counter lives in the
-                // Olympus maker notes, which only exiftool reads and iOS can't run — ImageIO
-                // exposes no maker-note dictionary at all. So iPad groups on the timestamp gap
-                // alone, which over-merges back-to-back short bursts the Mac separates but never
-                // splits a capture the Mac keeps whole. See docs/SPEC.md §1.
-                let allSets = grouping.group(assets)
+                // The same camera signals the Mac groups on, read straight out of the frame's own
+                // bytes. exiftool cannot run here and ImageIO exposes no maker-note dictionary, but
+                // the Olympus note is in the file regardless and `OlympusMakerNoteReader` walks to
+                // it unaided — so this is not a lesser iPad path, it is the same six checks on the
+                // same inputs. Without it the timestamp gap is all there is, which merges bursts
+                // shot back to back and shatters every interval run into singles. See docs/SPEC.md §1.
+                let signals = await OlympusMakerNoteReader.signals(at: assets.map(\.url))
+                let allSets = grouping.group(assets, signals: signals)
                 automaticCaptureSets = allSets
                 mergeIDsByAssetPath = await mergeIDs(inFolder: folderURL)
                 rederiveCaptureSets()

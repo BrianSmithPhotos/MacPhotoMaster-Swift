@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Reads the five OM System maker-note tags capture-set grouping needs, by walking the file's own
 /// bytes rather than asking `exiftool`. This is the iPad's only route to them: iOS cannot spawn a
@@ -36,17 +37,29 @@ public enum OlympusMakerNoteReader {
     /// seconds for the ImageIO pass beside it, which reads incrementally. The whole-file read stays
     /// as the fallback for anything the head didn't cover.
     public static func signals(at url: URL) -> CaptureSignals? {
+        read(at: url).signals
+    }
+
+    /// The read itself, reporting which path answered. The fallback costs whole megabytes against
+    /// the head's quarter of one, so how often it fires is the difference between a folder opening
+    /// at once and taking a minute — worth counting rather than assuming.
+    static func read(at url: URL) -> (signals: CaptureSignals?, usedWholeFile: Bool) {
         if let handle = try? FileHandle(forReadingFrom: url) {
             defer { try? handle.close() }
             if let head = try? handle.read(upToCount: headLength),
                 let signals = signals(in: head, requiringWholeNote: true)
             {
-                return signals
+                return (signals, false)
             }
         }
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
-        return signals(in: data)
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return (nil, false) }
+        return (signals(in: data), true)
     }
+
+    /// Where the pass actually spends its time. Two rounds of reasoning about it from the Mac each
+    /// predicted a speedup the iPad did not deliver, so the device reports rather than the reasoning
+    /// predicting: how long the pass took, and how many files needed the expensive whole-file read.
+    private static let logger = Logger(subsystem: "MacPhotoMaster", category: "MakerNote")
 
     /// How many files to have open at once. Sized like `PhotoAssetLoader`'s fan-out for consistency,
     /// though the reason differs: that pass is CPU-bound on ImageIO parsing, while this one spends
@@ -63,23 +76,35 @@ public enum OlympusMakerNoteReader {
         await Task.detached(priority: .userInitiated) {
             var found: [URL: CaptureSignals] = [:]
             var next = 0
+            var wholeFileReads = 0
+            let startedAt = Date()
 
-            await withTaskGroup(of: (URL, CaptureSignals?).self) { group in
+            await withTaskGroup(of: (URL, CaptureSignals?, Bool).self) { group in
                 func startNextReadIfAny() {
                     guard next < urls.count else { return }
                     let url = urls[next]
                     next += 1
-                    group.addTask { (url, signals(at: url)) }
+                    group.addTask {
+                        let read = read(at: url)
+                        return (url, read.signals, read.usedWholeFile)
+                    }
                 }
 
                 for _ in 0..<min(concurrentReads, urls.count) { startNextReadIfAny() }
-                while let (url, signals) = await group.next() {
+                while let (url, signals, usedWholeFile) = await group.next() {
                     // Assigning nil removes the key, which is what an unreadable file should leave
                     // behind: absent, so grouping treats it as unknown rather than as a boundary.
                     found[url] = signals
+                    if usedWholeFile { wholeFileReads += 1 }
                     startNextReadIfAny()
                 }
             }
+            logger.log(
+                """
+                Maker-note read: \(found.count) of \(urls.count) files in \
+                \(Date().timeIntervalSince(startedAt), format: .fixed(precision: 1))s, \
+                \(wholeFileReads) needed the whole file
+                """)
             return found
         }.value
     }

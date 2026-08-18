@@ -47,6 +47,41 @@ public struct CaptureSignals: Equatable, Sendable {
         self.renderSignature = renderSignature
     }
 
+    /// Builds the signals from the camera's own numbers, whichever reader recovered them —
+    /// `exiftool` on the Mac, `OlympusMakerNoteReader` on the iPad. Shared so the two platforms
+    /// cannot drift on what a number means, which is the whole point of the iPad reading the
+    /// maker notes at all.
+    ///
+    /// `render` is the art filter, picture mode and exposure compensation in that order, already
+    /// rendered as text; it is joined rather than compared field by field because nothing here
+    /// interprets it, it only ever asks whether two frames rendered the same.
+    public static func grouping(
+        driveMode: [Int], intervalCounter: [Int], stackedImage: [Int], render: [String]
+    ) -> CaptureSignals {
+        var signals = CaptureSignals()
+        // `DriveMode`'s second number is the shot index within the sequence, and 0 means the
+        // camera considered this a plain single shot rather than part of one.
+        if driveMode.count > 1, driveMode[1] > 0 { signals.shotNumber = driveMode[1] }
+        // `0x0605` is (constant, index) while the interval timer is running and `0 0` when it
+        // isn't, so a positive index is both the "this is a timelapse frame" flag and its position
+        // in the run. Its first number is some descriptor of the run that isn't needed here.
+        if intervalCounter.count > 1, intervalCounter[1] > 0 {
+            signals.intervalIndex = intervalCounter[1]
+        }
+        // `StackedImage` is (mode, parameter) and names what one finished frame is, not what it
+        // belongs to. Only mode 9, in-camera focus stacking, carries a source frame count — mode
+        // 5 and 6 (HDR1/HDR2) reuse the same parameter slot for something that is not a count.
+        if stackedImage.count == 2, stackedImage[0] == 9 {
+            signals.stackedFrameCount = stackedImage[1]
+        }
+        // Left nil rather than joined-from-nothing when the camera wrote none of them, so a file
+        // with no readable render never looks identical to the next one and splits it off.
+        if render.contains(where: { !$0.isEmpty }) {
+            signals.renderSignature = render.joined(separator: "|")
+        }
+        return signals
+    }
+
     /// Fills in whatever this value doesn't know from `other`, used to give a frame one set of
     /// signals when its JPEG and RAW were read separately.
     mutating func fillGaps(from other: CaptureSignals) {

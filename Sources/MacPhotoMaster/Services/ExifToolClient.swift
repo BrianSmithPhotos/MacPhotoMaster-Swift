@@ -137,26 +137,11 @@ struct ExifToolClient: MetadataWriter {
     }
 
     static func groupingSignals(from entry: [String: Any]) -> CaptureSignals {
-        var signals = CaptureSignals()
-        // `DriveMode` is up to six numbers; the second is the shot index within the sequence, and
-        // 0 means the camera considered this a plain single shot rather than part of one.
-        let drive = numbers(entry["DriveMode"])
-        if drive.count > 1, drive[1] > 0 { signals.shotNumber = drive[1] }
-        // `0x0605` is (constant, index) while the interval timer is running and `0 0` when it
-        // isn't, so a positive index is both the "this is a timelapse frame" flag and its position
-        // in the run. Its first number is some descriptor of the run that isn't needed here.
-        let interval = numbers(entry["Olympus_CameraSettings_0x0605"])
-        if interval.count > 1, interval[1] > 0 { signals.intervalIndex = interval[1] }
-        // `StackedImage` is (mode, parameter) and names what one finished frame is, not what it
-        // belongs to. Only mode 9, in-camera focus stacking, carries a source frame count.
-        let stacked = numbers(entry["StackedImage"])
-        if stacked.count == 2, stacked[0] == 9 { signals.stackedFrameCount = stacked[1] }
-
-        let render = ["ArtFilter", "PictureMode", "ExposureCompensation"].map { text(entry[$0]) }
-        // Left nil rather than joined-from-nothing when the camera wrote none of them, so a file
-        // with no readable render never looks identical to the next one and splits it off.
-        if render.contains(where: { !$0.isEmpty }) { signals.renderSignature = render.joined(separator: "|") }
-        return signals
+        CaptureSignals.grouping(
+            driveMode: numbers(entry["DriveMode"]),
+            intervalCounter: numbers(entry["Olympus_CameraSettings_0x0605"]),
+            stackedImage: numbers(entry["StackedImage"]),
+            render: ["ArtFilter", "PictureMode", "ExposureCompensation"].map { text(entry[$0]) })
     }
 
     private static func numbers(_ value: Any?) -> [Int] {

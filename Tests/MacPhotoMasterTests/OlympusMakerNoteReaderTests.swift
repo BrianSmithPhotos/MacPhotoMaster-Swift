@@ -70,12 +70,18 @@ final class OlympusMakerNoteReaderTests: XCTestCase {
         return Array("II".utf8) + le16(42) + le32(ifd0Start) + ifd0 + exif
     }
 
+    /// The real shape of `ArtFilterEffect`: 20 components, of which only the first four name the
+    /// render — long enough that the reader's own per-entry component cap bites before the end,
+    /// which is exactly why the signature takes a fixed prefix rather than the whole entry.
+    private let artFilterEffect = [6, 1280, 0, 0, 32864, 1280, 0, 0, 32880, 1280, 0, 0]
+        + [Int](repeating: 0, count: 8)
+
     /// Drive mode says shot 3 of a sequence, the stack says eight source frames, the interval
     /// counter is idle, and the render is an art filter over a picture mode at -0.7 EV.
     private var cameraSettings: [Entry] {
         [
             Entry(tag: 0x520, format: 3, count: 2, payload: short([2, 2])),
-            Entry(tag: 0x529, format: 3, count: 4, payload: short([6, 1280, 0, 0])),
+            Entry(tag: 0x52F, format: 3, count: 20, payload: short(artFilterEffect)),
             Entry(tag: 0x600, format: 3, count: 6, payload: short([5, 3, 1, 0, 0, 7])),
             Entry(tag: 0x605, format: 3, count: 2, payload: short([0, 0])),
             Entry(tag: 0x804, format: 4, count: 2, payload: long([9, 8])),
@@ -121,6 +127,26 @@ final class OlympusMakerNoteReaderTests: XCTestCase {
         let signals = OlympusMakerNoteReader.signals(in: jpeg(tiffBlock(note: makerNote(cameraSettings: hdr))))
 
         XCTAssertNil(signals?.stackedFrameCount)
+    }
+
+    /// Grainy Film I and II are one filter as far as `ArtFilter` (0x0529) is concerned — it reports
+    /// `6 1280` for both — so a bracket holding both writes two frames that tag cannot separate.
+    /// The signature reads `ArtFilterEffect` (0x052F) instead, which numbers them apart, and this is
+    /// the case that forced the change: shot on the OM-3 test card as D1073877 and D1073878.
+    func testFilterVariantsThatShareAnArtFilterValueAreStillDifferentRenders() {
+        let grainyFilmII = [19, 4352] + artFilterEffect.dropFirst(2)
+        let settings = { (effect: [Int]) in
+            self.cameraSettings.map {
+                $0.tag == 0x52F
+                    ? Entry(tag: 0x52F, format: 3, count: 20, payload: self.short(effect)) : $0
+            }
+        }
+
+        let one = OlympusMakerNoteReader.signals(in: jpeg(tiffBlock(note: makerNote(cameraSettings: settings(artFilterEffect)))))
+        let two = OlympusMakerNoteReader.signals(in: jpeg(tiffBlock(note: makerNote(cameraSettings: settings(grainyFilmII)))))
+
+        XCTAssertEqual(one?.renderSignature, "6 1280 0 0|2 2|-0.7")
+        XCTAssertEqual(two?.renderSignature, "19 4352 0 0|2 2|-0.7")
     }
 
     func testFileWithNoOlympusNoteIsUnknownRatherThanEmpty() {

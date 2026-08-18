@@ -82,6 +82,21 @@ public struct CaptureSignals: Equatable, Sendable {
         return signals
     }
 
+    /// The part of Olympus `ArtFilterEffect` (0x052F) that names the render, as text.
+    ///
+    /// The obvious tag for this, `ArtFilter` (0x0529), is not good enough: it reports `6 1280` for
+    /// *both* Grainy Film I and Grainy Film II, so a bracket containing both writes two frames the
+    /// signature cannot tell apart. 0x052F separates them (`6 1280` against `19 4352`), and across
+    /// the whole test card it never merges two renders 0x0529 kept apart — strictly the better tag,
+    /// not merely a different one.
+    ///
+    /// Only the first four numbers: the rest describe the B&W and partial-colour sub-settings, and
+    /// the tag is 20 components long, past the cap the native reader deliberately puts on how many
+    /// components it will read out of one entry.
+    public static func artFilterEffect(_ values: [Int]) -> String {
+        values.prefix(4).map(String.init).joined(separator: " ")
+    }
+
     /// Fills in whatever this value doesn't know from `other`, used to give a frame one set of
     /// signals when its JPEG and RAW were read separately.
     mutating func fillGaps(from other: CaptureSignals) {

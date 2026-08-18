@@ -74,7 +74,10 @@ public enum OlympusMakerNoteReader {
             driveMode: numbers(0x600),
             intervalCounter: numbers(0x605),
             stackedImage: numbers(0x804),
-            render: [text(0x529), text(0x520), exposure.map { String(format: "%g", $0) } ?? ""])
+            render: [
+                CaptureSignals.artFilterEffect(numbers(0x52F)), text(0x520),
+                exposure.map { String(format: "%g", $0) } ?? "",
+            ])
     }
 
     /// Where the TIFF header starts: byte 0 of an ORF, or inside the Exif APP1 segment of a JPEG.

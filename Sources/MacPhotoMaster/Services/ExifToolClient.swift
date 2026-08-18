@@ -108,7 +108,7 @@ struct ExifToolClient: MetadataWriter {
     private static let groupingArguments = [
         "-j", "-s", "-n", "-u",
         "-DriveMode", "-Olympus_CameraSettings_0x0605", "-StackedImage",
-        "-ArtFilter", "-PictureMode", "-ExposureCompensation",
+        "-ArtFilterEffect", "-PictureMode", "-ExposureCompensation",
     ]
 
     /// Five tags is a fraction of a full read's output, so this runs in much larger chunks than
@@ -141,7 +141,10 @@ struct ExifToolClient: MetadataWriter {
             driveMode: numbers(entry["DriveMode"]),
             intervalCounter: numbers(entry["Olympus_CameraSettings_0x0605"]),
             stackedImage: numbers(entry["StackedImage"]),
-            render: ["ArtFilter", "PictureMode", "ExposureCompensation"].map { text(entry[$0]) })
+            render: [
+                CaptureSignals.artFilterEffect(numbers(entry["ArtFilterEffect"])),
+                text(entry["PictureMode"]), text(entry["ExposureCompensation"]),
+            ])
     }
 
     private static func numbers(_ value: Any?) -> [Int] {

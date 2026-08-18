@@ -476,6 +476,32 @@ checked against `AIModelSelection.presets`, nothing more.
 `OpenRouterProvider`'s API key resolves via `APIKeyStore` (below) rather than reading
 `ProcessInfo` directly.
 
+## Batch AI suggestions (Mac)
+
+`SourceBrowserViewModel.runBatchAISuggestion()` runs one suggestion per capture set over many sets.
+The only part with a silent failure mode — *which* sets a run covers — lives outside the view model
+as `BatchAISuggestionTargets` in Core, pure and unit-tested, because describing a set the user meant
+to keep (or skipping one they meant to describe) is invisible until the files are written.
+
+Three decisions worth keeping:
+
+- **Serial, not concurrent.** Every backend is a single model answering one request at a time —
+  local ones are bound by the one Metal/Ollama context, and firing an OpenRouter batch in parallel
+  just buys rate limits. A `TaskGroup` here would add contention, not throughput.
+- **Save as you go.** Each set is written the moment its answer comes back, so Stop keeps everything
+  already done and a failure costs only its own set (the loop records the first reason and carries
+  on). This is why `performSave(scope:)` was split: `writeMetadata(description:keywords:gps:to:)`
+  writes *passed-in* values, since the panel's edit buffer belongs to whichever set the user has
+  selected, not to the set the batch is currently on.
+- **Embedded GPS only.** `ensureAIContext(for:)` builds each set's location context and eBird
+  candidate list from the representative's own embedded coordinates, never from an unaccepted
+  Timeline suggestion — a batch writes files unattended, so it may only act on what the file already
+  says. It returns the location keywords rather than parking them in the edit buffer, because a batch
+  has no buffer for them to survive in.
+
+The single-set path (`suggestAI()`) and the batch share `aiSuggestion(...)` — prompt profile choice,
+eBird candidates, the Foundation-Models skip, and species enrichment — so the two cannot drift.
+
 ## eBird species-list cache
 
 `EBirdSpeciesListService` (network client for eBird's taxonomy/subnational2-region/species-list

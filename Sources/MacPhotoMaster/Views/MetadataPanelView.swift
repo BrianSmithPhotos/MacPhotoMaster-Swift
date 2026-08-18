@@ -77,6 +77,33 @@ struct MetadataPanelView: View {
                             }
                         }
                     }
+                    HStack {
+                        Button {
+                            viewModel.startBatchAISuggestion()
+                        } label: {
+                            // Says both halves of what will happen: how many sets, and whether the
+                            // run is scoped to the grid selection or to the whole folder.
+                            Text(
+                                (viewModel.hasMultiSelection ? "Suggest Selected Sets" : "Suggest All Sets")
+                                    + " (\(viewModel.batchAITargetCount))")
+                        }
+                        .disabled(
+                            viewModel.batchAITargetCount == 0 || viewModel.isSuggestingAI
+                                || viewModel.isBatchSuggestingAI)
+                        if viewModel.isBatchSuggestingAI {
+                            Button("Stop") {
+                                viewModel.cancelBatchAISuggestion()
+                            }
+                        }
+                    }
+                    Toggle(
+                        "Re-describe sets that already have a description",
+                        isOn: $viewModel.batchAIRedescribesDescribedSets)
+                    if viewModel.isBatchSuggestingAI {
+                        ProgressView(
+                            value: Double(viewModel.batchAICompletedCount),
+                            total: Double(max(viewModel.batchAITotalCount, 1)))
+                    }
                     if let aiStatusMessage = viewModel.aiStatusMessage {
                         Text(aiStatusMessage)
                             .font(.caption)

@@ -152,6 +152,17 @@ final class SourceBrowserViewModel: ObservableObject {
     /// the Suggest button so a slow local-model response can't be fired twice concurrently.
     @Published private(set) var isSuggestingAI = false
     @Published var aiStatusMessage: String?
+    /// True while a batch run is working through its capture sets. Separate from `isSuggestingAI`
+    /// because the two are not the same button and must not disable each other by accident: a batch
+    /// run sets this for minutes, and `isSuggestingAI` still belongs to the one request in flight.
+    @Published private(set) var isBatchSuggestingAI = false
+    /// How far a batch run has got, for the progress caption. Total is fixed when the run starts.
+    @Published private(set) var batchAICompletedCount = 0
+    @Published private(set) var batchAITotalCount = 0
+    /// Whether a batch run also re-describes sets that already have a description. Off by default
+    /// and deliberately not persisted: it is a decision about this run, over these files, and a
+    /// setting that quietly stayed on would overwrite hand-written prose on the next folder.
+    @Published var batchAIRedescribesDescribedSets = false
     /// The exact image the last `suggestAI()` call sent to the model (post `SubjectIsolationService`
     /// crop, when one was found) — shown in the Metadata panel so a misidentification is diagnosable
     /// (was the model looking at the subject, or a diluted full frame?).
@@ -181,6 +192,11 @@ final class SourceBrowserViewModel: ObservableObject {
     /// short of quitting the app). `MLXNativeProvider.chat` checks `Task.isCancelled` cooperatively,
     /// same mechanism `mlx-swift-lm`'s own token loop uses internally.
     private var suggestAITask: Task<Void, Never>?
+
+    /// Handle to the in-flight batch run, for `cancelBatchAISuggestion()`. Cancelling stops the run
+    /// between sets and unwinds the request in flight; sets already written stay written, which is
+    /// the point of saving each one as it completes rather than at the end.
+    private var batchAISuggestionTask: Task<Void, Never>?
 
     /// OpenRouter model strings (matching the `"<provider>:<model>"` convention `aiModelText` uses,
     /// e.g. `"openrouter:google/gemini-3.5-flash"`) for which the eBird candidate species list is
@@ -256,6 +272,11 @@ final class SourceBrowserViewModel: ObservableObject {
     /// question it needs to answer.
     private static let saveLog = Logger(
         subsystem: "photos.briansmith.macphotomaster", category: "MetadataSave")
+
+    /// Per-set failures during a batch run. Nobody is watching the screen while one runs, and the
+    /// status line can only carry the first reason, so the rest have to go somewhere.
+    private static let batchLog = Logger(
+        subsystem: "photos.briansmith.macphotomaster", category: "BatchAISuggestion")
 
     /// Reverse-geocode context text (docs/SPEC.md §6/§7), keyed by capture-set representative id so
     /// `suggestAI()` can pass along location context for whichever set it's sourcing the AI image
@@ -1363,13 +1384,7 @@ final class SourceBrowserViewModel: ObservableObject {
                 "Invalid AI model — expected \"ollama:<model>\", \"openrouter:<model>\", \"mlx:<model>\", or \"foundation:apple\""
             return
         }
-        let provider: AIProvider
-        switch selection.providerID {
-        case .ollama: provider = ollamaProvider
-        case .openRouter: provider = openRouterProvider
-        case .mlx: provider = mlxProvider
-        case .foundation: provider = foundationProvider
-        }
+        let provider = aiProvider(for: selection.providerID)
 
         let targetAssets: [PhotoAsset]
         let sourceSetMembers: [PhotoAsset]
@@ -1480,6 +1495,149 @@ final class SourceBrowserViewModel: ObservableObject {
     /// than needing a second signal.
     func cancelAISuggestion() {
         suggestAITask?.cancel()
+    }
+
+    /// How many capture sets "Suggest All" would cover if pressed right now — the button's own
+    /// label. An action that writes metadata into files unattended should say how many files that is
+    /// before it starts, not report it afterwards.
+    var batchAITargetCount: Int {
+        BatchAISuggestionTargets.sets(
+            in: captureSets, multiSelectedRepresentativeIDs: multiSelectedIDs,
+            redescribingDescribed: batchAIRedescribesDescribedSets
+        ).count
+    }
+
+    /// Starts `runBatchAISuggestion()` as a cancellable `Task` — the "Suggest All" button's action,
+    /// the batch counterpart to `startAISuggestion()`.
+    func startBatchAISuggestion() {
+        batchAISuggestionTask = Task { await runBatchAISuggestion() }
+    }
+
+    /// Stops a batch run. The set in flight unwinds through the same cooperative cancellation
+    /// `cancelAISuggestion()` uses, and the loop stops rather than moving to the next set.
+    func cancelBatchAISuggestion() {
+        batchAISuggestionTask?.cancel()
+    }
+
+    /// Runs one AI suggestion per capture set — the multi-selected sets if there are any, else every
+    /// set in the folder, skipping ones that already have a description unless
+    /// `batchAIRedescribesDescribedSets` says otherwise (`BatchAISuggestionTargets`).
+    ///
+    /// Each set gets its own image, its own prompt and its own answer, and is saved as soon as it
+    /// comes back. That is the difference from `suggestAI()`'s multi-selection behaviour, which
+    /// sends *one* image and applies that single answer to every selected set — right for a burst
+    /// of the same subject, wrong for a card.
+    ///
+    /// One set at a time, deliberately. Every provider this can run against is a single model
+    /// answering one request at a time — local Ollama and MLX are one GPU, and Foundation Models is
+    /// one on-device session — so concurrency would queue inside the provider instead of here,
+    /// while making the progress count meaningless and a cancel messy.
+    ///
+    /// A failure on one set is logged and counted, and the run carries on: with sixty sets to get
+    /// through, one timeout must not cost the other fifty-nine.
+    func runBatchAISuggestion() async {
+        guard !isSuggestingAI, !isBatchSuggestingAI else { return }
+        guard let selection = AIModelSelection.parse(aiModelText) else {
+            aiStatusMessage =
+                "Invalid AI model — expected \"ollama:<model>\", \"openrouter:<model>\", \"mlx:<model>\", or \"foundation:apple\""
+            return
+        }
+        let provider = aiProvider(for: selection.providerID)
+        let targets = BatchAISuggestionTargets.sets(
+            in: captureSets, multiSelectedRepresentativeIDs: multiSelectedIDs,
+            redescribingDescribed: batchAIRedescribesDescribedSets)
+        guard !targets.isEmpty else {
+            aiStatusMessage = "Nothing to suggest: every capture set in scope already has a description"
+            return
+        }
+
+        isBatchSuggestingAI = true
+        batchAITotalCount = targets.count
+        batchAICompletedCount = 0
+        defer { isBatchSuggestingAI = false }
+
+        var failureCount = 0
+        var firstFailureReason: String?
+        var cancelled = false
+        for captureSet in targets {
+            if Task.isCancelled {
+                cancelled = true
+                break
+            }
+            let name = captureSet.representative?.url.lastPathComponent ?? ""
+            aiStatusMessage =
+                "AI suggestions: \(batchAICompletedCount + 1) of \(batchAITotalCount) — \(name)"
+            do {
+                try await suggestAndSave(captureSet, provider: provider, selection: selection)
+            } catch is CancellationError {
+                cancelled = true
+                break
+            } catch {
+                failureCount += 1
+                if firstFailureReason == nil { firstFailureReason = error.localizedDescription }
+                Self.batchLog.error(
+                    "Batch AI failed for \(name, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            batchAICompletedCount += 1
+        }
+
+        let suggested = batchAICompletedCount - failureCount
+        let prefix = cancelled ? "Batch cancelled after" : "Batch finished:"
+        let failures =
+            failureCount == 0
+            ? ""
+            : "; \(failureCount) failed\(firstFailureReason.map { ": \($0)" } ?? ".")"
+        aiStatusMessage = "\(prefix) \(suggested) of \(batchAITotalCount) set(s) suggested\(failures)"
+    }
+
+    /// One set of a batch run: its own source image, its own answer, saved to its own members.
+    ///
+    /// The set's existing description and keywords go out as context, the same as the edit buffer's
+    /// contents do on the selected set. No typed hint and no manual crop reach here — there is
+    /// nobody at the keyboard during a batch — so subject isolation is whatever the toggle says and
+    /// the crop is `SubjectIsolationService`'s own pick.
+    private func suggestAndSave(
+        _ captureSet: CaptureSet, provider: AIProvider, selection: AIModelSelection
+    ) async throws {
+        guard let sourceAsset = AISuggestionSourcePicker.pickSourceAsset(from: captureSet.members),
+            let representative = captureSet.representative
+        else { return }
+
+        let locationKeywords = await ensureAIContext(for: captureSet)
+        let image = try await NativeMetadataReader().extractPreviewAsync(
+            at: sourceAsset.url, maxPixelSize: Self.aiPreviewMaxPixelSize(for: selection.providerID))
+        let evaluatedImage = subjectIsolationEnabled ? (await computeSubjectCrop(in: image) ?? image) : image
+
+        let (description, keywords, _) = try await aiSuggestion(
+            representativeID: representative.id, provider: provider, selection: selection,
+            image: evaluatedImage, existingDescription: representative.descriptionText,
+            existingKeywords: representative.keywords.joined(separator: ", "), trustedKeywords: [])
+        // The model's list replaces the field wholesale, so the geocode's city/county/state keywords
+        // have to be put back deliberately — on the selected set they survive by sitting in the edit
+        // buffer, and a batch run has no buffer to survive in.
+        let merged = MetadataEditParsing.merging(userAdded: locationKeywords, into: keywords)
+
+        await writeMetadata(
+            description: description, keywords: merged, gps: nil, to: captureSet.members)
+        // The panel is showing one of these sets if the user left it selected, and it would other-
+        // wise keep displaying what the file said before the batch wrote over it.
+        if representative.id == selectedCaptureSet?.representative?.id {
+            editableDescription = description
+            editableKeywords = merged.joined(separator: ", ")
+            loadedKeywords = merged
+        }
+    }
+
+    /// The provider object for a parsed model string. Was inline in `suggestAI()` until the batch
+    /// run needed the same mapping.
+    private func aiProvider(for providerID: AIProviderID) -> AIProvider {
+        switch providerID {
+        case .ollama: return ollamaProvider
+        case .openRouter: return openRouterProvider
+        case .mlx: return mlxProvider
+        case .foundation: return foundationProvider
+        }
     }
 
     var selectedAsset: PhotoAsset? {

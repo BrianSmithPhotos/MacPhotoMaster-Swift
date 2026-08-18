@@ -365,6 +365,19 @@ default settings, the point being Apple's engine applied to the file as the came
   provider, not touching prompt/parsing logic.
 - Group-aware: one AI pass runs on the capture-set representative image; the user applies the
   resulting draft description/keywords to all group members at once.
+- **Batch suggestions (Mac only so far):** one AI pass per capture set, across many sets, run
+  unattended. Scope is the grid's multi-selection when two or more sets are selected (one selected
+  tile is the cursor, not a selection) and otherwise every set in the folder; sets that already carry
+  a description are left alone unless the user asks for those to be re-described too. Each set gets
+  its own image, its own prompt and its own answer, and is saved as soon as it comes back — so
+  cancelling keeps everything already written, and a failure on one set costs only that set. Sets are
+  processed one at a time, since every provider is a single model answering one request at a time.
+  This is deliberately *not* the existing Suggest button's multi-selection behaviour, which sends one
+  image and applies that single answer to every selected set — right for a burst of one subject,
+  wrong for a whole card. Location context and the eBird candidate list are looked up per set from
+  the representative's own embedded GPS (never from an unaccepted Timeline suggestion), and the
+  resulting city/county/state keywords are folded into what gets written, matching what a manual
+  Suggest-then-save leaves on the file.
 - Prefer sending a RAW/unfiltered image to the AI over a heavily in-camera-filtered JPEG
   representative when both exist in a set — an Art-Filter-Bracket JPEG (monochrome, grainy, etc.)
   skews AI description/keyword output toward the filter effect rather than the actual scene.

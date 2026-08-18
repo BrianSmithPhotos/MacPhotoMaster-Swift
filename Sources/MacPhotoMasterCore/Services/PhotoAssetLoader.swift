@@ -21,7 +21,13 @@ public struct PhotoAssetLoader {
     /// subtracting the JPEG cases — and because adding a camera format should be one entry here, not
     /// two lists to keep in step. `CIRAWFilter` decides per file whether it can actually decode one;
     /// this set only says which extensions are worth offering to it.
-    public static let rawExtensions: Set<String> = ["orf", "raf"]
+    ///
+    /// `.ori` is not a fourth format: it is an Olympus RAW under a second extension, the
+    /// un-composited original the camera keeps beside a hi-res or composite frame. ImageIO types it
+    /// identically to `.orf` (`com.olympus.or-raw-image`), so it browses and develops like any other
+    /// RAW — and it has to be here, or the app would leave those originals behind on the card while
+    /// moving the frame they belong to.
+    public static let rawExtensions: Set<String> = ["orf", "ori", "raf"]
 
     public static let supportedExtensions: Set<String> = Set(["jpg", "jpeg"]).union(rawExtensions)
 

@@ -24,6 +24,9 @@ deterministically, and copy files into local storage.
 - Folder tree + thumbnail grid for a source directory (SD card or any folder).
 - Supported file types: `.jpg`, `.jpeg`, plus at least one RAW format (the reference app used
   Olympus/OM System `.orf`; pick based on whatever camera the Swift app's user actually shoots).
+  Olympus bodies also write `.ori`: the same RAW format under a second extension, holding the
+  un-composited original kept beside a hi-res or composite frame. It counts as a RAW, not a sidecar
+  — missing it would leave those originals on the card when their frame is moved.
 - Thumbnails and full preview load off the main thread; RAW files fall back to the embedded
   preview JPEG (extracted via `exiftool -b -PreviewImage`) when no faster path exists.
 - **Capture-set grouping**: one set per press of the shutter, where a burst, a bracket, an in-camera

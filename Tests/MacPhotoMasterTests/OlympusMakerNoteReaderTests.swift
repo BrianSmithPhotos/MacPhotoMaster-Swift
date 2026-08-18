@@ -222,7 +222,7 @@ final class OlympusMakerNoteReaderTests: XCTestCase {
 
         for length in 0..<whole.count {
             let partial = OlympusMakerNoteReader.signals(
-                in: whole.prefix(length), requiringWholeNote: true)
+                in: whole.prefix(length), requiringCompleteRead: true)
             if let partial {
                 XCTAssertEqual(partial, expected, "answered differently from \(length) bytes")
             }

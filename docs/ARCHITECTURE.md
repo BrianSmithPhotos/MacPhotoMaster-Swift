@@ -373,7 +373,13 @@ as possible:
   dictionary for at all, so the iPad reads the same five tags out of the file's bytes instead
   (`OlympusMakerNoteReader`). Both apps have to wire it in separately, since they are separate
   projects with separate view models: `SourceBrowserViewModel.groupingSignals(for:)` fills in with
-  it wherever exiftool didn't answer, and `PhotoBrowserViewModel.load(_:)` calls it directly. Deliberately not a general maker-note decoder: everything
+  it wherever exiftool didn't answer, and `PhotoBrowserViewModel.load(_:)` calls it directly. It reads the
+  first 64KB of a frame rather than the whole of it, and checks completeness against the bytes it
+  actually walked rather than the maker note's declared length — the note declares 1.8MB on a
+  camera-original ORF because Olympus embeds a preview in it, while everything grouping needs ends
+  12,608 bytes in. Through iPadOS's file provider that distinction is the whole cost of a folder
+  load: every byte crosses the cable, and the file cannot be memory-mapped the way a mounted card's
+  can. Deliberately not a general maker-note decoder: everything
   grouping needs lives in one Olympus `CameraSettings` subdirectory, and anything wider belongs to
   exiftool on the Mac.
 - **Writes**: only batch files that share byte-identical target tag values — pass the shared

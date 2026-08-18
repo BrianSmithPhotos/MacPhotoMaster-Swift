@@ -21,11 +21,12 @@ import os
 /// - Offsets *inside* the note are relative to the start of the note itself, not to the TIFF
 ///   header the rest of the file's offsets are measured from.
 public enum OlympusMakerNoteReader {
-    /// How much of a file to read before falling back to the whole thing. Every OM-3 frame measured
-    /// keeps its maker note far inside this: 3,714 bytes into a JPEG, and at worst 17,880 into a RAW
-    /// across 61 sampled across the library. A wide margin, not a tight fit — and undersizing it
-    /// only costs a second read, never an answer.
-    private static let headLength = 256 * 1024
+    /// How much of a file to read before falling back to the whole thing. Everything this reader
+    /// walks ends 12,068 bytes into a JPEG and 12,608 into a RAW, measured across all 373 frames of
+    /// a camera-original card rather than the exiftool-rewritten library files an earlier size was
+    /// taken from. Five times that, so the margin is wide — and undersizing it only costs a second
+    /// read, never an answer.
+    private static let headLength = 64 * 1024
 
     /// The grouping signals for one file, or `nil` if it has no readable OM System maker note —
     /// a different make, a JPEG the camera never wrote, or a truncated file.
@@ -40,14 +41,15 @@ public enum OlympusMakerNoteReader {
         read(at: url).signals
     }
 
-    /// The read itself, reporting which path answered. The fallback costs whole megabytes against
-    /// the head's quarter of one, so how often it fires is the difference between a folder opening
-    /// at once and taking a minute — worth counting rather than assuming.
+    /// The read itself, reporting which path answered. The fallback costs a whole camera-original
+    /// RAW — seventeen megabytes and up — against the head's sixty-four kilobytes, so how often it
+    /// fires is the difference between a folder opening at once and taking a minute. It is counted
+    /// rather than assumed because assuming it got this wrong once already.
     static func read(at url: URL) -> (signals: CaptureSignals?, usedWholeFile: Bool) {
         if let handle = try? FileHandle(forReadingFrom: url) {
             defer { try? handle.close() }
             if let head = try? handle.read(upToCount: headLength),
-                let signals = signals(in: head, requiringWholeNote: true)
+                let signals = signals(in: head, requiringCompleteRead: true)
             {
                 return (signals, false)
             }
@@ -109,12 +111,12 @@ public enum OlympusMakerNoteReader {
         }.value
     }
 
-    /// - Parameter requiringWholeNote: reject bytes that stop short of everything this reads, rather
-    ///   than answering from what happens to be present. Only a prefix read needs it: a short answer
-    ///   and a whole one are both non-`nil`, and grouping cannot tell them apart — it would take a
-    ///   truncated `DriveMode` for a frame that simply has no counter, which is the misgrouping this
-    ///   whole reader exists to prevent.
-    static func signals(in bytes: Data, requiringWholeNote: Bool = false) -> CaptureSignals? {
+    /// - Parameter requiringCompleteRead: reject bytes that stop short of everything this reads,
+    ///   rather than answering from what happens to be present. Only a prefix read needs it: a short
+    ///   answer and a whole one are both non-`nil`, and grouping cannot tell them apart — it would
+    ///   take a truncated `DriveMode` for a frame that simply has no counter, which is the
+    ///   misgrouping this whole reader exists to prevent.
+    static func signals(in bytes: Data, requiringCompleteRead: Bool = false) -> CaptureSignals? {
         // Every offset below is measured from the start of the file, so a `Data` slice — whose own
         // indices start wherever it was sliced from — has to be rebased before any of it is read.
         let data = bytes.startIndex == 0 ? bytes : Data(bytes)
@@ -134,16 +136,6 @@ public enum OlympusMakerNoteReader {
         guard let note = exif.first(where: { $0.tag == 0x927C }) else { return nil }
         let exposure = exif.first { $0.tag == 0x9204 }.flatMap { file.signedRational(at: $0.valueOffset) }
 
-        // Two bounds settle whether a prefix held everything. The maker note declares its own byte
-        // length and every offset inside it is relative to itself, so it is self-contained once
-        // present whole; the exposure bias is the only other thing read, and it either resolved or
-        // it didn't.
-        if requiringWholeNote {
-            let wholeNote = note.valueOffset + note.count <= data.count
-            let wholeBias = exposure != nil || !exif.contains { $0.tag == 0x9204 }
-            guard wholeNote, wholeBias else { return nil }
-        }
-
         guard file.matches("OM SYSTEM\0", at: note.valueOffset) else { return nil }
         let noteBase = note.valueOffset
         guard let settings = file.entries(at: noteBase + 16, base: noteBase)
@@ -152,8 +144,13 @@ public enum OlympusMakerNoteReader {
         else { return nil }
 
         let camera = file.entries(at: noteBase + settingsOffset, base: noteBase)
+        // Where the bytes this reader touches run out to, accumulated as they are read so the
+        // completeness check below is over exactly what was needed and nothing else.
+        var tagsEnd = 0
         func numbers(_ tag: Int) -> [Int] {
-            camera.first { $0.tag == tag }.map { file.numbers(of: $0) } ?? []
+            guard let entry = camera.first(where: { $0.tag == tag }) else { return [] }
+            tagsEnd = max(tagsEnd, file.end(of: entry, components: 16))
+            return file.numbers(of: entry)
         }
         // Rendered as text in the same shape exiftool's `-n` output arrives in, so both platforms
         // build the render signature the same way through `CaptureSignals.grouping`.
@@ -161,7 +158,7 @@ public enum OlympusMakerNoteReader {
             numbers(tag).map(String.init).joined(separator: " ")
         }
 
-        return CaptureSignals.grouping(
+        let signals = CaptureSignals.grouping(
             driveMode: numbers(0x600),
             intervalCounter: numbers(0x605),
             stackedImage: numbers(0x804),
@@ -169,6 +166,19 @@ public enum OlympusMakerNoteReader {
                 CaptureSignals.artFilterEffect(numbers(0x52F)), text(0x520),
                 exposure.map { String(format: "%g", $0) } ?? "",
             ])
+
+        // What a prefix has to have held. Not the whole maker note: on a camera original that note
+        // is 1.8MB, nearly all of it an embedded preview this never looks at, and demanding all of
+        // it sent every RAW on the card down the whole-file path — 170 of 373 files, and ninety of
+        // the ninety-four seconds a folder took to open on the iPad. What must be there is what was
+        // actually walked, which the reads above have just tallied. An empty CameraSettings means a
+        // truncated one rather than a bare one: `entries` returns nothing at all when the entry
+        // array runs off the end, and no OM System frame has none.
+        if requiringCompleteRead {
+            let wholeBias = exposure != nil || !exif.contains { $0.tag == 0x9204 }
+            guard !camera.isEmpty, tagsEnd <= data.count, wholeBias else { return nil }
+        }
+        return signals
     }
 
     /// Where the TIFF header starts: byte 0 of an ORF, or inside the Exif APP1 segment of a JPEG.
@@ -261,6 +271,13 @@ struct TIFFBytes {
             let valueOffset = size > 4 ? base + (uint32(at: entry + 8) ?? 0) : entry + 8
             return Entry(tag: tag, format: format, count: components, valueOffset: valueOffset)
         }
+    }
+
+    /// The byte just past an entry's first `components` values — how far a prefix read has to reach
+    /// for `numbers(of:)` to answer in full rather than thinly, given it reads no more than that
+    /// many.
+    func end(of entry: Entry, components: Int) -> Int {
+        entry.valueOffset + Self.componentWidths[entry.format] * min(entry.count, components)
     }
 
     /// An entry's components as integers. Capped because these tags are short by definition — the

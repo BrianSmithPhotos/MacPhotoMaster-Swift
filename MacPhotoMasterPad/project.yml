@@ -38,7 +38,11 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations~ipad: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
+        # `_iPad`, not the `~ipad` the plist key itself uses: this is a build setting, and Xcode's
+        # allowlist (checked against CoreBuildSystem.xcspec) names only the underscore form. The
+        # tilde form was accepted here in silence and dropped on the way out - the built Info.plist
+        # carried no orientation key at all, which is what the all-orientations warning was about.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
         # Process & Move writes into `Documents/ProcessedLibrary` (see PhotoBrowserViewModel
         # .libraryRootURL), and those files have to leave the device for the Mac app to finish them
         # off. Without both keys the folder is sealed inside the sandbox: file sharing exposes

@@ -219,6 +219,30 @@ final class CaptureGroupingServiceTests: XCTestCase {
         XCTAssertEqual(stems(sets), [["A.jpg"], ["B.jpg"]])
     }
 
+    /// Check 6: an art bracket sets no shot counter, so two presses of one land a second apart and
+    /// every adjacent pair of renders differs across the seam — including the pair that straddles
+    /// it. The second run repeats the first run's renders in the same order, so its opening render
+    /// matching the run's opening render is the only marker of the boundary. Shape taken from a
+    /// real two-press ART BKT run on the test card (H1073569-H1073584), with the render strings
+    /// left as placeholders: the rule compares whole signatures and never inspects a filter.
+    func testRepeatedRenderSequenceSplitsTwoArtBracketRuns() {
+        let renders = ["natural", "pop", "grainy", "diorama", "cross", "dramatic", "profile3", "profile1"]
+        var assets: [PhotoAsset] = []
+        var signals: [URL: CaptureSignals] = [:]
+        for (run, second) in [(0, 0.0), (1, 1.0)] {
+            for (index, render) in renders.enumerated() {
+                let frame = asset("R\(run)_\(index).jpg", capturedAt: base.addingTimeInterval(second))
+                assets.append(frame)
+                signals[frame.url] = CaptureSignals(renderSignature: render)
+            }
+        }
+
+        let sets = service.group(assets, signals: signals)
+
+        XCTAssertEqual(sets.count, 2)
+        XCTAssertEqual(sets.map { $0.members.count }, [8, 8])
+    }
+
     /// A RAW records the neutral picture mode whatever the JPEG beside it was rendered as, so a
     /// frame has to take its render from the JPEG or every bracket would look identically rendered.
     func testFrameTakesItsRenderFromTheJpegNotTheRaw() {

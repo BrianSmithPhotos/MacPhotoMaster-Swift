@@ -46,10 +46,12 @@ deterministically, and copy files into local storage.
     4. An in-camera focus-stacked composite joins the run it was built from, proven by its own
        source-frame count (`StackedImage` mode 9) matching that run's length.
     5. A shot counter that restarted, started or ended is a sequence boundary.
-    6. Two singles rendered identically in the same second are two presses, not one bracket — a
-       rendering bracket is invisible to the counter (the camera calls every frame of it a plain
-       single shot), so the differing art filter / picture mode / exposure compensation is all that
-       holds it together.
+    6. A render the run already opened with is the bracket starting over. A rendering bracket is
+       invisible to the counter (the camera calls every frame of it a plain single shot), so the
+       differing art filter / picture mode / exposure compensation is all that holds it together —
+       and two presses of an art bracket a second apart write the same sequence of renders twice,
+       where only the repeat of the run's *first* render shows the seam. With a run of one this is
+       also the plain case: two singles rendered identically in the same second are two presses.
   - The interval counter is Olympus CameraSettings **`0x0605`**, which exiftool has no name for and
     suppresses without `-u`. It reads `0 0` off the timer and `<constant> <index>` on it. It is the
     only signal a timelapse leaves: `DriveMode` is byte-identical between an interval frame and a

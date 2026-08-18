@@ -34,6 +34,7 @@ public struct CaptureGroupingService {
                 gap: frame.time.timeIntervalSince(previous.time),
                 previous: previous.signals,
                 next: frame.signals,
+                runStart: run[0].signals,
                 runLength: run.count)
             previous = frame
             if boundary {
@@ -51,7 +52,8 @@ public struct CaptureGroupingService {
     /// Each was needed by real frames off an OM-3 test card; the order matters as much as the
     /// checks, because the earlier ones are the ones that outrank the clock.
     static func startsNewSet(
-        gap: TimeInterval, previous: CaptureSignals, next: CaptureSignals, runLength: Int
+        gap: TimeInterval, previous: CaptureSignals, next: CaptureSignals,
+        runStart: CaptureSignals, runLength: Int
     ) -> Bool {
         // 1. Interval shooting is decided entirely by its own counter and never by the gap: the
         //    whole point of a timelapse is that its frames are far apart, so a night of star-trail
@@ -80,10 +82,16 @@ public struct CaptureGroupingService {
         }
         // 5. A shot counter that restarted, started or ended is a sequence boundary.
         if previous.shotNumber != nil || next.shotNumber != nil { return true }
-        // 6. Two singles rendered identically in the same second are two presses, not one bracket.
-        //    Only decisive when both renders are actually known: unknown must never split.
-        if let previousRender = previous.renderSignature, let nextRender = next.renderSignature {
-            return previousRender == nextRender
+        // 6. A render the run already opened with is the bracket starting over. An art bracket
+        //    sets no shot counter at all, so two presses of one land in adjacent seconds writing
+        //    the same sequence of renders twice; every adjacent pair inside a run differs, and the
+        //    repeat of the run's *first* render is the only place the seam shows. With a run of
+        //    one this is also the plain case: two singles rendered identically in the same second
+        //    are two presses, not one bracket.
+        //    Only decisive when the renders are actually known: unknown must never split.
+        if let nextRender = next.renderSignature {
+            if let firstRender = runStart.renderSignature { return firstRender == nextRender }
+            if let previousRender = previous.renderSignature { return previousRender == nextRender }
         }
         return false
     }

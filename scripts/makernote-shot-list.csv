@@ -2,6 +2,7 @@ ID,Description
 
 SETUP,"How to shoot this card"
 S1,"Format the card in the camera first so file numbering is contiguous"
+S7,"Optional: set the filename prefix to the group letter (A, B, C...) so you can see at a glance that a group is finished, instead of the usual month letter (H = August). Safe either way - the number keeps climbing across a prefix change, and the app takes only the digits as its sequence"
 S2,"RAW+JPEG for every frame unless the row says otherwise"
 S3,"Shoot the groups in order, leaving at least 10 seconds between lettered groups - longer is fine and makes the boundary clearer, so do not worry about hitting a number"
 S6,"Timing only matters where a row says back to back (B6, C2, D3) - those must be as fast as you can press. Everywhere else a bigger gap is harmless"

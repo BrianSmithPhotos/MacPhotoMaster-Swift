@@ -67,10 +67,16 @@ and the app silently aborts (no crash report) on first MLX use.
 
 Past the skeleton stage — the core ingest workflow from `docs/SPEC.md` works end to end:
 
-- **Source browsing** (§1): folder navigation, capture-set grouping (RAW+JPEG pairs grouped by
-  capture timestamp), a Stacked thumbnail grid, capture-group-aware multi-select, and a preview
-  filmstrip with ring-selection. Skip/un-skip is persisted per folder, with an Active/Skipped
-  segmented filter to review and restore skipped items.
+- **Source browsing** (§1): folder navigation, capture-set grouping, a Stacked thumbnail grid,
+  capture-group-aware multi-select, and a preview filmstrip with ring-selection. Grouping is one set
+  per press of the shutter — a burst, a bracket, an in-camera composite or a whole interval/timelapse
+  run counts as one press — decided by the camera's own maker-note counters read in a narrow batched
+  `exiftool` pass, because the OM-3's whole-second timestamps make gaps within one capture and gaps
+  between two captures overlap completely. Any group of sets can also be merged by hand (and split
+  apart again), persisted per folder, for captures the camera left no counter behind for. iPad has no
+  maker-note access at all and falls back to the timestamp gap. Skip/un-skip is recorded per file —
+  an individual frame can be culled from a bracket in the filmstrip — persisted per folder, with an
+  Active/Skipped segmented filter to review and restore skipped items.
 - **Metadata read/write** (§2–3): full EXIF/IPTC/XMP read and dual-tag write via `ExifToolClient`,
   batched across files, idempotent keyword writes, and save scopes for a single file, a capture
   set, or the current manual selection.

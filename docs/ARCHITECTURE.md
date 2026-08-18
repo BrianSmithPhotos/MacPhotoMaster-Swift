@@ -420,6 +420,21 @@ accuracy/source/altitude) and falling back to `semanticSegments[].timelinePath[]
 tagged `TIMELINE_PATH`, no altitude/accuracy/source). A malformed or partial record is skipped
 rather than failing the whole parse; the result feeds `TimelineLocationCache.importSamples`.
 
+## Per-folder session state
+
+Three small GRDB actors share `TimelineLocationCache`'s shape and hold the user's per-folder
+editorial decisions: `SkipStateStore` (`skip_state.sqlite3`), `ProcessedStateStore`
+(`processed_state.sqlite3`) and `CaptureSetMergeStore` (`capture_set_merges.sqlite3`). All three live
+in Application Support rather than in the source folder, because the source is usually an SD card
+that will be ejected and reformatted while the decisions about that shoot should outlive it. All
+three key on `(folderPath, assetPath)` — never on a `CaptureSet.ID`, which is regenerated on every
+load — so their state survives regrouping as well as reopening.
+
+Both browsers derive what they display from these in one chain, in `rederiveCaptureSets()`:
+grouping's own answer (`automaticCaptureSets`) -> `CaptureSetMerging.apply` -> `SkipPartition.split`.
+Nothing writes to the published arrays directly, and in-memory asset mutations go to the pre-merge
+array so that splitting a merged set apart cannot discard an unsaved metadata edit.
+
 ## Provider pattern (AI)
 
 Mirror the reference app's split: a small `AIProvider` protocol (async chat/vision call, given an

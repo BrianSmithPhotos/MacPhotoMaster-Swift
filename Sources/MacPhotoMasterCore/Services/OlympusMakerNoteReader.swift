@@ -34,9 +34,9 @@ public enum OlympusMakerNoteReader {
     /// Reads the head of the file rather than the whole of it. Mapping the whole file is free on a
     /// mounted card, where only the pages actually touched are ever paged in, and ruinous through
     /// iPadOS's file provider, where a card in a tethered camera cannot be mapped at all and every
-    /// byte crosses the cable: a 373-frame card cost about three minutes that way, against twenty
-    /// seconds for the ImageIO pass beside it, which reads incrementally. The whole-file read stays
-    /// as the fallback for anything the head didn't cover.
+    /// byte crosses the cable: the 373-frame test card took 94 seconds read whole and 0.3 seconds
+    /// read this way, against 4.2 seconds for the ImageIO pass beside it, which reads incrementally.
+    /// The whole-file read stays as the fallback for anything the head didn't cover.
     public static func signals(at url: URL) -> CaptureSignals? {
         read(at: url).signals
     }

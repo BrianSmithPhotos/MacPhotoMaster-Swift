@@ -48,12 +48,39 @@ public enum OlympusMakerNoteReader {
         return signals(in: data)
     }
 
-    /// A whole folder's worth, off the calling actor. Each file is cheap on its own — a bounded read
-    /// and a few hundred bytes of walking — but a card holds several hundred frames, and none of
-    /// that belongs on the thread drawing the grid.
+    /// How many files to have open at once. Sized like `PhotoAssetLoader`'s fan-out for consistency,
+    /// though the reason differs: that pass is CPU-bound on ImageIO parsing, while this one spends
+    /// nearly all its time waiting on a file provider to hand over the first page.
+    private static let concurrentReads = ProcessInfo.processInfo.activeProcessorCount
+
+    /// A whole folder's worth, off the calling actor, several at a time. Each file is cheap once
+    /// open — a bounded read and a few hundred bytes of walking — but *opening* it through iPadOS's
+    /// file provider is a round trip, and a card holds several hundred frames. Read one after
+    /// another, that latency is paid end to end: on the test card, cutting the bytes read per file
+    /// by a factor of sixty only halved the wall clock, because the wait was never about bytes.
+    /// None of it belongs on the thread drawing the grid either, hence the detached task.
     public static func signals(at urls: [URL]) async -> [URL: CaptureSignals] {
         await Task.detached(priority: .userInitiated) {
-            urls.reduce(into: [URL: CaptureSignals]()) { found, url in found[url] = signals(at: url) }
+            var found: [URL: CaptureSignals] = [:]
+            var next = 0
+
+            await withTaskGroup(of: (URL, CaptureSignals?).self) { group in
+                func startNextReadIfAny() {
+                    guard next < urls.count else { return }
+                    let url = urls[next]
+                    next += 1
+                    group.addTask { (url, signals(at: url)) }
+                }
+
+                for _ in 0..<min(concurrentReads, urls.count) { startNextReadIfAny() }
+                while let (url, signals) = await group.next() {
+                    // Assigning nil removes the key, which is what an unreadable file should leave
+                    // behind: absent, so grouping treats it as unknown rather than as a boundary.
+                    found[url] = signals
+                    startNextReadIfAny()
+                }
+            }
+            return found
         }.value
     }
 

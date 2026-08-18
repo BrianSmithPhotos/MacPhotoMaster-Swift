@@ -498,11 +498,9 @@ final class SourceBrowserViewModel: ObservableObject {
                 // merged in before grouping. Their EXIF capture time came through the render
                 // untouched, which is what puts each one in its original's capture set.
                 let derived = rawDerivedStore?.derivedAssets(forOriginals: assets) ?? []
-                // One narrow exiftool pass over the folder, because the camera's own burst/bracket
-                // counter lives in the maker notes and nothing else can separate a burst from two
-                // deliberate presses in the same second. Best-effort: no signals means grouping
-                // falls back to the timestamp gap, which is what the iPad build does everywhere.
-                let signals = (try? await exifTool.readGroupingSignals(at: assets.map(\.url))) ?? [:]
+                // The camera's own burst/bracket counter lives in the maker notes, and nothing else
+                // can separate a burst from two deliberate presses in the same second.
+                let signals = await groupingSignals(for: assets.map(\.url))
                 let allSets = grouping.group(assets + derived, signals: signals)
                 automaticCaptureSets = allSets
                 mergeIDsByAssetPath = await mergeIDs(inFolder: folderURL)
@@ -527,6 +525,22 @@ final class SourceBrowserViewModel: ObservableObject {
                 loadErrorMessage = error.localizedDescription
             }
         }
+    }
+
+    /// One narrow exiftool pass over the folder, with the file's own bytes covering whatever it
+    /// didn't answer for. On the Mac that second step does nothing; on the iPad, where exiftool
+    /// cannot run at all, it is the only step — and grouping there has been falling back to the
+    /// timestamp gap, which cannot tell a burst from two presses in one second.
+    ///
+    /// Written as a fill-in rather than a choice of reader so one unreadable file is handled the
+    /// same way as a whole platform. Still best-effort: a file neither can read stays absent, and
+    /// grouping treats it as unknown rather than as a boundary.
+    private func groupingSignals(for urls: [URL]) async -> [URL: CaptureSignals] {
+        var signals = (try? await exifTool.readGroupingSignals(at: urls)) ?? [:]
+        let missing = urls.filter { signals[$0] == nil }
+        guard !missing.isEmpty else { return signals }
+        for (url, native) in await OlympusMakerNoteReader.signals(at: missing) { signals[url] = native }
+        return signals
     }
 
     /// Hides every member of `captureSet` from the active view and persists that choice so it

@@ -369,8 +369,12 @@ as possible:
   ...`) and add `-n` for the camera's raw numbers rather than exiftool's prose. Output shrinks
   enough to justify a much larger chunk size — `readGroupingSignals(at:)` reads a whole folder's
   capture-grouping signals in a couple of launches, which is what makes running it on every folder
-  load affordable. It is also why grouping is better on Mac than on iPad: the signals it reads live
-  in Olympus maker notes, and ImageIO exposes no maker-note dictionary at all.
+  load affordable. The signals it reads live in Olympus maker notes, which ImageIO exposes no
+  dictionary for at all, so the iPad reads the same five tags out of the file's bytes instead
+  (`OlympusMakerNoteReader`) and `SourceBrowserViewModel.groupingSignals(for:)` fills in with it
+  wherever exiftool didn't answer. Deliberately not a general maker-note decoder: everything
+  grouping needs lives in one Olympus `CameraSettings` subdirectory, and anything wider belongs to
+  exiftool on the Mac.
 - **Writes**: only batch files that share byte-identical target tag values — pass the shared
   `-TAG=value` args once followed by every target path. Group files by their value-tuple first;
   files needing a unique per-file value (e.g. a rename-derived title) can't be grouped and should

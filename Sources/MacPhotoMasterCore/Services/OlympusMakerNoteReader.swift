@@ -27,6 +27,15 @@ public enum OlympusMakerNoteReader {
         return signals(in: data)
     }
 
+    /// A whole folder's worth, off the calling actor. Each file is cheap on its own — a mapped read
+    /// and a few hundred bytes of walking — but a card holds several hundred frames, and none of
+    /// that belongs on the thread drawing the grid.
+    public static func signals(at urls: [URL]) async -> [URL: CaptureSignals] {
+        await Task.detached(priority: .userInitiated) {
+            urls.reduce(into: [URL: CaptureSignals]()) { found, url in found[url] = signals(at: url) }
+        }.value
+    }
+
     static func signals(in bytes: Data) -> CaptureSignals? {
         // Every offset below is measured from the start of the file, so a `Data` slice — whose own
         // indices start wherever it was sliced from — has to be rebased before any of it is read.

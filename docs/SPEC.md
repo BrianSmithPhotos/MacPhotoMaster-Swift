@@ -57,11 +57,15 @@ deterministically, and copy files into local storage.
     only signal a timelapse leaves: `DriveMode` is byte-identical between an interval frame and a
     hand-shot single, and the gap can't help because a timelapse interval is by definition longer
     than any burst.
-  - Unknown never splits: any signal the platform can't read is simply absent. **iPad therefore
-    groups on the gap alone**, since ImageIO exposes no maker-note dictionary and iOS can't run
-    exiftool. Measured on a 553-frame test card that costs 39 frames against the Mac's grouping —
+  - Unknown never splits: any signal the platform can't read is simply absent. The iPad used to
+    group **on the gap alone**, since ImageIO exposes no maker-note dictionary and iOS can't run
+    exiftool; measured on a 553-frame test card that cost 39 frames against the Mac's grouping —
     all over-merges of back-to-back short bursts, never a split capture. (The same-second rule this
-    replaced misgrouped 233 of those 553.)
+    replaced misgrouped 233 of those 553.) `OlympusMakerNoteReader` closes that gap by reading the
+    five tags out of the file's own bytes, and is wired in as a fill-in wherever exiftool didn't
+    answer — the whole folder, on iPad. It matches exiftool tag for tag on every frame of the OM-3
+    test card; **still to be confirmed on the device itself**, where the open question is whether
+    iPadOS hands the app the original card bytes rather than a transcoded copy.
   - **Manual merge** overrides all of the above: select two or more capture sets in the source grid
     and merge them into one (Mac right-click "Merge into One Capture Set", iPad Select mode's
     "Merge"), reversible with "Split Apart". For captures the camera left no counter behind for — a
@@ -243,10 +247,10 @@ deterministically, and copy files into local storage.
   path. The sidecar only reaches the original file's actual tags later, via
   `ExifToolClient.foldInSidecarIfPresent(for:)` once the file (copied at Process & Move, below) is on
   a Mac. See docs/ARCHITECTURE.md "iPad file access & sidecar staging" for the reasoning.
-  Focus distance is a further casualty of the missing MakerNote reader: the iPad can't read it at
-  all, so nothing lands in `SubjectDistance` there — it's recovered and written during the Mac-side
-  import (`IPadImportService`), which reads the Olympus MakerNote via exiftool. The camera look is a
-  casualty of the same gap and is recovered the same way.
+  Focus distance is a further casualty of the same gap: `OlympusMakerNoteReader` deliberately reads
+  only the five grouping tags, so nothing lands in `SubjectDistance` on iPad — it's recovered and
+  written during the Mac-side import (`IPadImportService`), which reads the Olympus MakerNote via
+  exiftool. The camera look is a casualty of the same gap and is recovered the same way.
 
 ## 4. Rename
 

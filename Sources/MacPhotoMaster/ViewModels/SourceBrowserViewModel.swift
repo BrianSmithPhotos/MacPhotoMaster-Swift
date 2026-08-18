@@ -240,6 +240,13 @@ final class SourceBrowserViewModel: ObservableObject {
     /// Unlike the SQLite-backed stores below this needs no `ensure…` accessor: its init only creates
     /// a directory, cheap enough to do up front, and `load(_:)` needs it synchronously.
     private let rawDerivedStore: RawDerivedStore? = try? RawDerivedStore.makeDefault()
+
+    /// RAW originals whose staged derivative has been copied into the library but is deliberately
+    /// still on disk, together with the folder that was open when they were processed. See
+    /// `discardSpentDerivatives(for:inFolder:processedPaths:)` for why the cleanup waits.
+    private var keptDerivativeOriginals: Set<URL> = []
+    private var keptDerivativeFolderPath: String?
+
     private static let ebirdLogger = Logger(subsystem: "MacPhotoMaster", category: "EBirdSpecies")
 
     /// Shares `IPadImportService`'s subsystem so one predicate catches both write paths:
@@ -423,6 +430,20 @@ final class SourceBrowserViewModel: ObservableObject {
     /// (they could have navigated on).
     private var folderPathByCaptureSetID: [CaptureSet.ID: String] = [:]
 
+    /// The current folder's capture groups as `CaptureGroupingService` produced them from the
+    /// camera's own signals, before the user's manual merges and before skip state divides them up.
+    /// This, `mergeIDsByAssetPath` and `skippedPaths` are the source of truth; everything the
+    /// browser displays is re-derived from them by `rederiveCaptureSets()`, never edited directly.
+    /// Skipping is per file, so a change can move part of a set across the divide without moving the
+    /// set — which splicing whole sets between the two published arrays can't express.
+    private var automaticCaptureSets: [CaptureSet] = []
+    private var mergeIDsByAssetPath: [String: String] = [:]
+    private var skippedPaths: Set<String> = []
+
+    /// `automaticCaptureSets` with the user's manual merges applied — the grouping the browser
+    /// actually works in, and what skip state is partitioned over.
+    private var groupedCaptureSets: [CaptureSet] = []
+
     /// Called from the "Open Folder…" picker (and from `init` to reopen last time's root) — starts
     /// a fresh breadcrumb rooted at the chosen folder, discarding anything previously open, and
     /// persists `folderURL` as the new default source root so the next launch starts here too. The
@@ -469,21 +490,23 @@ final class SourceBrowserViewModel: ObservableObject {
                 async let assetsTask = loader.loadAssets(in: folderURL)
                 async let subfoldersTask = folderBrowser.subfolders(of: folderURL)
                 let (assets, folders) = try await (assetsTask, subfoldersTask)
-                let skippedPaths = await skippedAssetPaths(inFolder: folderURL)
+                skippedPaths = await skippedAssetPaths(inFolder: folderURL)
                 processedAssetPaths = await loadProcessedAssetPaths(inFolder: folderURL)
+                discardSpentDerivatives(
+                    for: assets, inFolder: folderURL, processedPaths: processedAssetPaths)
                 // RAW-developed JPEGs live in app storage rather than this folder, so they're
                 // merged in before grouping. Their EXIF capture time came through the render
                 // untouched, which is what puts each one in its original's capture set.
                 let derived = rawDerivedStore?.derivedAssets(forOriginals: assets) ?? []
-                let allSets = grouping.group(assets + derived)
-                captureSets = allSets.filter { set in
-                    guard let representativePath = set.representative?.url.path else { return true }
-                    return !skippedPaths.contains(representativePath)
-                }
-                skippedCaptureSets = allSets.filter { set in
-                    guard let representativePath = set.representative?.url.path else { return false }
-                    return skippedPaths.contains(representativePath)
-                }
+                // One narrow exiftool pass over the folder, because the camera's own burst/bracket
+                // counter lives in the maker notes and nothing else can separate a burst from two
+                // deliberate presses in the same second. Best-effort: no signals means grouping
+                // falls back to the timestamp gap, which is what the iPad build does everywhere.
+                let signals = (try? await exifTool.readGroupingSignals(at: assets.map(\.url))) ?? [:]
+                let allSets = grouping.group(assets + derived, signals: signals)
+                automaticCaptureSets = allSets
+                mergeIDsByAssetPath = await mergeIDs(inFolder: folderURL)
+                rederiveCaptureSets()
                 folderPathByCaptureSetID = Dictionary(
                     uniqueKeysWithValues: allSets.map { ($0.id, folderURL.path) })
                 subfolders = folders
@@ -511,58 +534,152 @@ final class SourceBrowserViewModel: ObservableObject {
     /// via `SourcePanelView`'s "Skipped" filter and restorable with `unskip(_:)`. Never touches the
     /// files on disk — see `SkipStateStore`'s doc comment for why "skip" is view-only.
     func skip(_ captureSet: CaptureSet) {
-        guard let folderPath = folderPathByCaptureSetID[captureSet.id] else { return }
-        Task {
-            guard let store = await ensureSkipStore() else { return }
-            let assetPaths = captureSet.members.map(\.url.path)
-            try? await store.skip(assetPaths: assetPaths, inFolder: folderPath)
-
-            let removedIndex = captureSets.firstIndex { $0.id == captureSet.id } ?? 0
-            captureSets.removeAll { $0.id == captureSet.id }
-            skippedCaptureSets.append(captureSet)
-            sortByCaptureOrder(&skippedCaptureSets)
-            if let representativeID = captureSet.representative?.id {
-                multiSelectedIDs.remove(representativeID)
-            }
-            if selectedAssetID == captureSet.representative?.id {
-                selectTileAfterRemoval(from: captureSets, previousIndex: removedIndex)
-            } else {
-                refreshVariantStrip()
-            }
-        }
+        setSkipped(true, assets: captureSet.members, inGroup: captureSet)
     }
 
     /// Restores `captureSet` from `skippedCaptureSets` back into the active `captureSets` — the
     /// inverse of `skip(_:)`, reachable only via `SourcePanelView`'s "Skipped" filter's context-menu
-    /// "Un-skip" action (never a side effect of previewing/clicking a tile there). Reconciles
-    /// selection the same way `skip(_:)` does when the un-skipped item was the one currently
-    /// previewed, so un-skipping while reviewing the Skipped grid moves focus to the next skipped
-    /// item rather than leaving the preview pointed at something no longer in that list.
+    /// "Un-skip" action (never a side effect of previewing/clicking a tile there).
     func unskip(_ captureSet: CaptureSet) {
-        guard let folderPath = folderPathByCaptureSetID[captureSet.id] else { return }
+        setSkipped(false, assets: captureSet.members, inGroup: captureSet)
+    }
+
+    /// Skips one image out of its capture set, leaving the set's other members in the active view —
+    /// the filmstrip's per-file counterpart to `skip(_:)`, for culling individual frames out of a
+    /// focus bracket or a burst rather than discarding the whole sequence. The skipped frame shows
+    /// up under the "Skipped" filter alongside its own set's other culled members.
+    func skipMember(_ asset: PhotoAsset) {
+        guard let group = group(containing: asset.id) else { return }
+        setSkipped(true, assets: [asset], inGroup: group)
+    }
+
+    /// Returns one culled image to its capture set — the inverse of `skipMember(_:)`, reached from
+    /// the filmstrip while browsing the "Skipped" filter.
+    func unskipMember(_ asset: PhotoAsset) {
+        guard let group = group(containing: asset.id) else { return }
+        setSkipped(false, assets: [asset], inGroup: group)
+    }
+
+    /// The grouped capture sets the grid's multi-selection covers, in display order. Resolved back
+    /// to the grouping rather than read off `displayedCaptureSets`, so a set with some members
+    /// skipped is merged whole rather than losing its culled frames.
+    private var multiSelectedGroups: [CaptureSet] {
+        let selectedIDs = Set(
+            displayedCaptureSets.filter { set in
+                set.representative.map { multiSelectedIDs.contains($0.id) } ?? false
+            }.map(\.id))
+        return groupedCaptureSets.filter { selectedIDs.contains($0.id) }
+    }
+
+    /// Whether "Merge into One Capture Set" has anything to act on — two or more sets picked in the
+    /// grid.
+    var canMergeSelection: Bool { multiSelectedGroups.count > 1 }
+
+    /// Whether this set is one the user merged by hand, i.e. whether it can be split apart again.
+    func isMerged(_ captureSet: CaptureSet) -> Bool {
+        captureSet.members.contains { mergeIDsByAssetPath[$0.url.path] != nil }
+    }
+
+    /// Combines every capture set in the grid multi-selection into one, and remembers the choice for
+    /// this folder. For captures the camera left no counter behind for — a long hand-shot sequence,
+    /// an interval run on a body that stamps no interval index — where only the photographer knows
+    /// the frames belong together. See `CaptureSetMerging`.
+    func mergeSelectedCaptureSets() {
+        let groups = multiSelectedGroups
+        guard groups.count > 1, let folderPath = folderPathByCaptureSetID[groups[0].id] else { return }
+        let assetPaths = groups.flatMap { $0.members.map(\.url.path) }
+        let previousIndex = displayedCaptureSets.firstIndex { $0.id == groups[0].id } ?? 0
         Task {
-            guard let store = await ensureSkipStore() else { return }
-            let assetPaths = captureSet.members.map(\.url.path)
-            try? await store.unskip(assetPaths: assetPaths, inFolder: folderPath)
-
-            let removedIndex = skippedCaptureSets.firstIndex { $0.id == captureSet.id } ?? 0
-            skippedCaptureSets.removeAll { $0.id == captureSet.id }
-            captureSets.append(captureSet)
-            sortByCaptureOrder(&captureSets)
-
-            if selectedAssetID == captureSet.representative?.id {
-                selectTileAfterRemoval(from: skippedCaptureSets, previousIndex: removedIndex)
-            }
+            guard let store = await ensureMergeStore(),
+                let mergeID = try? await store.merge(assetPaths: assetPaths, inFolder: folderPath)
+            else { return }
+            for path in assetPaths { mergeIDsByAssetPath[path] = mergeID }
+            rederiveCaptureSets()
+            reconcileSelection(afterChangeTo: groups[0].id, previousIndex: previousIndex)
         }
     }
 
-    /// Restores grouping order (ascending by representative capture time) after `skip(_:)`/
-    /// `unskip(_:)` splice a set into the middle of `captureSets`/`skippedCaptureSets` rather than
-    /// rebuilding from a fresh `CaptureGroupingService.group(_:)` call — see that type for the
-    /// canonical ordering this mirrors.
-    private func sortByCaptureOrder(_ sets: inout [CaptureSet]) {
-        sets.sort {
-            ($0.representative?.capturedAt ?? .distantPast) < ($1.representative?.capturedAt ?? .distantPast)
+    /// Undoes a manual merge, letting the camera's own grouping stand again — the inverse of
+    /// `mergeSelectedCaptureSets()`.
+    func splitApart(_ captureSet: CaptureSet) {
+        guard let folderPath = folderPathByCaptureSetID[captureSet.id],
+            let group = groupedCaptureSets.first(where: { $0.id == captureSet.id })
+        else { return }
+        let assetPaths = group.members.map(\.url.path)
+        let previousIndex = displayedCaptureSets.firstIndex { $0.id == group.id } ?? 0
+        Task {
+            guard let store = await ensureMergeStore() else { return }
+            try? await store.unmerge(assetPaths: assetPaths, inFolder: folderPath)
+            for path in assetPaths { mergeIDsByAssetPath.removeValue(forKey: path) }
+            rederiveCaptureSets()
+            reconcileSelection(afterChangeTo: group.id, previousIndex: previousIndex)
+        }
+    }
+
+    /// Persists a skip-state change for `assets` and republishes both lists from the new partition.
+    ///
+    /// Everything is re-derived from `groupedCaptureSets`/`skippedPaths` rather than spliced between
+    /// the two published arrays: a per-file skip can move part of a set without moving the set, and
+    /// re-deriving is the only way that stays consistent whichever members are involved. `inGroup`
+    /// is the *grouped* set the change belongs to (`captureSets`' entries carry their group's id, so
+    /// either half can be passed straight in) — it names the folder to persist against, and the tile
+    /// selection should land on if the change empties the one being viewed.
+    private func setSkipped(_ isSkipped: Bool, assets: [PhotoAsset], inGroup group: CaptureSet) {
+        guard let folderPath = folderPathByCaptureSetID[group.id] else { return }
+        let assetPaths = assets.map(\.url.path)
+        Task {
+            guard let store = await ensureSkipStore() else { return }
+            if isSkipped {
+                try? await store.skip(assetPaths: assetPaths, inFolder: folderPath)
+                skippedPaths.formUnion(assetPaths)
+            } else {
+                try? await store.unskip(assetPaths: assetPaths, inFolder: folderPath)
+                skippedPaths.subtract(assetPaths)
+            }
+
+            // Read before re-partitioning, while the displayed list is still the one the user acted on.
+            let previousIndex = displayedCaptureSets.firstIndex { $0.id == group.id } ?? 0
+            rederiveCaptureSets()
+            reconcileSelection(afterChangeTo: group.id, previousIndex: previousIndex)
+        }
+    }
+
+    /// Rebuilds everything the browser shows from the three stored inputs: the camera's grouping,
+    /// the user's manual merges on top of it, then the split into active and skipped.
+    private func rederiveCaptureSets() {
+        groupedCaptureSets = CaptureSetMerging.apply(
+            automaticCaptureSets, mergeIDsByAssetPath: mergeIDsByAssetPath)
+        let partition = SkipPartition.split(groupedCaptureSets, skippedPaths: skippedPaths)
+        captureSets = partition.active
+        skippedCaptureSets = partition.skipped
+    }
+
+    private func group(containing assetID: PhotoAsset.ID) -> CaptureSet? {
+        groupedCaptureSets.first { $0.members.contains { $0.id == assetID } }
+    }
+
+    /// Re-points the selection after a skip/un-skip re-partitioned the lists, in three cases: the
+    /// selected image is still on screen (a sibling was skipped, so nothing needs to move); it isn't,
+    /// but its set survives with fewer members (the representative itself was skipped, so focus moves
+    /// to whichever member represents the set now); or the set has left the displayed list entirely
+    /// (focus moves to the next set, as it did when skip only ever worked a whole set at a time).
+    private func reconcileSelection(afterChangeTo groupID: CaptureSet.ID, previousIndex: Int) {
+        let displayed = displayedCaptureSets
+        multiSelectedIDs = multiSelectedIDs.filter { id in
+            displayed.contains { $0.representative?.id == id }
+        }
+
+        if displayed.contains(where: { set in set.members.contains { $0.id == selectedAssetID } }) {
+            refreshVariantStrip()
+        } else if let survivor = displayed.first(where: { $0.id == groupID }),
+            let representativeID = survivor.representative?.id
+        {
+            selectedAssetID = representativeID
+            multiSelectedIDs.insert(representativeID)
+            rangeAnchorID = representativeID
+            refreshVariantStrip()
+        } else {
+            selectTileAfterRemoval(from: displayed, previousIndex: previousIndex)
         }
     }
 
@@ -722,6 +839,27 @@ final class SourceBrowserViewModel: ObservableObject {
     private func skippedAssetPaths(inFolder folderURL: URL) async -> Set<String> {
         guard let store = await ensureSkipStore() else { return [] }
         return (try? await store.skippedAssetPaths(inFolder: folderURL.path)) ?? []
+    }
+
+    /// Lazily created for the same reason as `skipStore` above.
+    private var mergeStore: CaptureSetMergeStore?
+
+    private func ensureMergeStore() async -> CaptureSetMergeStore? {
+        if let mergeStore { return mergeStore }
+        do {
+            let databasePath = try AppSupportDirectory.url(forFileNamed: "capture_set_merges.sqlite3")
+            let store = try CaptureSetMergeStore(databasePath: databasePath)
+            mergeStore = store
+            return store
+        } catch {
+            loadErrorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    private func mergeIDs(inFolder folderURL: URL) async -> [String: String] {
+        guard let store = await ensureMergeStore() else { return [:] }
+        return (try? await store.mergeIDsByAssetPath(inFolder: folderURL.path)) ?? [:]
     }
 
     private func ensureSkipStore() async -> SkipStateStore? {
@@ -1307,6 +1445,65 @@ final class SourceBrowserViewModel: ObservableObject {
         }
     }
 
+    /// Trashes staged RAW derivatives that have already been copied into the library, so app storage
+    /// doesn't keep a second copy of every developed frame.
+    ///
+    /// Deliberately not done at process time. The reload that follows a process would then find the
+    /// derivative's file gone (`RawDerivedStore.derivedAssets(forOriginals:)` only returns ones that
+    /// still exist) and drop its tile out of the grid and filmstrip, so the frame the user just
+    /// rendered would disappear rather than show its processed check mark. Instead the derivative
+    /// lives for as long as its folder stays open, and goes when the user navigates away.
+    ///
+    /// The second pass is what makes that safe across a quit: `keptDerivativeOriginals` is in-memory
+    /// only, so a session that ends while some are still held would otherwise strand them. Any
+    /// derivative whose own staging path is already recorded processed has served its purpose and is
+    /// swept on the next load of its folder.
+    ///
+    /// Nothing is lost either way — a discarded derivative is a couple of seconds of re-develop away
+    /// from the RAW that is still sitting in the folder.
+    private func discardSpentDerivatives(
+        for assets: [PhotoAsset], inFolder folderURL: URL, processedPaths: Set<String>
+    ) {
+        guard let store = rawDerivedStore else { return }
+
+        // A derivative is "spent" once its own staging path is recorded processed — that path is
+        // what `process(scope:libraryRoot:)` wrote to `ProcessedStateStore`, under this folder.
+        let spent = Set(
+            assets.lazy
+                .filter { PhotoAssetLoader.isRaw($0.url) }
+                .filter { asset in
+                    guard let derivedURL = try? store.derivedURL(for: asset.url) else { return false }
+                    return processedPaths.contains(derivedURL.path)
+                }
+                .map(\.url))
+
+        let decision = Self.derivativeSweep(
+            loadingFolderPath: folderURL.path,
+            keptFolderPath: keptDerivativeFolderPath,
+            keptOriginals: keptDerivativeOriginals,
+            spentOriginalsInFolder: spent)
+
+        for original in decision.discard {
+            try? store.discard(for: original)
+        }
+        keptDerivativeOriginals = decision.stillKept
+        keptDerivativeFolderPath = decision.stillKept.isEmpty ? nil : keptDerivativeFolderPath
+    }
+
+    /// The rule behind `discardSpentDerivatives`, split out so it can be tested without a staging
+    /// directory or a live folder: staying in the folder holds its derivatives, leaving it releases
+    /// them, and anything already spent that nobody is holding goes regardless (the leftovers of a
+    /// session that quit mid-hold).
+    static func derivativeSweep(
+        loadingFolderPath: String,
+        keptFolderPath: String?,
+        keptOriginals: Set<URL>,
+        spentOriginalsInFolder: Set<URL>
+    ) -> (discard: Set<URL>, stillKept: Set<URL>) {
+        let stillKept = keptFolderPath == loadingFolderPath ? keptOriginals : []
+        return (spentOriginalsInFolder.union(keptOriginals).subtracting(stillKept), stillKept)
+    }
+
     /// Renders every not-yet-developed RAW file in `scope` to a JPEG in `RawDerivedStore`, then
     /// reloads so the results appear as members of their originals' capture sets. See docs/SPEC.md
     /// §5 "RAW develop" and `RawDevelopService` for how the decoder is chosen.
@@ -1411,11 +1608,14 @@ final class SourceBrowserViewModel: ObservableObject {
                 }
                 processedFileCount += 1
             }
-            // The derivative existed only to reach the library; now that it's verified in, the
-            // staging copy is dropped so app storage doesn't accumulate a second copy of every
-            // developed frame. It's regenerable from the RAW in a second or two if ever needed.
-            for original in developedOriginals {
-                try? rawDerivedStore?.discard(for: original)
+            // The derivative existed only to reach the library, but trashing it here would delete
+            // it out from under the reload below, and the tile would vanish from the grid and the
+            // filmstrip instead of gaining its processed check mark — on the one frame the user
+            // just rendered and most wants confirmation for. Held until the folder is left, then
+            // swept by `discardSpentDerivatives(for:inFolder:processedPaths:)`.
+            if !developedOriginals.isEmpty {
+                keptDerivativeOriginals.formUnion(developedOriginals)
+                keptDerivativeFolderPath = folderPath
             }
             if let folderPath, !processedPaths.isEmpty {
                 await markAssetsProcessed(processedPaths, inFolder: folderPath)
@@ -1644,13 +1844,18 @@ final class SourceBrowserViewModel: ObservableObject {
         }
     }
 
-    /// Finds `id` across every capture set and applies `mutate` in place — the one spot that knows
-    /// how to reach into `captureSets`' nested `members` arrays, so a successful metadata save can
-    /// update in-memory state immediately without re-reading the file back from disk.
+    /// Finds `id` across every capture group and applies `mutate` in place — the one spot that knows
+    /// how to reach into the nested `members` arrays, so a successful metadata save can update
+    /// in-memory state immediately without re-reading the file back from disk.
+    ///
+    /// Writes to `automaticCaptureSets` and re-derives, rather than editing the published
+    /// `captureSets` directly: that array is a view of the grouping (see `rederiveCaptureSets()`), so
+    /// an edit made only there would be thrown away by the next skip, un-skip or merge.
     private func updateAsset(_ id: PhotoAsset.ID, _ mutate: (inout PhotoAsset) -> Void) {
-        for setIndex in captureSets.indices {
-            if let memberIndex = captureSets[setIndex].members.firstIndex(where: { $0.id == id }) {
-                mutate(&captureSets[setIndex].members[memberIndex])
+        for setIndex in automaticCaptureSets.indices {
+            if let memberIndex = automaticCaptureSets[setIndex].members.firstIndex(where: { $0.id == id }) {
+                mutate(&automaticCaptureSets[setIndex].members[memberIndex])
+                rederiveCaptureSets()
                 return
             }
         }

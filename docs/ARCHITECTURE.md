@@ -365,6 +365,12 @@ as possible:
 - **Reads**: pass every path as a trailing argument to one `exiftool -j -G1 -a -s file1 file2 ...`
   call; the JSON array comes back with one object per file, keyed by that object's `SourceFile`
   tag. Chunk large batches so one invocation's runtime/output stays bounded.
+- **Narrow reads**: when only a handful of tags are wanted, name them (`-DriveMode -StackedImage
+  ...`) and add `-n` for the camera's raw numbers rather than exiftool's prose. Output shrinks
+  enough to justify a much larger chunk size — `readGroupingSignals(at:)` reads a whole folder's
+  capture-grouping signals in a couple of launches, which is what makes running it on every folder
+  load affordable. It is also why grouping is better on Mac than on iPad: the signals it reads live
+  in Olympus maker notes, and ImageIO exposes no maker-note dictionary at all.
 - **Writes**: only batch files that share byte-identical target tag values — pass the shared
   `-TAG=value` args once followed by every target path. Group files by their value-tuple first;
   files needing a unique per-file value (e.g. a rename-derived title) can't be grouped and should

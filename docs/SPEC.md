@@ -26,15 +26,60 @@ deterministically, and copy files into local storage.
   Olympus/OM System `.orf`; pick based on whatever camera the Swift app's user actually shoots).
 - Thumbnails and full preview load off the main thread; RAW files fall back to the embedded
   preview JPEG (extracted via `exiftool -b -PreviewImage`) when no faster path exists.
-- **Capture-set grouping**: files are grouped by capture timestamp at second precision
-  (`DateTimeOriginal`, falling back to `CreateDate`). A "Stacked" view mode shows one representative
-  tile per group instead of every member.
+- **Capture-set grouping**: one set per press of the shutter, where a burst, a bracket, an in-camera
+  composite or a whole interval/timelapse run counts as one press. A "Stacked" view mode shows one
+  representative tile per group instead of every member.
+  - Files sharing a filename stem (a JPEG, its RAW, an unfiltered `.ORI`, and any RAW-developed
+    derivative) are one *frame* and are never split apart. Grouping then runs over frames in
+    capture order.
+  - **The timestamp alone cannot do this.** The OM-3 writes `DateTimeOriginal` in whole seconds and
+    no `SubSecTimeOriginal`, so on a real card gaps within one capture (up to 7s across a focus
+    bracket of long exposures) and gaps between separate captures (down to 0s) overlap completely.
+    No gap threshold can separate them; the camera's own maker-note signals have to break the tie.
+  - Six checks decide whether a frame opens a new set, in order:
+    1. Interval shooting is decided by its own counter and the gap gets no vote at all — a whole
+       timelapse run is one capture set however far apart its frames are. The counter restarting,
+       or a hand-shot frame beside an interval one, is where a run ends.
+    2. An advancing shot counter (Olympus `DriveMode`) means "still the same sequence" and outranks
+       the gap, which a focus bracket of long exposures needs (7s between frames on the test card).
+    3. Otherwise a gap over 1s starts a new set.
+    4. An in-camera focus-stacked composite joins the run it was built from, proven by its own
+       source-frame count (`StackedImage` mode 9) matching that run's length.
+    5. A shot counter that restarted, started or ended is a sequence boundary.
+    6. Two singles rendered identically in the same second are two presses, not one bracket — a
+       rendering bracket is invisible to the counter (the camera calls every frame of it a plain
+       single shot), so the differing art filter / picture mode / exposure compensation is all that
+       holds it together.
+  - The interval counter is Olympus CameraSettings **`0x0605`**, which exiftool has no name for and
+    suppresses without `-u`. It reads `0 0` off the timer and `<constant> <index>` on it. It is the
+    only signal a timelapse leaves: `DriveMode` is byte-identical between an interval frame and a
+    hand-shot single, and the gap can't help because a timelapse interval is by definition longer
+    than any burst.
+  - Unknown never splits: any signal the platform can't read is simply absent. **iPad therefore
+    groups on the gap alone**, since ImageIO exposes no maker-note dictionary and iOS can't run
+    exiftool. Measured on a 553-frame test card that costs 39 frames against the Mac's grouping —
+    all over-merges of back-to-back short bursts, never a split capture. (The same-second rule this
+    replaced misgrouped 233 of those 553.)
+  - **Manual merge** overrides all of the above: select two or more capture sets in the source grid
+    and merge them into one (Mac right-click "Merge into One Capture Set", iPad Select mode's
+    "Merge"), reversible with "Split Apart". For captures the camera left no counter behind for — a
+    long hand-shot sequence, or an interval run on a body that stamps no interval index — where only
+    the photographer knows the frames belong together. Persisted per source folder, keyed by file
+    path (set ids are regenerated on every load), so it survives reopening the folder *and*
+    regrouping: a frame joining a merged set later, such as a RAW developed after the merge, comes
+    along with it. It also gives iPad a way back to a grouping its missing maker-note signals cost it.
   - Representative selection: prefer the first JPG/JPEG in filename order; else the first file.
     (Learned the hard way in the reference app: picking "largest file" biases toward heavily
     processed/filtered renders in in-camera bracket bursts — filename-order-first JPEG is a better
     proxy for "the plain render".)
 - **Skip** removes a file (or a whole capture set) from the current session view only — persisted
   per source folder so a re-opened folder remembers what was skipped.
+  - Skip state is recorded **per file**, and an individual frame can be skipped on its own from the
+    filmstrip under the large preview (right-click on Mac, long-press on iPad). Skipping the whole
+    set is simply the same action applied to every member.
+  - A set with only some members skipped therefore appears in **both** filter views: the frames still
+    in play under Active, the culled ones under Skipped. Both halves keep the group's identity, so
+    culling one frame out of a focus bracket or a burst doesn't disturb the rest of the grid.
 - Manual multi-select (cmd-click to toggle, shift-click for range) should act on the *full capture-group
   membership* of whatever's selected, not just the visibly selected representative tiles — otherwise
   bulk actions silently skip hidden group members (e.g. the RAW file behind a stacked JPEG).
@@ -287,7 +332,12 @@ default settings, the point being Apple's engine applied to the file as the came
   description note — a RAW carries no in-camera effect.
 - **Storage**: the derivative is staged in Application Support, never written to the SD card (which
   may be full, and stays in use across a multi-day trip — the same reasoning as the iPad's sidecar
-  staging). It is trashed once Process & Move has verified it into the library.
+  staging). It is trashed once Process & Move has verified it into the library — but **not until the
+  folder is left**. Trashing it at process time would take its tile out of the grid and filmstrip on
+  the reload that follows, so the frame just processed would disappear instead of showing its
+  processed check mark. Holding it means the derivative behaves like every other file for the rest of
+  the review pass, and re-developing after the sweep is a couple of seconds from the RAW that is
+  still there.
 - **iPad divergence**: iPadOS cannot write a DNG (ImageIO lists no DNG output type), so a body
   outside the decoder-9 list cannot be developed there at all. The iPad instead offers **Mark for RAW
   develop**, which stages a marker keyword in the sidecar and badges the tile; the marker rides

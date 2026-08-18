@@ -36,6 +36,10 @@ struct SourcePanelView: View {
                     Text("\(viewModel.multiSelectedIDs.count) selected")
                         .foregroundStyle(.secondary)
                     Spacer()
+                    if viewModel.sourceViewFilter == .active {
+                        Button("Merge") { viewModel.mergeSelectedCaptureSets() }
+                            .disabled(!viewModel.canMergeSelection)
+                    }
                     Button(viewModel.sourceViewFilter == .active ? "Skip" : "Un-skip") {
                         viewModel.performBatchSkipAction()
                     }
@@ -112,6 +116,9 @@ struct SourcePanelView: View {
                                                 ) {
                                                     viewModel.toggleRawDevelopMark(captureSet)
                                                 }
+                                            }
+                                            if viewModel.isMerged(captureSet) {
+                                                Button("Split Apart") { viewModel.splitApart(captureSet) }
                                             }
                                         case .skipped:
                                             Button("Un-skip") { viewModel.unskip(captureSet) }

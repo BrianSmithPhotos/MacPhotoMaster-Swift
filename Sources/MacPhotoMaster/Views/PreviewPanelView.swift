@@ -195,9 +195,17 @@ private struct SelectedImagesStripView: View {
                         onPlainSelect: { viewModel.setActivePreview(member.id) },
                         onToggleSelect: { viewModel.toggleVariantSelection(member.id) }
                     )
-                    // Per-file counterpart to the capture-set action in `SourcePanelView`: develop
-                    // just this one RAW rather than every RAW in its set.
+                    // Per-file counterparts to the capture-set actions in `SourcePanelView`: act on
+                    // just this one frame rather than every member of its set. Skip/Un-skip follow
+                    // the same rule as the grid's — which one is offered depends on which filter is
+                    // being browsed, so a tile can't be skipped twice or un-skipped while active.
                     .contextMenu {
+                        switch viewModel.sourceViewFilter {
+                        case .active:
+                            Button("Skip") { viewModel.skipMember(member) }
+                        case .skipped:
+                            Button("Un-skip") { viewModel.unskipMember(member) }
+                        }
                         Button("Develop RAW") {
                             viewModel.developRAW(scope: .singleAsset(member))
                         }

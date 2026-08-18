@@ -1,10 +1,18 @@
 import Foundation
 
-/// A group of assets captured within the same second. See docs/SPEC.md §1 for the grouping and
-/// representative-selection rules.
+/// One press of the shutter's worth of assets — a single frame, or a whole burst, bracket or
+/// in-camera composite. See docs/SPEC.md §1 for the grouping and representative-selection rules.
 public struct CaptureSet: Identifiable {
-    public let id: UUID = UUID()
+    /// Assigned once by `CaptureGroupingService` and then carried by both halves `SkipPartition`
+    /// splits this group into, rather than regenerated per split — see that type for why the two
+    /// halves deliberately share an id, and why regenerating would cost every tile its thumbnail.
+    public let id: UUID
     public var members: [PhotoAsset]
+
+    public init(members: [PhotoAsset], id: UUID = UUID()) {
+        self.members = members
+        self.id = id
+    }
 
     /// First JPG/JPEG in filename order, else the first member in filename order. See docs/SPEC.md §1.
     ///

@@ -89,7 +89,14 @@ struct PreviewPanelView: View {
                 FilmstripView(
                     members: members,
                     activeAssetID: asset?.id,
-                    onSelect: { viewModel.setActivePreview($0) }
+                    skipActionTitle: viewModel.sourceViewFilter == .active ? "Skip" : "Un-skip",
+                    onSelect: { viewModel.setActivePreview($0) },
+                    onSkipAction: { member in
+                        switch viewModel.sourceViewFilter {
+                        case .active: viewModel.skipMember(member)
+                        case .skipped: viewModel.unskipMember(member)
+                        }
+                    }
                 )
             }
         }
@@ -122,11 +129,14 @@ private struct ZoomReadout: View {
 }
 
 /// Row of every member of the selected capture set, shown under the large preview. Tapping a
-/// thumbnail switches which member is previewed large.
+/// thumbnail switches which member is previewed large; long-pressing one skips (or un-skips) that
+/// single frame, leaving the rest of the set in place — see docs/SPEC.md §1.
 private struct FilmstripView: View {
     let members: [PhotoAsset]
     let activeAssetID: PhotoAsset.ID?
+    let skipActionTitle: String
     let onSelect: (PhotoAsset.ID) -> Void
+    let onSkipAction: (PhotoAsset) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: true) {
@@ -137,6 +147,9 @@ private struct FilmstripView: View {
                         isActive: activeAssetID == member.id,
                         onSelect: { onSelect(member.id) }
                     )
+                    .contextMenu {
+                        Button(skipActionTitle) { onSkipAction(member) }
+                    }
                 }
             }
             .padding(.top, 4)

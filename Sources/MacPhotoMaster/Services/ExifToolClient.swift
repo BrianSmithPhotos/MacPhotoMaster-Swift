@@ -99,6 +99,80 @@ struct ExifToolClient: MetadataWriter {
         return bySourceFile
     }
 
+    /// Only the tags capture-set grouping needs, and `-n` so they come back as the camera's raw
+    /// numbers rather than exiftool's prose — `DriveMode`'s shot index and `StackedImage`'s source
+    /// frame count only exist in the raw form.
+    ///
+    /// `-u` is what makes the interval-shooting counter readable at all: exiftool has no name for
+    /// Olympus CameraSettings `0x0605` and suppresses unnamed tags without it.
+    private static let groupingArguments = [
+        "-j", "-s", "-n", "-u",
+        "-DriveMode", "-Olympus_CameraSettings_0x0605", "-StackedImage",
+        "-ArtFilter", "-PictureMode", "-ExposureCompensation",
+    ]
+
+    /// Five tags is a fraction of a full read's output, so this runs in much larger chunks than
+    /// `readMetadata(at:)` — a folder of several hundred frames costs only a handful of launches.
+    private static let groupingChunkSize = 250
+
+    /// Reads the maker-note signals `CaptureGroupingService` groups by, for a whole folder at once.
+    ///
+    /// Best-effort throughout: a file exiftool couldn't read is simply absent from the result, and
+    /// grouping falls back to the timestamp gap for it. There is no per-file retry the way
+    /// `readMetadata(at:)` has one — a missing signal degrades grouping, it doesn't fail a save.
+    func readGroupingSignals(at urls: [URL]) async throws -> [URL: CaptureSignals] {
+        var signals: [URL: CaptureSignals] = [:]
+        for chunk in stride(from: 0, to: urls.count, by: Self.groupingChunkSize).map({
+            Array(urls[$0..<min($0 + Self.groupingChunkSize, urls.count)])
+        }) {
+            guard let output = try? await run(arguments: Self.groupingArguments + chunk.map(\.path)),
+                let entries = try? JSONSerialization.jsonObject(with: output) as? [[String: Any]]
+            else { continue }
+            for entry in entries {
+                guard let sourceFile = entry["SourceFile"] as? String else { continue }
+                signals[URL(fileURLWithPath: sourceFile)] = Self.groupingSignals(from: entry)
+            }
+        }
+        return signals
+    }
+
+    static func groupingSignals(from entry: [String: Any]) -> CaptureSignals {
+        var signals = CaptureSignals()
+        // `DriveMode` is up to six numbers; the second is the shot index within the sequence, and
+        // 0 means the camera considered this a plain single shot rather than part of one.
+        let drive = numbers(entry["DriveMode"])
+        if drive.count > 1, drive[1] > 0 { signals.shotNumber = drive[1] }
+        // `0x0605` is (constant, index) while the interval timer is running and `0 0` when it
+        // isn't, so a positive index is both the "this is a timelapse frame" flag and its position
+        // in the run. Its first number is some descriptor of the run that isn't needed here.
+        let interval = numbers(entry["Olympus_CameraSettings_0x0605"])
+        if interval.count > 1, interval[1] > 0 { signals.intervalIndex = interval[1] }
+        // `StackedImage` is (mode, parameter) and names what one finished frame is, not what it
+        // belongs to. Only mode 9, in-camera focus stacking, carries a source frame count.
+        let stacked = numbers(entry["StackedImage"])
+        if stacked.count == 2, stacked[0] == 9 { signals.stackedFrameCount = stacked[1] }
+
+        let render = ["ArtFilter", "PictureMode", "ExposureCompensation"].map { text(entry[$0]) }
+        // Left nil rather than joined-from-nothing when the camera wrote none of them, so a file
+        // with no readable render never looks identical to the next one and splits it off.
+        if render.contains(where: { !$0.isEmpty }) { signals.renderSignature = render.joined(separator: "|") }
+        return signals
+    }
+
+    private static func numbers(_ value: Any?) -> [Int] {
+        if let number = value as? NSNumber { return [number.intValue] }
+        guard let string = value as? String else { return [] }
+        return string.split(separator: " ").compactMap { Int($0) }
+    }
+
+    private static func text(_ value: Any?) -> String {
+        switch value {
+        case let string as String: return string
+        case let number as NSNumber: return number.stringValue
+        default: return ""
+        }
+    }
+
     /// Writes title/description/keywords/GPS to a single file. `title` is per-file-unique (it's
     /// usually rename-derived), so it's only exposed here, never in the batched overload below —
     /// see docs/SPEC.md §3.

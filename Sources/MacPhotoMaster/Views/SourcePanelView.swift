@@ -88,6 +88,14 @@ struct SourcePanelView: View {
                                         .disabled(
                                             viewModel.isDevelopingRAW
                                                 || !viewModel.canDevelopRAW(scope: .captureSet(captureSet)))
+                                        Divider()
+                                        Button("Merge into One Capture Set") {
+                                            viewModel.mergeSelectedCaptureSets()
+                                        }
+                                        .disabled(!viewModel.canMergeSelection)
+                                        if viewModel.isMerged(captureSet) {
+                                            Button("Split Apart") { viewModel.splitApart(captureSet) }
+                                        }
                                     case .skipped:
                                         Button("Un-skip") { viewModel.unskip(captureSet) }
                                     }

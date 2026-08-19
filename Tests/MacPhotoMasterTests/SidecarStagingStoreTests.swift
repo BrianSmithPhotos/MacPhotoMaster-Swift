@@ -59,6 +59,45 @@ final class SidecarStagingStoreTests: XCTestCase {
         XCTAssertFalse(try store.hasStagedDraft(for: url))
     }
 
+    func testClearingRemovesEveryStagedDraftAndReportsHowMany() async throws {
+        let first = try makeTempFile()
+        let second = try makeTempFile()
+        let store = try makeStore()
+        try await store.stage(
+            title: nil, description: "One", keywords: [], gps: nil, for: first)
+        try await store.stage(
+            title: nil, description: "Two", keywords: [], gps: nil, for: second)
+        XCTAssertEqual(try store.stagedDraftCount(), 2)
+
+        XCTAssertEqual(try store.clearStagedDrafts(), 2)
+
+        XCTAssertEqual(try store.stagedDraftCount(), 0)
+        XCTAssertNil(try store.stagedDraft(for: first))
+        XCTAssertNil(try store.stagedDraft(for: second))
+    }
+
+    /// Clearing an already-empty store is the state the button sits in most of the time, so it has
+    /// to be a quiet no-op rather than a throw.
+    func testClearingAnEmptyStoreRemovesNothing() throws {
+        let store = try makeStore()
+
+        XCTAssertEqual(try store.clearStagedDrafts(), 0)
+        XCTAssertEqual(try store.stagedDraftCount(), 0)
+    }
+
+    /// Staging again after a clear has to work: the directory itself must survive, and the store
+    /// must not be left holding a path that no longer exists.
+    func testStagingWorksAgainAfterAClear() async throws {
+        let url = try makeTempFile()
+        let store = try makeStore()
+        try await store.stage(title: nil, description: "Before", keywords: [], gps: nil, for: url)
+        try store.clearStagedDrafts()
+
+        try await store.stage(title: nil, description: "After", keywords: [], gps: nil, for: url)
+
+        XCTAssertEqual(try store.stagedDraft(for: url)?.description, "After")
+    }
+
     func testStageAndReadBackRoundTrip() async throws {
         let url = try makeTempFile()
         let store = try makeStore()

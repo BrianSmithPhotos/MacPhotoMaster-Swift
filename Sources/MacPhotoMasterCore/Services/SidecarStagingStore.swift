@@ -92,4 +92,34 @@ public struct SidecarStagingStore {
         return "\(size)_\(assetURL.lastPathComponent)"
     }
 
+    /// Deletes every staged sidecar, returning how many were removed — the only way to get rid of
+    /// drafts that were staged and never processed, since nothing else here ever removes one (a
+    /// Process & Move reads a draft and leaves it in place).
+    ///
+    /// `removeItem` rather than the repo's usual `trashItem`/`recycle` rule: these are the app's own
+    /// bookkeeping inside its own container, not the user's photographs, and an iOS app container
+    /// has no user-visible trash for them to be recoverable from anyway. The originals these describe
+    /// are never touched by this type at all.
+    ///
+    /// Only `.xmp` files are removed, so an unrelated file that somehow ends up in the directory
+    /// survives rather than being swept up by a blanket "empty this folder".
+    @discardableResult
+    public func clearStagedDrafts() throws -> Int {
+        let contents = try FileManager.default.contentsOfDirectory(
+            at: stagingDirectory, includingPropertiesForKeys: nil)
+        var removed = 0
+        for url in contents where url.pathExtension.lowercased() == "xmp" {
+            try FileManager.default.removeItem(at: url)
+            removed += 1
+        }
+        return removed
+    }
+
+    /// How many drafts are staged right now — lets the UI say what a clear would discard before the
+    /// user commits to it, rather than reporting the number afterwards.
+    public func stagedDraftCount() throws -> Int {
+        try FileManager.default.contentsOfDirectory(at: stagingDirectory, includingPropertiesForKeys: nil)
+            .count { $0.pathExtension.lowercased() == "xmp" }
+    }
+
 }

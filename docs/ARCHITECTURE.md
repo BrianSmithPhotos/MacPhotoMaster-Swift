@@ -211,6 +211,20 @@ actual views:
   below), same as the existing sidecar design already assumes. The original file on the card never
   gets a sidecar at all.
 
+  Staged sidecars are never removed by anything in the normal flow — a Process & Move *reads* a draft
+  and leaves it in place — so they accumulate for the life of the install, and a re-previewed file
+  picks its old draft back up (`applyStagedDraftIfPresent`). That is right for a multi-day trip and
+  wrong after a testing session, so `clearStagedDrafts()` plus a confirmed "Clear Staged Edits" button
+  in `SettingsView` is the one way to discard them. It deletes with `removeItem` rather than the
+  repo's usual trash rule: this is the app's own bookkeeping inside its own container, not the user's
+  photographs, and an iOS container has no user-visible trash to recover from anyway.
+
+  One consequence worth knowing: a staged draft reaches `PhotoAsset.descriptionText` only when the
+  photo is previewed or processed, never at folder load. So batch AI's "skip sets that already have a
+  description" rule sees the *original* file's metadata across sessions — reopen a card in a new
+  session and a second batch run re-describes sets it already staged. Within one session it skips
+  correctly.
+
 ## iPad import (Mac side)
 
 `IPadImportService` finishes off files the iPad processed but couldn't complete — the art-filter

@@ -9,7 +9,9 @@ import MacPhotoMasterCore
 /// launches (see `PhotoBrowserViewModel.locateTimelineFile` and docs/ARCHITECTURE.md's iPad
 /// file-access section), the OpenRouter + eBird API keys, a per-model Compact Prompt toggle (small
 /// on-device models), and a per-model eBird candidate-list toggle (chargeable OpenRouter models). The
-/// AI model itself is picked per-photo in `MetadataPanelView`, not here.
+/// AI model itself is picked per-photo in `MetadataPanelView`, not here. A "Clear Staged Edits"
+/// button lives here too — the only way to discard staged sidecars, which nothing else ever removes
+/// (a Process & Move reads a draft and leaves it in place).
 struct SettingsView: View {
     @ObservedObject var viewModel: PhotoBrowserViewModel
     @Environment(\.dismiss) private var dismiss
@@ -19,6 +21,7 @@ struct SettingsView: View {
     /// else (a `UserDefaults` secret would be a cleartext plist). See `APIKeyStore`.
     @State private var openRouterAPIKey = ""
     @State private var eBirdAPIKey = ""
+    @State private var isConfirmingClearStagedEdits = false
 
     var body: some View {
         NavigationStack {
@@ -106,12 +109,50 @@ struct SettingsView: View {
                         "Turn on for small models that echo placeholder keywords or over-apply bird/flower "
                         + "identification (e.g. FastVLM-0.5B). Larger models work better with it off.")
                 }
+
+                Section {
+                    Button(role: .destructive) {
+                        isConfirmingClearStagedEdits = true
+                    } label: {
+                        Label("Clear Staged Edits (\(viewModel.stagedEditCount))", systemImage: "trash")
+                    }
+                    .disabled(viewModel.stagedEditCount == 0)
+
+                    if let message = viewModel.stagedEditsStatusMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Staged Edits")
+                } footer: {
+                    Text(
+                        "Descriptions, keywords and locations saved on this iPad are staged in the app "
+                        + "rather than written to the originals on the card, and stay staged even after "
+                        + "Process & Move copies them. Clearing discards every one that hasn't been "
+                        + "processed — the photos on the card are never touched either way.")
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 openRouterAPIKey = APIKeyStore.read(account: "OPENROUTER_API_KEY") ?? ""
                 eBirdAPIKey = APIKeyStore.read(account: "EBIRD_API_KEY") ?? ""
+                viewModel.refreshStagedEditCount()
+            }
+            // Confirmed rather than immediate: staged edits are the only copy of work not yet
+            // processed, and the count in the message is what makes "is this the test run or my
+            // afternoon?" answerable before the tap.
+            .confirmationDialog(
+                "Clear \(viewModel.stagedEditCount) staged edit(s)?",
+                isPresented: $isConfirmingClearStagedEdits, titleVisibility: .visible
+            ) {
+                Button("Clear Staged Edits", role: .destructive) {
+                    viewModel.clearStagedEdits()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Any description, keyword or location not yet processed into the library is discarded. Photos on the card are unaffected.")
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

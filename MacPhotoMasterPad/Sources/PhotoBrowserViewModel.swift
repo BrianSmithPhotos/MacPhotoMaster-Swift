@@ -1028,6 +1028,37 @@ final class PhotoBrowserViewModel: ObservableObject {
         captureSet.members.contains { processedAssetPaths.contains($0.url.path) }
     }
 
+    /// How many staged edits exist right now, refreshed by `refreshStagedEditCount()` — Settings
+    /// shows it so "Clear Staged Edits" says what it would discard before it is pressed.
+    @Published private(set) var stagedEditCount = 0
+    @Published var stagedEditsStatusMessage: String?
+
+    func refreshStagedEditCount() {
+        Task {
+            guard let store = await ensureSidecarStagingStore() else { return }
+            stagedEditCount = (try? store.stagedDraftCount()) ?? 0
+        }
+    }
+
+    /// Discards every staged edit. Nothing else ever removes one — a Process & Move reads a draft
+    /// and leaves it behind — so without this, descriptions written during testing stay in the app
+    /// container indefinitely and come back the next time the same file is previewed.
+    ///
+    /// The in-memory buffer and the loaded assets are deliberately left alone: this clears what is
+    /// on disk, and what is on screen is still the user's unsaved work until they navigate away.
+    func clearStagedEdits() {
+        Task {
+            guard let store = await ensureSidecarStagingStore() else { return }
+            do {
+                let removed = try store.clearStagedDrafts()
+                stagedEditCount = 0
+                stagedEditsStatusMessage = "Cleared \(removed) staged edit(s)."
+            } catch {
+                stagedEditsStatusMessage = "Could not clear staged edits: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func ensureSidecarStagingStore() async -> SidecarStagingStore? {
         if let sidecarStagingStore { return sidecarStagingStore }
         do {

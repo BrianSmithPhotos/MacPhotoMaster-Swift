@@ -1403,12 +1403,18 @@ final class PhotoBrowserViewModel: ObservableObject {
 
     /// The same location context and eBird candidate list for a capture set nobody has selected —
     /// what `lookupLocationKeywordsIfNeeded()` does for the previewed one, minus the edit buffer.
-    /// GPS comes off the representative's own metadata, so a Timeline suggestion the user has not
-    /// accepted is deliberately not used here: a batch run stages sidecars with nobody watching, and
-    /// a guessed location must not become a written one.
+    ///
+    /// A photo with no GPS of its own falls back to a Timeline suggestion, but only as *context*:
+    /// the location line in the prompt and the eBird region the candidate species come from. Its
+    /// coordinates are never written to the asset and its place names never become keywords, which
+    /// is the line this draws — a batch run stages sidecars with nobody watching, so a guessed
+    /// location must not become a written one. Without the fallback the run had neither, and the
+    /// camera writes no GPS: every set was described with no idea where it was taken and no list of
+    /// species that live there, which is exactly the condition a small model invents bird names in.
     ///
     /// Returns the location keywords for the caller to fold into what it stages, since without a
-    /// buffer to pass through they would otherwise be dropped from a batch-written sidecar.
+    /// buffer to pass through they would otherwise be dropped from a batch-written sidecar. Empty
+    /// on the Timeline path, for the reason above.
     @discardableResult
     private func ensureAIContext(for captureSet: CaptureSet) async -> [String] {
         guard let representative = captureSet.representative else { return [] }
@@ -1416,21 +1422,49 @@ final class PhotoBrowserViewModel: ObservableObject {
         guard !geocodeAppliedRepresentativeIDs.contains(representativeID) else {
             return locationKeywordsByRepresentativeID[representativeID] ?? []
         }
-        guard let latitude = representative.gpsLatitude, let longitude = representative.gpsLongitude
-        else { return [] }
+
+        let embeddedGPS = representative.gpsLatitude.flatMap { latitude in
+            representative.gpsLongitude.map { (latitude: latitude, longitude: $0) }
+        }
+        var resolved = embeddedGPS
+        if resolved == nil { resolved = await timelineCoordinate(for: representative) }
+        guard let coordinate = resolved else {
+            Self.ebirdLogger.log(
+                "Bird candidates skipped: no GPS and no Timeline point for this capture time")
+            return []
+        }
         geocodeAppliedRepresentativeIDs.insert(representativeID)
 
         guard
             let result = try? await reverseGeocodeService.lookupLocation(
-                latitude: latitude, longitude: longitude)
+                latitude: coordinate.latitude, longitude: coordinate.longitude)
         else { return [] }
         locationContextByRepresentativeID[representativeID] = result.contextText
-        locationKeywordsByRepresentativeID[representativeID] = result.keywordTokens
         geocodeRegionByRepresentativeID[representativeID] = (result.county, result.stateRegionCode)
         await lookupBirdCandidates(
             representativeID: representativeID, county: result.county,
             stateRegionCode: result.stateRegionCode)
+
+        guard embeddedGPS != nil else { return [] }
+        locationKeywordsByRepresentativeID[representativeID] = result.keywordTokens
         return result.keywordTokens
+    }
+
+    /// The Timeline point nearest this photo's capture time, or nil when there is no import, no
+    /// timestamp, or nothing inside the cache's match window. Read-only: unlike
+    /// `suggestGPSIfNeeded()`, which the user is watching and can see the result of, nothing here
+    /// touches the asset.
+    private func timelineCoordinate(
+        for asset: PhotoAsset
+    ) async -> (latitude: Double, longitude: Double)? {
+        guard let capturedAt = asset.capturedAt, let cache = await ensureTimelineCache() else {
+            return nil
+        }
+        guard
+            let suggestion = try? await cache.suggestion(
+                forCaptureTimestampUTC: Int(capturedAt.timeIntervalSince1970))
+        else { return nil }
+        return (suggestion.latitude, suggestion.longitude)
     }
 
     /// Called from `SettingsView`'s per-model eBird toggle. Persists the set.

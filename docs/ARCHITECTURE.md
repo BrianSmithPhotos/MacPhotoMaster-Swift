@@ -527,10 +527,16 @@ Three decisions worth keeping:
   on). This is why `performSave(scope:)` was split: `writeMetadata(description:keywords:gps:to:)`
   writes *passed-in* values, since the panel's edit buffer belongs to whichever set the user has
   selected, not to the set the batch is currently on.
-- **Embedded GPS only.** `ensureAIContext(for:)` builds each set's location context and eBird
-  candidate list from the representative's own embedded coordinates, never from an unaccepted
-  Timeline suggestion — a batch writes files unattended, so it may only act on what the file already
-  says. It returns the location keywords rather than parking them in the edit buffer, because a batch
+- **A guessed location may be read, never written.** `ensureAIContext(for:)` prefers the
+  representative's own embedded coordinates and falls back to a Timeline suggestion, but the
+  fallback only feeds the prompt: the location line, and the eBird region the candidate species come
+  from. It writes no GPS and contributes no location keywords, so nothing a batch leaves behind
+  claims a location the file did not have. The first cut had no fallback at all, and on a camera
+  that records no GPS that meant every set was described with no idea where it was taken and no list
+  of species that live there — the condition where the prompt asks a small model for a Latin
+  binomial and gets an invented one, since it is the presence of a candidate list that switches the
+  prompt to "name it from this list, do not write a scientific name". On the embedded-GPS path it
+  still returns the location keywords rather than parking them in the edit buffer, because a batch
   has no buffer for them to survive in.
 
 The single-set path (`suggestAI()`) and the batch share `aiSuggestion(...)` — prompt profile choice,

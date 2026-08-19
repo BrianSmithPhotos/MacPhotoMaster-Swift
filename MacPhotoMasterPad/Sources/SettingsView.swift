@@ -117,6 +117,24 @@ struct SettingsView: View {
                         Label("Clear Staged Edits (\(viewModel.stagedEditCount))", systemImage: "trash")
                     }
                     .disabled(viewModel.stagedEditCount == 0)
+                    // Confirmed rather than immediate: staged edits are the only copy of work not
+                    // yet processed, and the count in the message is what makes "is this the test
+                    // run or my afternoon?" answerable before the tap. Attached to the button, not
+                    // to the Form: a second presentation modifier on the view that already carries
+                    // the Timeline `.fileImporter` is the stacking that leaves a phantom
+                    // `PresentationHostingController` behind (see `ContentView.ActiveSheet`) —
+                    // which then blocks the sidebar's Open Folder picker after Settings is closed.
+                    .confirmationDialog(
+                        "Clear \(viewModel.stagedEditCount) staged edit(s)?",
+                        isPresented: $isConfirmingClearStagedEdits, titleVisibility: .visible
+                    ) {
+                        Button("Clear Staged Edits", role: .destructive) {
+                            viewModel.clearStagedEdits()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Any description, keyword or location not yet processed into the library is discarded. Photos on the card are unaffected.")
+                    }
 
                     if let message = viewModel.stagedEditsStatusMessage {
                         Text(message)
@@ -139,20 +157,6 @@ struct SettingsView: View {
                 openRouterAPIKey = APIKeyStore.read(account: "OPENROUTER_API_KEY") ?? ""
                 eBirdAPIKey = APIKeyStore.read(account: "EBIRD_API_KEY") ?? ""
                 viewModel.refreshStagedEditCount()
-            }
-            // Confirmed rather than immediate: staged edits are the only copy of work not yet
-            // processed, and the count in the message is what makes "is this the test run or my
-            // afternoon?" answerable before the tap.
-            .confirmationDialog(
-                "Clear \(viewModel.stagedEditCount) staged edit(s)?",
-                isPresented: $isConfirmingClearStagedEdits, titleVisibility: .visible
-            ) {
-                Button("Clear Staged Edits", role: .destructive) {
-                    viewModel.clearStagedEdits()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Any description, keyword or location not yet processed into the library is discarded. Photos on the card are unaffected.")
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

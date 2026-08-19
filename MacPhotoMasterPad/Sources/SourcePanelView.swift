@@ -145,7 +145,7 @@ struct SourcePanelView: View {
                 }
             }
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Open Folder…") { isChoosingFolder = true }
+                Button("Open Folder…") { presentFolderPicker() }
                     .disabled(viewModel.isSelecting)
             }
         }
@@ -154,6 +154,17 @@ struct SourcePanelView: View {
                 viewModel.openFolder(at: url)
             }
         }
+    }
+
+    /// UIKit refuses to present the picker while anything else is still presented on this screen's
+    /// hosting controller — a sheet that has only just been dismissed counts — and SwiftUI does not
+    /// report that back: the binding is left at true with no picker on screen, so every later tap
+    /// writes true over true, produces no change for SwiftUI to act on, and the button stays dead
+    /// until the app is restarted. Dropping it to false first makes every tap a fresh false-to-true
+    /// edge, so a second tap retries rather than doing nothing.
+    private func presentFolderPicker() {
+        isChoosingFolder = false
+        DispatchQueue.main.async { isChoosingFolder = true }
     }
 }
 

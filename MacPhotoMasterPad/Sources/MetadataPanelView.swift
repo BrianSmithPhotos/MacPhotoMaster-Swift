@@ -21,7 +21,10 @@ import MacPhotoMasterCore
 ///
 /// The AI Suggestions section has a model picker (free-text field + presets menu, `mlx:`/`openrouter:`/
 /// `foundation:` on iPad) and a Suggest/Cancel button driving `PhotoBrowserViewModel.startAISuggestion()`;
-/// the result auto-saves like the Mac app. A "Crop to Subject" Toggle mirrors the Mac's — when on, the
+/// the result auto-saves like the Mac app. Below that, a batch row runs one suggestion per capture
+/// set (`startBatchAISuggestion()`) over the grid's multi-selection or, with none, everything the
+/// grid is showing — its label carries the count because the sheet covers the grid, so neither the
+/// selection nor the number of sets in scope is visible from here. A "Crop to Subject" Toggle mirrors the Mac's — when on, the
 /// preview switches to a static crop canvas (see `PreviewPanelView`) and the model is sent the cropped
 /// subject; the resulting "Evaluated" thumbnail below confirms what it actually received. The eBird
 /// candidate list is wired up in the view model, toggled per-model in `SettingsView` rather than here.
@@ -114,6 +117,30 @@ struct MetadataPanelView: View {
                                 }
                                 .disabled(viewModel.previewAsset == nil)
                             }
+
+                            // Batch: one suggestion per capture set. The label says both halves of
+                            // what will happen — how many sets, and whether the run is scoped to the
+                            // grid selection or to everything the grid is showing — because the sheet
+                            // covers the grid, so the selection itself is not visible from here.
+                            if viewModel.isBatchSuggestingAI {
+                                Button("Stop", role: .cancel) {
+                                    viewModel.cancelBatchAISuggestion()
+                                }
+                                ProgressView(
+                                    value: Double(viewModel.batchAICompletedCount),
+                                    total: Double(max(viewModel.batchAITotalCount, 1)))
+                            } else {
+                                Button(
+                                    (viewModel.hasMultiSelection ? "Suggest Selected Sets" : "Suggest All Sets")
+                                        + " (\(viewModel.batchAITargetCount))"
+                                ) {
+                                    viewModel.startBatchAISuggestion()
+                                }
+                                .disabled(viewModel.batchAITargetCount == 0 || viewModel.isSuggestingAI)
+                            }
+                            Toggle(
+                                "Re-describe sets that already have a description",
+                                isOn: $viewModel.batchAIRedescribesDescribedSets)
 
                             if let aiStatusMessage = viewModel.aiStatusMessage {
                                 Text(aiStatusMessage)

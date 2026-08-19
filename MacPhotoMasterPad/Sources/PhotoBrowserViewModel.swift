@@ -160,6 +160,17 @@ final class PhotoBrowserViewModel: ObservableObject {
     }
     @Published private(set) var isSuggestingAI = false
     @Published var aiStatusMessage: String?
+    /// True while a batch run is working through its capture sets. Separate from `isSuggestingAI`
+    /// because the two are not the same button and must not disable each other by accident: a batch
+    /// run sets this for minutes, and `isSuggestingAI` still belongs to the one request in flight.
+    @Published private(set) var isBatchSuggestingAI = false
+    /// How far a batch run has got, for the progress caption. Total is fixed when the run starts.
+    @Published private(set) var batchAICompletedCount = 0
+    @Published private(set) var batchAITotalCount = 0
+    /// Whether a batch run also re-describes sets that already have a description. Off by default
+    /// and deliberately not persisted: it is a decision about this run, over these files, and a
+    /// setting that quietly stayed on would overwrite hand-written prose on the next folder.
+    @Published var batchAIRedescribesDescribedSets = false
     /// The exact image the last `suggestAI()` call sent to the model, shown in the Metadata panel so
     /// a misidentification is diagnosable rather than assumed to be a hallucination.
     ///
@@ -197,6 +208,9 @@ final class PhotoBrowserViewModel: ObservableObject {
         UserDefaults.standard.bool(forKey: PhotoBrowserViewModel.subjectIsolationEnabledKey)
     private static let subjectIsolationEnabledKey = "subjectIsolationEnabled"
     private var suggestAITask: Task<Void, Never>?
+    private var batchAISuggestionTask: Task<Void, Never>?
+    private static let batchLog = Logger(
+        subsystem: "photos.briansmith.macphotomaster", category: "BatchAISuggestion")
     private static let aiModelDefaultsKey = "aiModelText"
 
     /// Models (by their `AIModelSelection.presets` string) that use the `.compact` prompt profile —
@@ -297,6 +311,10 @@ final class PhotoBrowserViewModel: ObservableObject {
     /// from. Populated by `lookupLocationKeywordsIfNeeded()`. Mirrors the Mac app's
     /// `locationContextByRepresentativeID`.
     private var locationContextByRepresentativeID: [PhotoAsset.ID: String] = [:]
+    /// The reverse-geocode's city/county/state keyword tokens, keyed the same way. The selected set
+    /// gets these folded into the edit buffer instead; a batch run has no buffer, so it reads them
+    /// back from here to fold into what it stages.
+    private var locationKeywordsByRepresentativeID: [PhotoAsset.ID: [String]] = [:]
     /// eBird candidate-species list text (see `EBirdCandidateFormatting`), keyed the same way and
     /// populated alongside `locationContextByRepresentativeID` since both come from the same GPS fix.
     /// Passed to `suggestAI()` so the model prefers a species verified as recorded near the photo's
@@ -759,22 +777,29 @@ final class PhotoBrowserViewModel: ObservableObject {
     }
 
     private func performSave(scope: MetadataSaveScope) async {
-        guard !isSavingMetadata else { return }
         let targets: [PhotoAsset]
         switch scope {
         case .singleAsset(let asset): targets = [asset]
         case .captureSet(let captureSet): targets = captureSet.members
         case .manualSelection(let assets): targets = assets
         }
-        guard !targets.isEmpty else { return }
+        await writeMetadata(
+            description: editableDescription,
+            keywords: MetadataEditParsing.parseKeywords(editableKeywords), to: targets)
+    }
+
+    /// The staging write itself, on values passed in rather than read off the edit buffer — which is
+    /// what lets `runBatchAISuggestion()` stage each capture set the model's own answer for that set,
+    /// while the panel's buffer still belongs to whichever set the user has selected.
+    private func writeMetadata(
+        description: String, keywords: [String], to targets: [PhotoAsset]
+    ) async {
+        guard !isSavingMetadata, !targets.isEmpty else { return }
 
         isSavingMetadata = true
         saveStatusMessage = "Saving…"
         defer { isSavingMetadata = false }
         guard let store = await ensureSidecarStagingStore() else { return }
-
-        let description = editableDescription
-        let keywords = MetadataEditParsing.parseKeywords(editableKeywords)
 
         var failureCount = 0
         for target in targets {
@@ -1270,6 +1295,7 @@ final class PhotoBrowserViewModel: ObservableObject {
         {
             geocodeAppliedRepresentativeIDs.insert(representativeID)
             locationContextByRepresentativeID[representativeID] = result.contextText
+            locationKeywordsByRepresentativeID[representativeID] = result.keywordTokens
             geocodeRegionByRepresentativeID[representativeID] = (result.county, result.stateRegionCode)
 
             let tokens = result.keywordTokens
@@ -1295,6 +1321,38 @@ final class PhotoBrowserViewModel: ObservableObject {
                 representativeID: representativeID, county: region.county,
                 stateRegionCode: region.stateRegionCode)
         }
+    }
+
+    /// The same location context and eBird candidate list for a capture set nobody has selected —
+    /// what `lookupLocationKeywordsIfNeeded()` does for the previewed one, minus the edit buffer.
+    /// GPS comes off the representative's own metadata, so a Timeline suggestion the user has not
+    /// accepted is deliberately not used here: a batch run stages sidecars with nobody watching, and
+    /// a guessed location must not become a written one.
+    ///
+    /// Returns the location keywords for the caller to fold into what it stages, since without a
+    /// buffer to pass through they would otherwise be dropped from a batch-written sidecar.
+    @discardableResult
+    private func ensureAIContext(for captureSet: CaptureSet) async -> [String] {
+        guard let representative = captureSet.representative else { return [] }
+        let representativeID = representative.id
+        guard !geocodeAppliedRepresentativeIDs.contains(representativeID) else {
+            return locationKeywordsByRepresentativeID[representativeID] ?? []
+        }
+        guard let latitude = representative.gpsLatitude, let longitude = representative.gpsLongitude
+        else { return [] }
+        geocodeAppliedRepresentativeIDs.insert(representativeID)
+
+        guard
+            let result = try? await reverseGeocodeService.lookupLocation(
+                latitude: latitude, longitude: longitude)
+        else { return [] }
+        locationContextByRepresentativeID[representativeID] = result.contextText
+        locationKeywordsByRepresentativeID[representativeID] = result.keywordTokens
+        geocodeRegionByRepresentativeID[representativeID] = (result.county, result.stateRegionCode)
+        await lookupBirdCandidates(
+            representativeID: representativeID, county: result.county,
+            stateRegionCode: result.stateRegionCode)
+        return result.keywordTokens
     }
 
     /// Called from `SettingsView`'s per-model eBird toggle. Persists the set.
@@ -1511,6 +1569,167 @@ final class PhotoBrowserViewModel: ObservableObject {
         suggestAITask?.cancel()
     }
 
+    /// How many capture sets a batch run would cover if started right now — the button's own label.
+    /// An action that writes metadata unattended should say how many sets that is before it starts,
+    /// not report it afterwards.
+    ///
+    /// Scope is `displayedCaptureSets`, not every set loaded: on iPad the Active/Skipped picker is
+    /// what the user is looking at, and a run must not reach sets the grid is not showing.
+    var batchAITargetCount: Int {
+        BatchAISuggestionTargets.sets(
+            in: displayedCaptureSets, multiSelectedRepresentativeIDs: multiSelectedIDs,
+            redescribingDescribed: batchAIRedescribesDescribedSets
+        ).count
+    }
+
+    /// Starts `runBatchAISuggestion()` as a cancellable `Task` — the "Suggest All" button's action,
+    /// the batch counterpart to `startAISuggestion()`.
+    func startBatchAISuggestion() {
+        batchAISuggestionTask = Task { await runBatchAISuggestion() }
+    }
+
+    /// Stops a batch run. The set in flight unwinds through the same cooperative cancellation
+    /// `cancelAISuggestion()` uses, and the loop stops rather than moving to the next set.
+    func cancelBatchAISuggestion() {
+        batchAISuggestionTask?.cancel()
+    }
+
+    /// Runs one AI suggestion per capture set — the multi-selected sets if two or more are picked,
+    /// else every set the grid is showing, skipping ones that already have a description unless
+    /// `batchAIRedescribesDescribedSets` says otherwise (`BatchAISuggestionTargets`, shared with the
+    /// Mac app).
+    ///
+    /// Each set gets its own image, its own prompt and its own answer, and is staged as soon as it
+    /// comes back. That is the difference from `suggestAI()`'s multi-selection behaviour, which
+    /// sends *one* image and applies that single answer to every selected set — right for a burst
+    /// of the same subject, wrong for a card.
+    ///
+    /// One set at a time, deliberately, and more so here than on the Mac: `mlx:` and `foundation:`
+    /// are one on-device model against the iPad's jetsam ceiling, so overlapping two generations
+    /// risks the app being killed rather than finishing sooner.
+    ///
+    /// A failure on one set is logged and counted, and the run carries on: with sixty sets to get
+    /// through, one timeout must not cost the other fifty-nine.
+    func runBatchAISuggestion() async {
+        guard !isSuggestingAI, !isBatchSuggestingAI else { return }
+        guard let selection = AIModelSelection.parse(aiModelText) else {
+            aiStatusMessage =
+                "Invalid AI model — expected \"mlx:<model>\", \"openrouter:<model>\" or \"foundation:apple\""
+            return
+        }
+        guard let provider = aiProvider(for: selection.providerID) else {
+            aiStatusMessage = "Ollama isn't available on iPad — use an mlx:, openrouter: or foundation: model"
+            return
+        }
+        let targets = BatchAISuggestionTargets.sets(
+            in: displayedCaptureSets, multiSelectedRepresentativeIDs: multiSelectedIDs,
+            redescribingDescribed: batchAIRedescribesDescribedSets)
+        guard !targets.isEmpty else {
+            aiStatusMessage = "Nothing to suggest: every capture set in scope already has a description"
+            return
+        }
+
+        isBatchSuggestingAI = true
+        batchAITotalCount = targets.count
+        batchAICompletedCount = 0
+        defer { isBatchSuggestingAI = false }
+
+        var failureCount = 0
+        var firstFailureReason: String?
+        var cancelled = false
+        for captureSet in targets {
+            if Task.isCancelled {
+                cancelled = true
+                break
+            }
+            let name = captureSet.representative?.url.lastPathComponent ?? ""
+            aiStatusMessage =
+                "AI suggestions: \(batchAICompletedCount + 1) of \(batchAITotalCount) — \(name)"
+            do {
+                try await suggestAndSave(captureSet, provider: provider, selection: selection)
+            } catch is CancellationError {
+                cancelled = true
+                break
+            } catch {
+                failureCount += 1
+                if firstFailureReason == nil { firstFailureReason = error.localizedDescription }
+                Self.batchLog.error(
+                    "Batch AI failed for \(name, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            batchAICompletedCount += 1
+        }
+
+        let suggested = batchAICompletedCount - failureCount
+        let prefix = cancelled ? "Batch cancelled after" : "Batch finished:"
+        let failures =
+            failureCount == 0
+            ? ""
+            : "; \(failureCount) failed\(firstFailureReason.map { ": \($0)" } ?? ".")"
+        aiStatusMessage = "\(prefix) \(suggested) of \(batchAITotalCount) set(s) suggested\(failures)"
+    }
+
+    /// One set of a batch run: its own source image, its own answer, staged to its own members.
+    ///
+    /// The set's existing description and keywords go out as context, the same as the edit buffer's
+    /// contents do on the previewed set. No typed hint and no manual crop reach here — there is
+    /// nobody at the screen during a batch — so subject isolation is whatever the toggle says and
+    /// the crop is `SubjectIsolationService`'s own pick, taken from the already-capped frame rather
+    /// than a second full-size decode the on-device memory ceiling would rather not see.
+    private func suggestAndSave(
+        _ captureSet: CaptureSet, provider: AIProvider, selection: AIModelSelection
+    ) async throws {
+        guard let sourceAsset = AISuggestionSourcePicker.pickSourceAsset(from: captureSet.members),
+            let representative = captureSet.representative
+        else { return }
+
+        let locationKeywords = await ensureAIContext(for: captureSet)
+        let image = try await NativeMetadataReader().extractPreviewAsync(
+            at: sourceAsset.url, maxPixelSize: Self.aiPreviewMaxPixelSize(for: selection.providerID))
+        let evaluatedImage = subjectIsolationEnabled ? (await computeSubjectCrop(in: image) ?? image) : image
+
+        let (description, keywords, _) = try await aiSuggestion(
+            representativeID: representative.id, provider: provider, selection: selection,
+            image: evaluatedImage, existingDescription: representative.descriptionText,
+            existingKeywords: representative.keywords.joined(separator: ", "), trustedKeywords: [])
+        // The model's list replaces the field wholesale, so the geocode's city/county/state keywords
+        // have to be put back deliberately — on the previewed set they survive by sitting in the edit
+        // buffer, and a batch run has no buffer to survive in.
+        let merged = MetadataEditParsing.merging(userAdded: locationKeywords, into: keywords)
+
+        await writeMetadata(description: description, keywords: merged, to: captureSet.members)
+        // The panel is showing one of these sets if the user left it selected, and it would other-
+        // wise keep displaying what the sidecar said before the batch wrote over it.
+        if representative.id == selectedCaptureSet?.representative?.id {
+            editableDescription = description
+            editableKeywords = merged.joined(separator: ", ")
+            loadedKeywords = merged
+        }
+    }
+
+    /// The provider object for a parsed model string — `nil` for `ollama:`, which has no iPad
+    /// counterpart (no daemon to talk to). Was inline in `suggestAI()` until the batch run needed
+    /// the same mapping.
+    private func aiProvider(for providerID: AIProviderID) -> AIProvider? {
+        switch providerID {
+        case .mlx: return mlxProvider
+        case .openRouter: return openRouterProvider
+        case .foundation: return foundationProvider
+        case .ollama: return nil
+        }
+    }
+
+    /// Longest edge of the frame sent to a provider. On-device MLX and Foundation Models run against
+    /// the iPad's raised-but-still-bounded jetsam ceiling, and a vision encoder's feature maps scale
+    /// with pixel count, so they get half the edge (a quarter of the pixels); OpenRouter is a network
+    /// call, not memory-bound, so it keeps the full frame.
+    private static func aiPreviewMaxPixelSize(for providerID: AIProviderID) -> Int {
+        switch providerID {
+        case .mlx, .foundation: return 1024
+        case .openRouter, .ollama: return 2048
+        }
+    }
+
     /// Called from `MetadataPanelView`'s "Crop to Subject" Toggle — see `subjectIsolationEnabled`'s
     /// doc comment. Eagerly computes and shows the crop the moment it's switched on, rather than
     /// waiting for a `suggestAI()` call. Mirrors the Mac app's `setSubjectIsolationEnabled`.
@@ -1602,6 +1821,78 @@ final class PhotoBrowserViewModel: ObservableObject {
         }.value
     }
 
+    /// The AI request and the deterministic eBird enrichment that follows it, on values passed in
+    /// rather than read off the edit buffer — so `runBatchAISuggestion()` gets the same answer for a
+    /// set the user would have got pressing Suggest on it. Everything selection-shaped stays with
+    /// the caller: the manual crop, the typed keyword hint, the evaluated-image preview, the buffer.
+    ///
+    /// `trustedKeywords` are keywords already believed correct for this photo, which the enrichment
+    /// may attach a binomial to — the user's own typed hint on the previewed set, and nothing at all
+    /// in a batch run, since there is nobody there to have typed one.
+    private func aiSuggestion(
+        representativeID: PhotoAsset.ID?, provider: AIProvider, selection: AIModelSelection,
+        image: CGImage, existingDescription: String, existingKeywords: String,
+        trustedKeywords: [String]
+    ) async throws -> (description: String, keywords: [String], result: AISuggestionResult) {
+        let locationContext = representativeID.flatMap { locationContextByRepresentativeID[$0] } ?? ""
+        // Foundation Models' small context window can't hold the hundreds-of-species candidate list on
+        // top of the image; skip it (the typed `species` field + deterministic binomial lookup cover
+        // it, and the location-context line still biases toward local species). See the Mac
+        // SourceBrowserViewModel for the full rationale ("Exceeded model context window size").
+        let birdCandidateSpecies =
+            selection.providerID == .foundation || eBirdDisabledModels.contains(aiModelText)
+            ? ""
+            : representativeID.flatMap { birdCandidateSpeciesByRepresentativeID[$0] } ?? ""
+        // Foundation Models uses `@Generable` guided generation, so it takes the `.guided` prompt
+        // (no "return JSON" framing, typed species field); MLX small models take `.compact`; the
+        // rest take `.full`.
+        let promptProfile: PromptProfile =
+            selection.providerID == .foundation
+            ? .guided
+            : (compactPromptModels.contains(aiModelText) ? .compact : .full)
+
+        let result = try await aiSuggestionService.suggest(
+            provider: provider, model: selection.modelName, image: image,
+            existingDescription: existingDescription, existingKeywords: existingKeywords,
+            locationContext: locationContext, birdCandidateSpecies: birdCandidateSpecies,
+            promptProfile: promptProfile,
+            birdCandidatesAreCommonNamesOnly: true)
+        // Deterministically attach the Latin binomial the model likely omitted: if it named a bird
+        // by a common name that's in the photo's eBird region taxonomy, look up the scientific name
+        // and add it to the description (and as a keyword) — no fabrication, always correct.
+        var description = result.description
+        var keywords = result.keywords
+
+        if let scientificNames = representativeID.flatMap({ birdScientificNamesByRepresentativeID[$0] }) {
+            // Post-hoc-validate a guided provider's typed species guess against the photo's eBird
+            // region: `foundation:` is sent no candidate list (it won't fit its context window), so
+            // it guesses freely and often names an out-of-region or non-existent species. Trust it
+            // only when it's a real species in the region; a failed lookup yields "", so the
+            // description/trusted-keyword enrichment below still runs, but the bogus typed guess is
+            // neither binomial-attached nor added as a keyword. Trust the description (the model's
+            // stated ID) and the user's pre-existing keywords, never the model's freshly-generated
+            // keywords — a small model can hallucinate a candidate species into those.
+            let validatedSpecies =
+                EBirdCandidateFormatting.regionalScientificName(
+                    forSpecies: result.species, scientificNameByCommonName: scientificNames) != nil
+                ? result.species : ""
+            let enriched = EBirdCandidateFormatting.attachScientificNames(
+                description: description, keywords: keywords, trustedKeywords: trustedKeywords,
+                species: validatedSpecies, scientificNameByCommonName: scientificNames)
+            description = enriched.description
+            keywords = enriched.keywords
+            // A validated species common name (e.g. "Great Egret") isn't necessarily in the model's
+            // keywords or description, so add it as a keyword itself — its binomial was already
+            // appended by attachScientificNames above.
+            if !validatedSpecies.isEmpty,
+                !keywords.contains(where: { $0.caseInsensitiveCompare(validatedSpecies) == .orderedSame })
+            {
+                keywords.insert(validatedSpecies, at: 0)
+            }
+        }
+        return (description, keywords, result)
+    }
+
     /// AI description/keyword suggestion for the current selection — ported from the Mac app's
     /// `suggestAI()`, trimmed to this cut's scope: MLX + OpenRouter providers (no Ollama on iPad),
     /// the full preview frame (no subject-isolation crop yet), and no eBird candidate list (both
@@ -1617,12 +1908,7 @@ final class PhotoBrowserViewModel: ObservableObject {
                 "Invalid AI model — expected \"mlx:<model>\", \"openrouter:<model>\" or \"foundation:apple\""
             return
         }
-        let provider: AIProvider
-        switch selection.providerID {
-        case .mlx: provider = mlxProvider
-        case .openRouter: provider = openRouterProvider
-        case .foundation: provider = foundationProvider
-        case .ollama:
+        guard let provider = aiProvider(for: selection.providerID) else {
             aiStatusMessage = "Ollama isn't available on iPad — use an mlx:, openrouter: or foundation: model"
             return
         }
@@ -1649,15 +1935,6 @@ final class PhotoBrowserViewModel: ObservableObject {
         guard !targetAssets.isEmpty,
             let sourceAsset = AISuggestionSourcePicker.pickSourceAsset(from: sourceSetMembers)
         else { return }
-        let locationContext = sourceRepresentativeID.flatMap { locationContextByRepresentativeID[$0] } ?? ""
-        // Foundation Models' small context window can't hold the hundreds-of-species candidate list on
-        // top of the image; skip it (the typed `species` field + deterministic binomial lookup cover
-        // it, and the location-context line still biases toward local species). See the Mac
-        // SourceBrowserViewModel for the full rationale ("Exceeded model context window size").
-        let birdCandidateSpecies =
-            selection.providerID == .foundation || eBirdDisabledModels.contains(aiModelText)
-            ? ""
-            : sourceRepresentativeID.flatMap { birdCandidateSpeciesByRepresentativeID[$0] } ?? ""
 
         isSuggestingAI = true
         aiStatusMessage = "Generating AI suggestions…"
@@ -1705,60 +1982,18 @@ final class PhotoBrowserViewModel: ObservableObject {
             guard previewAsset?.id == previewID else { return }
             aiEvaluatedImage = image
             aiEvaluatedImageSourceName = sourceAsset.url.lastPathComponent
-            // Foundation Models uses `@Generable` guided generation, so it takes the `.guided` prompt
-            // (no "return JSON" framing, typed species field); MLX small models take `.compact`; the
-            // rest take `.full`.
-            let promptProfile: PromptProfile =
-                selection.providerID == .foundation
-                ? .guided
-                : (compactPromptModels.contains(aiModelText) ? .compact : .full)
-            let result = try await aiSuggestionService.suggest(
-                provider: provider, model: selection.modelName, image: image,
-                existingDescription: editableDescription, existingKeywords: editableKeywords,
-                locationContext: locationContext, birdCandidateSpecies: birdCandidateSpecies,
-                promptProfile: promptProfile,
-                birdCandidatesAreCommonNamesOnly: true)
-            guard previewAsset?.id == previewID else { return }
-            // Deterministically attach the Latin binomial the model likely omitted: if it named a bird
-            // by a common name that's in the photo's eBird region taxonomy, look up the scientific name
-            // and add it to the description (and as a keyword) — no fabrication, always correct.
-            var description = result.description
-            var keywords = result.keywords
             // Captured before `editableKeywords` is overwritten below: the model's list replaces the
             // whole field, and a keyword the user typed as a hint has to survive that. The prompt asks
             // the model to treat existing keywords as a trusted guide, but the small on-device models
             // this app runs routinely ignore that and drop the hint.
             let userAddedKeywords = MetadataEditParsing.userAddedKeywords(
                 current: MetadataEditParsing.parseKeywords(editableKeywords), loaded: loadedKeywords)
-            if let scientificNames = sourceRepresentativeID.flatMap({ birdScientificNamesByRepresentativeID[$0] }) {
-                // Post-hoc-validate a guided provider's typed species guess against the photo's eBird
-                // region: `foundation:` is sent no candidate list (it won't fit its context window), so
-                // it guesses freely and often names an out-of-region or non-existent species. Trust it
-                // only when it's a real species in the region; a failed lookup yields "", so the
-                // description/trusted-keyword enrichment below still runs, but the bogus typed guess is
-                // neither binomial-attached nor added as a keyword. Trust the description (the model's
-                // stated ID) and the user's pre-existing keywords, never the model's freshly-generated
-                // keywords — a small model can hallucinate a candidate species into those.
-                // `editableKeywords` here still holds the pre-suggestion (user) keywords.
-                let validatedSpecies =
-                    EBirdCandidateFormatting.regionalScientificName(
-                        forSpecies: result.species, scientificNameByCommonName: scientificNames) != nil
-                    ? result.species : ""
-                let trustedKeywords = MetadataEditParsing.parseKeywords(editableKeywords)
-                let enriched = EBirdCandidateFormatting.attachScientificNames(
-                    description: description, keywords: keywords, trustedKeywords: trustedKeywords,
-                    species: validatedSpecies, scientificNameByCommonName: scientificNames)
-                description = enriched.description
-                keywords = enriched.keywords
-                // A validated species common name (e.g. "Great Egret") isn't necessarily in the model's
-                // keywords or description, so add it as a keyword itself — its binomial was already
-                // appended by attachScientificNames above.
-                if !validatedSpecies.isEmpty,
-                    !keywords.contains(where: { $0.caseInsensitiveCompare(validatedSpecies) == .orderedSame })
-                {
-                    keywords.insert(validatedSpecies, at: 0)
-                }
-            }
+            let (description, keywords, result) = try await aiSuggestion(
+                representativeID: sourceRepresentativeID, provider: provider, selection: selection,
+                image: image, existingDescription: editableDescription,
+                existingKeywords: editableKeywords,
+                trustedKeywords: MetadataEditParsing.parseKeywords(editableKeywords))
+            guard previewAsset?.id == previewID else { return }
             editableDescription = description
             editableKeywords = MetadataEditParsing.merging(userAdded: userAddedKeywords, into: keywords)
                 .joined(separator: ", ")

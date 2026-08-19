@@ -476,7 +476,7 @@ checked against `AIModelSelection.presets`, nothing more.
 `OpenRouterProvider`'s API key resolves via `APIKeyStore` (below) rather than reading
 `ProcessInfo` directly.
 
-## Batch AI suggestions (Mac)
+## Batch AI suggestions
 
 `SourceBrowserViewModel.runBatchAISuggestion()` runs one suggestion per capture set over many sets.
 The only part with a silent failure mode — *which* sets a run covers — lives outside the view model
@@ -501,6 +501,16 @@ Three decisions worth keeping:
 
 The single-set path (`suggestAI()`) and the batch share `aiSuggestion(...)` — prompt profile choice,
 eBird candidates, the Foundation-Models skip, and species enrichment — so the two cannot drift.
+
+`PhotoBrowserViewModel` carries the same three methods for iPad, against the same Core rule. Three
+differences, all from the platform rather than the feature: writes go through `SidecarStagingStore`
+(`writeMetadata(description:keywords:to:)` — no `gps` parameter, since each staged sidecar takes GPS
+from its own asset), the scope is `displayedCaptureSets` so a run cannot reach sets the Active/Skipped
+picker is hiding, and serial execution matters more — `mlx:` and `foundation:` are one on-device model
+under a jetsam ceiling, where overlapping generations get the app killed rather than finishing sooner.
+Touch selection needs nothing special: iPad fills `multiSelectedIDs` only in Select mode, so a
+selection is always deliberate there, and the shared two-or-more threshold already matches what
+`hasMultiSelection` gates everywhere else in that app.
 
 ## eBird species-list cache
 

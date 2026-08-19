@@ -4,7 +4,7 @@ import Foundation
 /// One normalized Google Timeline position sample, ready to cache locally for nearest-timestamp
 /// GPS matching. Mirrors the reference app's `_TimelinePosition` (see docs/SPEC.md §7) — parsing
 /// a raw Timeline JSON export into these is a separate concern from caching/matching them.
-public struct TimelineSample: Equatable {
+public struct TimelineSample: Equatable, Sendable {
     public var recordKey: String
     public var timestampUTC: Int
     public var latitude: Double
@@ -17,6 +17,8 @@ public struct TimelineSample: Equatable {
     /// duplicates. Matches the reference app's `_build_record_key` field order/precision exactly
     /// so the two apps would derive the same key for the same source record (not that they share
     /// a database — this just keeps the two implementations easy to compare).
+    private static let hexDigits = Array("0123456789abcdef")
+
     public static func recordKey(
         timestampUTC: Int,
         latitude: Double,
@@ -31,7 +33,16 @@ public struct TimelineSample: Equatable {
             "\(timestampUTC)|\(String(format: "%.7f", latitude))|\(String(format: "%.7f", longitude))|"
             + "\(altitudeText)|\(sourceType)|\(accuracyText)"
         let digest = Insecure.SHA1.hash(data: Data(raw.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
+        // Hand-rolled hex rather than `String(format: "%02x")` per byte: this key is built once per
+        // record and an import has hundreds of thousands of them, where 20 format calls each is
+        // measurable. Same 40 lowercase characters out.
+        var hex = ""
+        hex.reserveCapacity(Insecure.SHA1.Digest.byteCount * 2)
+        for byte in digest {
+            hex.append(Self.hexDigits[Int(byte >> 4)])
+            hex.append(Self.hexDigits[Int(byte & 0x0F)])
+        }
+        return hex
     }
 }
 

@@ -1283,8 +1283,14 @@ final class PhotoBrowserViewModel: ObservableObject {
                 return
             }
 
-            let samples = try timelineImportParser.parseSamples(fromFileAt: url)
-            let sha256 = try FileHashing.sha256(of: url)
+            // Parsing and hashing a Timeline export is seconds of work even after the scanner
+            // rewrite (`TimelineImportParser.parseISOTimestamp`), and both are synchronous, so on
+            // the main actor they freeze the whole app — at launch, before there is anything on
+            // screen to explain the wait.
+            let parser = timelineImportParser
+            let (samples, sha256) = try await Task.detached(priority: .userInitiated) {
+                (try parser.parseSamples(fromFileAt: url), try FileHashing.sha256(of: url))
+            }.value
             try await cache.importSamples(
                 samples, sourcePath: url.path, sourceSize: size,
                 sourceModificationNanoseconds: modificationNanoseconds, sourceSHA256: sha256)

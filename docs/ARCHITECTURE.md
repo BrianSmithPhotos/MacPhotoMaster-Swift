@@ -449,6 +449,22 @@ accuracy/source/altitude) and falling back to `semanticSegments[].timelinePath[]
 tagged `TIMELINE_PATH`, no altitude/accuracy/source). A malformed or partial record is skipped
 rather than failing the whole parse; the result feeds `TimelineLocationCache.importSamples`.
 
+Import cost is a real constraint, not a micro-optimisation: an export has one record per timestamp
+and hundreds of thousands of them. Measured on a 13.6 MB / 100k-record synthetic export,
+`JSONSerialization` accounts for 0.14s of it and the rest was Foundation calls made per record —
+`ISO8601DateFormatter.date(from:)` at ~63 microseconds a call (6.3s), and `String(format:)` inside
+`TimelineSample.recordKey` (2.2s). Both now have hand-rolled fast paths (a byte scanner for the
+timestamp, falling back to the formatters for any shape it doesn't recognise; a hex table for the
+digest), taking that export from ~10s to ~1.5s (release build, M1 Ultra). The record key's *text* is a persisted format —
+it is the upsert key in `timelinePosition` — so `TimelineSampleRecordKeyTests` pins two digests
+computed independently, and a rewrite that changed the key would re-import an unchanged export as a
+database full of new points rather than failing visibly.
+
+Both apps run the parse and the file hash in a `Task.detached`. They are synchronous, second-scale
+work called from a `@MainActor` view model, so on the main actor they freeze the UI — on the iPad
+during the launch import, before there is anything on screen to explain the wait. The iPad shows a
+`ProgressView` in the toolbar while `isImportingTimeline` is true for the same reason.
+
 ## Per-folder session state
 
 Three small GRDB actors share `TimelineLocationCache`'s shape and hold the user's per-folder

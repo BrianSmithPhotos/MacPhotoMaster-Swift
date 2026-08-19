@@ -1035,8 +1035,14 @@ final class SourceBrowserViewModel: ObservableObject {
                     sourceModificationNanoseconds: modificationNanoseconds)
             else { return .upToDate }
 
-            let samples = try timelineImportParser.parseSamples(fromFileAt: localCopyPath)
-            let sha256 = try FileHashing.sha256(of: localCopyPath)
+            // Parsing and hashing a Timeline export is seconds of work even after the scanner
+            // rewrite (`TimelineImportParser.parseISOTimestamp`), and both are synchronous, so on
+            // the main actor they freeze the whole app — at launch, before there is anything on
+            // screen to explain the wait.
+            let parser = timelineImportParser
+            let (samples, sha256) = try await Task.detached(priority: .userInitiated) {
+                (try parser.parseSamples(fromFileAt: localCopyPath), try FileHashing.sha256(of: localCopyPath))
+            }.value
             try await cache.importSamples(
                 samples, sourcePath: localCopyPath.path, sourceSize: size,
                 sourceModificationNanoseconds: modificationNanoseconds, sourceSHA256: sha256)

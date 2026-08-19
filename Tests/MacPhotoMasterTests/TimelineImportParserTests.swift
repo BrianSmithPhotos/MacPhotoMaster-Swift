@@ -142,6 +142,43 @@ final class TimelineImportParserTests: XCTestCase {
         XCTAssertEqual(samples.first?.timestampUTC, 1_773_585_000)
     }
 
+    /// The timestamp scanner (`epochSecondsScanningISO8601`) stands in front of the date formatters
+    /// because they cost more than the rest of the parse put together, so every shape an export can
+    /// carry has to come out with the same epoch seconds the formatters produced. A wrong offset
+    /// here would put a photo's suggested location an hour's driving away from where it was taken.
+    func testTimestampOffsetsAndFractionsAllResolveToTheSameInstant() throws {
+        let shapes = [
+            "2026-03-15T14:30:00Z", "2026-03-15T14:30:00.000Z", "2026-03-15T14:30:00.123456Z",
+            "2026-03-15T15:30:00+01:00", "2026-03-15T09:30:00-05:00", "2026-03-15T14:30:00",
+        ]
+
+        for shape in shapes {
+            let json = """
+                {"rawSignals": [{"position": {"LatLng": "45.5\u{b0}, -122.6\u{b0}", "timestamp": "\(shape)"}}]}
+                """
+            let samples = try parser.parseSamples(from: Data(json.utf8))
+            XCTAssertEqual(samples.first?.timestampUTC, 1_773_585_000, "for \(shape)")
+        }
+    }
+
+    /// Text the scanner cannot read must fall through to the formatters and, failing those, be
+    /// skipped — never guessed at. A month of 13 is corrupt data, not December of the next year.
+    func testUnparseableTimestampsAreSkippedRatherThanGuessed() {
+        let json = """
+            {
+                "rawSignals": [
+                    {"position": {"LatLng": "45.5\u{b0}, -122.6\u{b0}", "timestamp": "2026-13-15T14:30:00Z"}},
+                    {"position": {"LatLng": "45.5\u{b0}, -122.6\u{b0}", "timestamp": "15/03/2026 14:30"}},
+                    {"position": {"LatLng": "45.5\u{b0}, -122.6\u{b0}", "timestamp": "2026-03-15T14:30"}}
+                ]
+            }
+            """
+
+        XCTAssertThrowsError(try parser.parseSamples(from: Data(json.utf8))) { error in
+            XCTAssertEqual(error as? TimelineImportError, .noPositionRecords)
+        }
+    }
+
     func testThrowsNoPositionRecordsWhenPayloadHasNoUsableEntries() {
         let json = "{}"
 

@@ -42,6 +42,20 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    // The launch import runs before a folder is even open and takes seconds on a
+                    // large export, with nothing else on screen to explain the wait — and GPS
+                    // suggestions are wrong-looking (absent) until it finishes, so silence here
+                    // reads as a broken feature rather than a busy one.
+                    ToolbarItem(placement: .primaryAction) {
+                        if browser.isImportingTimeline {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Timeline…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         Button {
                             activeSheet = .metadata

@@ -527,17 +527,23 @@ Three decisions worth keeping:
   on). This is why `performSave(scope:)` was split: `writeMetadata(description:keywords:gps:to:)`
   writes *passed-in* values, since the panel's edit buffer belongs to whichever set the user has
   selected, not to the set the batch is currently on.
-- **A guessed location may be read, never written.** `ensureAIContext(for:)` prefers the
-  representative's own embedded coordinates and falls back to a Timeline suggestion, but the
-  fallback only feeds the prompt: the location line, and the eBird region the candidate species come
-  from. It writes no GPS and contributes no location keywords, so nothing a batch leaves behind
-  claims a location the file did not have. The first cut had no fallback at all, and on a camera
-  that records no GPS that meant every set was described with no idea where it was taken and no list
-  of species that live there — the condition where the prompt asks a small model for a Latin
-  binomial and gets an invented one, since it is the presence of a candidate list that switches the
-  prompt to "name it from this list, do not write a scientific name". On the embedded-GPS path it
-  still returns the location keywords rather than parking them in the edit buffer, because a batch
-  has no buffer for them to survive in.
+- **A batch locates a photo the same way a person would.** `ensureAIContext(for:)` prefers the
+  representative's own embedded coordinates and falls back to the Timeline point for its capture
+  time — the same bounded-window query `suggestGPSIfNeeded()` runs on the photo on screen, and now
+  with the same consequences: the coordinate feeds the prompt (the location line, and the eBird
+  region the candidate species come from), becomes location keywords, and is written. The Mac hands
+  it back for `writeMetadata(description:keywords:gps:to:)` to write with the rest; the iPad applies
+  it to the set's members, so it stages, shows in the panel and reaches Process & Move, all three of
+  which read GPS off the asset. Altitude is looked up for it rather than taken from Timeline
+  (SPEC.md §7). Two earlier cuts are worth not repeating. The first had no fallback at all, so on a
+  camera that records no GPS every set was described with no idea where it was taken and no list of
+  species that live there — the condition where the prompt asks a small model for a Latin binomial
+  and gets an invented one, since it is the presence of a candidate list that switches the prompt to
+  "name it from this list, do not write a scientific name". The second read the fallback but refused
+  to write it, on the grounds that a batch runs with nobody watching; with a GPS-less camera that
+  fired on every photo, and the result was that whether a shoot ended up located came down to which
+  sets the user had happened to open first. The location keywords are returned rather than parked in
+  the edit buffer either way, because a batch has no buffer for them to survive in.
 
 The single-set path (`suggestAI()`) and the batch share `aiSuggestion(...)` — prompt profile choice,
 eBird candidates, the Foundation-Models skip, and species enrichment — so the two cannot drift.

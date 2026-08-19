@@ -1404,34 +1404,37 @@ final class PhotoBrowserViewModel: ObservableObject {
     /// The same location context and eBird candidate list for a capture set nobody has selected —
     /// what `lookupLocationKeywordsIfNeeded()` does for the previewed one, minus the edit buffer.
     ///
-    /// A photo with no GPS of its own falls back to a Timeline suggestion, but only as *context*:
-    /// the location line in the prompt and the eBird region the candidate species come from. Its
-    /// coordinates are never written to the asset and its place names never become keywords, which
-    /// is the line this draws — a batch run stages sidecars with nobody watching, so a guessed
-    /// location must not become a written one. Without the fallback the run had neither, and the
-    /// camera writes no GPS: every set was described with no idea where it was taken and no list of
-    /// species that live there, which is exactly the condition a small model invents bird names in.
+    /// A photo with no GPS of its own falls back to the Timeline point for its capture time, and the
+    /// fallback is treated exactly as `suggestGPSIfNeeded()` treats it on the previewed photo: it is
+    /// applied to the set's members, it feeds the prompt (the location line, and the eBird region the
+    /// candidate species come from), and it becomes location keywords. An earlier cut used it as
+    /// context only, on the grounds that a batch stages sidecars with nobody watching — but the
+    /// camera records no GPS, so that rule fired on every photo and whether a shoot ended up located
+    /// came down to which sets the user had happened to open first. The match is the same
+    /// bounded-window query either way; only the audience differs.
     ///
     /// Returns the location keywords for the caller to fold into what it stages, since without a
-    /// buffer to pass through they would otherwise be dropped from a batch-written sidecar. Empty
-    /// on the Timeline path, for the reason above.
+    /// buffer to pass through they would otherwise be dropped from a batch-written sidecar.
     @discardableResult
     private func ensureAIContext(for captureSet: CaptureSet) async -> [String] {
         guard let representative = captureSet.representative else { return [] }
         let representativeID = representative.id
-        guard !geocodeAppliedRepresentativeIDs.contains(representativeID) else {
-            return locationKeywordsByRepresentativeID[representativeID] ?? []
-        }
 
-        let embeddedGPS = representative.gpsLatitude.flatMap { latitude in
+        // Resolved ahead of the geocode memo rather than inside it: a set the user opened before
+        // starting the run is already marked geocoded, and short-circuiting on that would skip the
+        // GPS as well as the lookup it was meant to skip.
+        var coordinate = representative.gpsLatitude.flatMap { latitude in
             representative.gpsLongitude.map { (latitude: latitude, longitude: $0) }
         }
-        var resolved = embeddedGPS
-        if resolved == nil { resolved = await timelineCoordinate(for: representative) }
-        guard let coordinate = resolved else {
+        if coordinate == nil { coordinate = await applyTimelineGPS(to: captureSet) }
+        guard let coordinate else {
             Self.ebirdLogger.log(
                 "Bird candidates skipped: no GPS and no Timeline point for this capture time")
             return []
+        }
+
+        guard !geocodeAppliedRepresentativeIDs.contains(representativeID) else {
+            return locationKeywordsByRepresentativeID[representativeID] ?? []
         }
         geocodeAppliedRepresentativeIDs.insert(representativeID)
 
@@ -1440,30 +1443,42 @@ final class PhotoBrowserViewModel: ObservableObject {
                 latitude: coordinate.latitude, longitude: coordinate.longitude)
         else { return [] }
         locationContextByRepresentativeID[representativeID] = result.contextText
+        locationKeywordsByRepresentativeID[representativeID] = result.keywordTokens
         geocodeRegionByRepresentativeID[representativeID] = (result.county, result.stateRegionCode)
         await lookupBirdCandidates(
             representativeID: representativeID, county: result.county,
             stateRegionCode: result.stateRegionCode)
-
-        guard embeddedGPS != nil else { return [] }
-        locationKeywordsByRepresentativeID[representativeID] = result.keywordTokens
         return result.keywordTokens
     }
 
-    /// The Timeline point nearest this photo's capture time, or nil when there is no import, no
-    /// timestamp, or nothing inside the cache's match window. Read-only: unlike
-    /// `suggestGPSIfNeeded()`, which the user is watching and can see the result of, nothing here
-    /// touches the asset.
-    private func timelineCoordinate(
-        for asset: PhotoAsset
+    /// Applies the Timeline point nearest this set's capture time to every member that has no GPS of
+    /// its own, and returns it. The batch counterpart to `suggestGPSIfNeeded()`, which does the same
+    /// for the set on screen — writing to the in-memory asset is what makes the location show in the
+    /// panel, stage with the next save, and reach Process & Move, since all three read GPS from the
+    /// asset. Nil when there is no import, no timestamp, or nothing inside the cache's match window.
+    private func applyTimelineGPS(
+        to captureSet: CaptureSet
     ) async -> (latitude: Double, longitude: Double)? {
-        guard let capturedAt = asset.capturedAt, let cache = await ensureTimelineCache() else {
-            return nil
-        }
+        guard let capturedAt = captureSet.representative?.capturedAt,
+            let cache = await ensureTimelineCache()
+        else { return nil }
         guard
             let suggestion = try? await cache.suggestion(
                 forCaptureTimestampUTC: Int(capturedAt.timeIntervalSince1970))
         else { return nil }
+
+        let targetIDs = captureSet.members
+            .filter { $0.gpsLatitude == nil && $0.gpsLongitude == nil }
+            .map(\.id)
+        for id in targetIDs {
+            updateAsset(id) {
+                $0.gpsLatitude = suggestion.latitude
+                $0.gpsLongitude = suggestion.longitude
+            }
+        }
+        // Altitude is never trusted from Timeline itself (SPEC.md §7), same as the previewed path.
+        await lookupElevation(
+            latitude: suggestion.latitude, longitude: suggestion.longitude, memberIDs: targetIDs)
         return (suggestion.latitude, suggestion.longitude)
     }
 
@@ -1602,6 +1617,15 @@ final class PhotoBrowserViewModel: ObservableObject {
         for id in memberIDs {
             updateAsset(id) { $0.gpsAltitude = elevation }
         }
+    }
+
+    /// This set's members as they are now rather than as the batch's snapshot of the folder had
+    /// them — a `CaptureSet` holds `PhotoAsset` values, so anything `updateAsset` changed after the
+    /// snapshot was taken is invisible to the copy the loop is carrying.
+    private func liveMembers(of captureSet: CaptureSet) -> [PhotoAsset] {
+        let currentByID = Dictionary(
+            automaticCaptureSets.flatMap(\.members).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return captureSet.members.map { currentByID[$0.id] ?? $0 }
     }
 
     private static func gpsCoordinate(for asset: PhotoAsset) -> GPSCoordinate? {
@@ -1809,7 +1833,10 @@ final class PhotoBrowserViewModel: ObservableObject {
         // buffer, and a batch run has no buffer to survive in.
         let merged = MetadataEditParsing.merging(userAdded: locationKeywords, into: keywords)
 
-        await writeMetadata(description: description, keywords: merged, to: captureSet.members)
+        // Members re-read from current state, not from the batch's folder snapshot: `ensureAIContext`
+        // may have just applied a Timeline location to them, and staging takes each file's GPS off
+        // the asset it is handed.
+        await writeMetadata(description: description, keywords: merged, to: liveMembers(of: captureSet))
         // The panel is showing one of these sets if the user left it selected, and it would other-
         // wise keep displaying what the sidecar said before the batch wrote over it.
         if representative.id == selectedCaptureSet?.representative?.id {

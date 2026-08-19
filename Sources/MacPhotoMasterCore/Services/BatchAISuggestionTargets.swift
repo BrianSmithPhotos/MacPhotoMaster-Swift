@@ -32,7 +32,11 @@ public enum BatchAISuggestionTargets {
     /// Whether a set counts as already described. Any member with description text does it, not just
     /// the representative: a save writes the whole set, so a set with prose on only some of its
     /// members is a set someone has already worked on.
-    private static func hasDescription(_ captureSet: CaptureSet) -> Bool {
+    ///
+    /// Public because the grid's "tagged" badge asks the same question: the mark on a tile and the
+    /// sets a batch run leaves alone have to be the same sets, or the badge is telling the user
+    /// something the run does not act on.
+    public static func hasDescription(_ captureSet: CaptureSet) -> Bool {
         captureSet.members.contains {
             !$0.descriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }

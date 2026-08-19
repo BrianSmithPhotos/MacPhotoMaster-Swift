@@ -219,11 +219,15 @@ actual views:
   repo's usual trash rule: this is the app's own bookkeeping inside its own container, not the user's
   photographs, and an iOS container has no user-visible trash to recover from anyway.
 
-  One consequence worth knowing: a staged draft reaches `PhotoAsset.descriptionText` only when the
-  photo is previewed or processed, never at folder load. So batch AI's "skip sets that already have a
-  description" rule sees the *original* file's metadata across sessions — reopen a card in a new
-  session and a second batch run re-describes sets it already staged. Within one session it skips
-  correctly.
+  Drafts are also hydrated at folder load, not only on preview: `applyStagedDrafts(to:)` patches
+  description, keywords and GPS onto every asset in one pass before the grid appears, and logs how
+  many it restored. Without it a staged draft only reached `PhotoAsset.descriptionText` when the
+  photo was previewed, which broke the multi-day case in two visible ways — the grid showed no sign
+  of yesterday's work, and batch AI's "skip sets that already have a description" rule read the
+  *original* file's metadata, so a second run re-described sets it had already staged. The grid's
+  blue `text.bubble.fill` badge is the other half: it asks
+  `BatchAISuggestionTargets.hasDescription`, the same question the batch skip rule asks, so the mark
+  on a tile and the sets a run leaves alone can never disagree.
 
 ## iPad import (Mac side)
 

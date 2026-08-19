@@ -887,17 +887,44 @@ final class PhotoBrowserViewModel: ObservableObject {
         }
     }
 
-    /// Which RAW files in a just-loaded folder are already marked. Only RAW files are read — the
-    /// marker is meaningless on anything else — so this is a handful of small sidecar reads rather
-    /// than one per photo in the folder.
-    private func loadDevelopMarkedPaths(among assets: [PhotoAsset]) async -> Set<String> {
-        guard let store = await ensureSidecarStagingStore() else { return [] }
-        var paths: Set<String> = []
-        for asset in assets where PhotoAssetLoader.isRaw(asset.url) {
-            guard let draft = try? store.stagedDraft(for: asset.url) else { continue }
-            if RawDevelopService.isMarkedForDevelop(draft.keywords) { paths.insert(asset.url.path) }
+    /// Puts every previously staged edit back onto the just-loaded assets, and collects which RAWs
+    /// are marked for develop, in a single pass over the staging store.
+    ///
+    /// Without this, a staged draft only ever reached an asset when its photo was previewed
+    /// (`applyStagedDraftIfPresent`) or processed — so reopening a card on the second evening of a
+    /// trip showed a grid with no sign of the work already done on it, and batch AI's "skip sets
+    /// that already have a description" rule read the untouched original file and offered to
+    /// re-describe everything. The originals on the card carry no metadata by design, so the staged
+    /// drafts are the only record of a session's tagging until Process & Move runs.
+    ///
+    /// The develop marker is app bookkeeping rather than one of the user's keywords, so it is
+    /// stripped out here the same way `applyStagedDraftIfPresent` strips it from the edit buffer.
+    private func applyStagedDrafts(to assets: [PhotoAsset]) async -> (
+        assets: [PhotoAsset], developMarkedPaths: Set<String>, restoredCount: Int
+    ) {
+        guard let store = await ensureSidecarStagingStore() else { return (assets, [], 0) }
+        var updated = assets
+        var developMarkedPaths: Set<String> = []
+        var restoredCount = 0
+        for index in updated.indices {
+            guard let draft = try? store.stagedDraft(for: updated[index].url) else { continue }
+            restoredCount += 1
+            if PhotoAssetLoader.isRaw(updated[index].url),
+                RawDevelopService.isMarkedForDevelop(draft.keywords)
+            {
+                developMarkedPaths.insert(updated[index].url.path)
+            }
+            updated[index].descriptionText = draft.description
+            updated[index].keywords = RawDevelopService.removingDevelopMarker(from: draft.keywords)
+            // Originals carry no GPS (the card is never written to), so a staged fix is the only one
+            // there is — and the grouping/AI steps downstream read it off the asset.
+            if let gps = draft.gps {
+                updated[index].gpsLatitude = gps.latitude
+                updated[index].gpsLongitude = gps.longitude
+                updated[index].gpsAltitude = gps.altitude
+            }
         }
-        return paths
+        return (updated, developMarkedPaths, restoredCount)
     }
 
     /// Mutates the in-memory asset so the grid/preview reflect a successful save immediately, without
@@ -1022,6 +1049,14 @@ final class PhotoBrowserViewModel: ObservableObject {
         processedAssetPaths.contains(asset.url.path)
     }
 
+    /// Whether this set has been described at all — the grid's "I have already worked on this one"
+    /// mark. Reads the in-memory asset, which `applyStagedDrafts` has already restored from staging,
+    /// so it is true across sessions without a second store read per tile. Same rule as
+    /// `BatchAISuggestionTargets`, which decides what a batch run may skip.
+    func isTagged(_ captureSet: CaptureSet) -> Bool {
+        BatchAISuggestionTargets.hasDescription(captureSet)
+    }
+
     /// Whether any member of `captureSet` has already been through Process & Move — a set is shown
     /// as processed as soon as one member has, since the common case processes the whole set at once.
     func isProcessed(_ captureSet: CaptureSet) -> Bool {
@@ -1084,11 +1119,14 @@ final class PhotoBrowserViewModel: ObservableObject {
                 let startedAt = Date()
                 async let assetsTask = assetLoader.loadAssets(in: folderURL)
                 async let subfoldersTask = folderBrowser.subfolders(of: folderURL)
-                let (assets, folders) = try await (assetsTask, subfoldersTask)
+                let (loadedAssets, folders) = try await (assetsTask, subfoldersTask)
                 let assetsAt = Date()
                 skippedPaths = await skippedAssetPaths(inFolder: folderURL)
                 processedAssetPaths = await loadProcessedAssetPaths(inFolder: folderURL)
-                developMarkedPaths = await loadDevelopMarkedPaths(among: assets)
+                let staged = await applyStagedDrafts(to: loadedAssets)
+                let assets = staged.assets
+                developMarkedPaths = staged.developMarkedPaths
+                let stagedAt = Date()
                 // The same camera signals the Mac groups on, read straight out of the frame's own
                 // bytes. exiftool cannot run here and ImageIO exposes no maker-note dictionary, but
                 // the Olympus note is in the file regardless and `OlympusMakerNoteReader` walks to
@@ -1102,8 +1140,11 @@ final class PhotoBrowserViewModel: ObservableObject {
                     """
                     Folder load: \(assets.count) files, \
                     ImageIO pass \(assetsAt.timeIntervalSince(startedAt), format: .fixed(precision: 1))s, \
-                    maker-note pass \(signalsAt.timeIntervalSince(assetsAt), format: .fixed(precision: 1))s, \
-                    read \(signals.count) of them
+                    staged-edit pass \(stagedAt.timeIntervalSince(assetsAt), format: .fixed(precision: 1))s \
+                    restoring \(staged.restoredCount), \
+                    maker-note pass \(signalsAt.timeIntervalSince(stagedAt), format: .fixed(precision: 1))s, \
+                    read \(signals.count) of them, \
+                    folder \(folderURL.path, privacy: .public)
                     """)
                 automaticCaptureSets = allSets
                 mergeIDsByAssetPath = await mergeIDs(inFolder: folderURL)

@@ -85,6 +85,7 @@ struct SourcePanelView: View {
                                     isSelectMode: viewModel.isSelecting,
                                     isMultiSelected: viewModel.multiSelectedIDs.contains(representative.id),
                                     isProcessed: viewModel.isProcessed(captureSet),
+                                    isTagged: viewModel.isTagged(captureSet),
                                     isMarkedForRawDevelop: viewModel.isMarkedForRawDevelop(captureSet),
                                     onSelect: {
                                         if viewModel.isSelecting {
@@ -219,6 +220,11 @@ private struct CaptureTileView: View {
     /// small bottom-leading checkmark so it never competes with the Select-mode badge (top-leading)
     /// or the member-count badge (bottom-trailing).
     let isProcessed: Bool
+    /// Whether this set already carries a description — a session's tagging lives only in the staged
+    /// sidecars until Process & Move runs (the card is never written to), so without this the second
+    /// evening of a trip opens on a grid that looks untouched. Bottom-leading, beside the processed
+    /// check: the two answer the same question at different stages.
+    let isTagged: Bool
     /// Whether this set's RAW is waiting for the Mac to develop it — the only feedback the iPad can
     /// give, since the develop itself happens at import time on the other machine. Top-trailing, the
     /// one corner none of the other badges use.
@@ -278,13 +284,23 @@ private struct CaptureTileView: View {
                 }
             }
             .overlay(alignment: .bottomLeading) {
-                if isProcessed {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.caption)
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, .green)
-                        .padding(6)
+                // Both marks share this corner, tagged first, because they are the two halves of the
+                // same question — what have I already done to this set — and on a multi-evening trip
+                // the answer has to be readable from the grid rather than by opening each set.
+                HStack(spacing: 3) {
+                    if isTagged {
+                        Image(systemName: "text.bubble.fill")
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .blue)
+                    }
+                    if isProcessed {
+                        Image(systemName: "checkmark.circle.fill")
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .green)
+                    }
                 }
+                .font(.caption)
+                .padding(6)
             }
             .clipped()
             .overlay(

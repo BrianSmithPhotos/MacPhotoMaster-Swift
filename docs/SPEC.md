@@ -91,6 +91,14 @@ deterministically, and copy files into local storage.
   - A set with only some members skipped therefore appears in **both** filter views: the frames still
     in play under Active, the culled ones under Skipped. Both halves keep the group's identity, so
     culling one frame out of a focus bracket or a burst doesn't disturb the rest of the grid.
+- **A review pass survives disconnecting the card.** The iPad case that drives this is a multi-day
+  trip: connect the camera each evening, work through some of the day's shots, shoot more the next
+  day, and only process when it suits. Nothing requires a Process & Move to make an evening's work
+  stick. Skipped and processed state is remembered per source folder; staged descriptions, keywords
+  and GPS are read back at folder load, not just when a photo is previewed, so reopening the card
+  shows yesterday's work in place. Two marks on the tile say which is which — a blue speech bubble
+  for described, a green check for processed — and "described" means exactly what a batch AI run
+  treats as already done, so the grid and the run never disagree about what is left to do.
 - Manual multi-select (cmd-click to toggle, shift-click for range) should act on the *full capture-group
   membership* of whatever's selected, not just the visibly selected representative tiles — otherwise
   bulk actions silently skip hidden group members (e.g. the RAW file behind a stacked JPEG).
